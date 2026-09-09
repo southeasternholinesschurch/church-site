@@ -3,7 +3,7 @@
  * Grant, list or revoke staff access.
  *
  *   node scripts/staff.mjs add someone@gmail.com --admin      # local db
- *   node scripts/staff.mjs add someone@gmail.com --kids        # [Kids Ministry] only
+ *   node scripts/staff.mjs add someone@gmail.com --kids        # Fairhaven Kids only
  *   node scripts/staff.mjs add someone@gmail.com --kids-director
  *   node scripts/staff.mjs add someone@gmail.com --remote
  *   node scripts/staff.mjs list

@@ -1,15 +1,15 @@
 /*
- * [Kids Ministry].
+ * Fairhaven Kids.
  *
  * Deliberately NOT the staff chrome. The staff app is cream and warm ink; this
  * is navy and bright. That is not decoration — a volunteer and an admin use the
  * same app on the same phone, and the colour is how you know at a glance which
  * one you are looking at without reading a word.
  *
- * The palette is sampled from the pastor's own printed [Kids Ministry] material (the door
+ * The palette is sampled from the pastor's own printed Fairhaven Kids material (the door
  * hanger and the invite card), not invented: the navy is the brush banner
  * behind "CALL THIS NUMBER", the orange is the crown in the logo ring, and the
- * cyan/periwinkle/pink are the three stops of the [Kids Ministry] logo gradient.
+ * cyan/periwinkle/pink are the three stops of the Fairhaven Kids logo gradient.
  */
 :root {
   --k-navy:      #0d1b45;   /* the ground */
@@ -69,7 +69,7 @@ body.kids h2 { font-size: 21px; }
 .k-bar__in { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
              padding: 12px clamp(20px, 4vw, 34px); max-width: 1100px; margin-inline: auto; }
 /*
- * The [Kids Ministry] wordmark — the real artwork, in white.
+ * The Fairhaven Kids wordmark — the real artwork, in white.
  *
  * The source is the church's own horizontal logo, a pink-to-periwinkle-to-cyan
  * gradient that all but vanishes against this navy. So it is flattened to white

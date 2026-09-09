@@ -82,13 +82,37 @@ You will also want, before you write any copy:
 
 If you are an AI agent working through this, or a volunteer following along:
 
-**Placeholders are marked with square brackets.** To find every one still
-outstanding:
+**This template ships as a working, finished-looking site for an invented
+church — Fairhaven Community Church.** That is deliberate: you can run it and
+click through a complete site before changing anything, rather than judging a
+design from grey boxes.
+
+Everything of Fairhaven's is therefore something to replace. To find it all:
 
 ```bash
-grep -rni "\[Your Church Name\]\|\[123 Example\|\[City, ST\|changeme\|YOUR-SUBDOMAIN\|example.org" \
+grep -rni "fairhaven\|meadowbrook\|changeme\|YOUR-SUBDOMAIN\|example.org\|555-0142" \
   site/src app/src workers --include="*.astro" --include="*.ts" --include="*.yaml" --include="*.jsonc" --include="*.toml"
 ```
+
+That one word is the spine of it: the church name, the four ministry names
+(Fairhaven Kids, Youth, Ladies, Men, Seniors) and the play currency
+(Fairhaven Bucks) are all "Fairhaven" plus a noun, so a single find-and-replace
+across the repo gets you most of the way.
+
+Then replace the brand artwork, which no find-and-replace can touch:
+
+| file | what it is |
+|---|---|
+| `site/src/assets/brand/church-mark.png` | the symbol — icons are generated from this |
+| `site/src/assets/brand/wordmark-on-light.png` / `-on-dark.png` | the church name set as a logo |
+| `site/src/assets/brand/{kids,youth,men}-*.png` | ministry wordmarks |
+| `app/public/kids-logo-white.png`, `kids-crown-white.png` | the children's section header |
+
+After swapping `church-mark.png`, run `node scripts/generate-icons.mjs` from
+`site/` to rebuild every favicon and PWA icon from it.
+
+**Every photograph is generated and depicts nobody real.** Replace them all —
+see `site/src/assets/photos/README.md`.
 
 **Step 3a is a question for the pastor, not a decision for you.** Four design
 directions ship with this template; show them, and let them pick.
@@ -648,8 +672,8 @@ anything else, or your volunteers will see square brackets:
 
 | Placeholder | Becomes |
 |---|---|
-| `[Kids Ministry]` | What you call it — "Lighthouse Kids", "First Kids" |
-| `[Kids Currency]` | What the play money is called — "Lighthouse Bucks" |
+| `Fairhaven Kids` | What you call it — "Lighthouse Kids", "First Kids" |
+| `Fairhaven Bucks` | What the play money is called — "Lighthouse Bucks" |
 
 Then drop your own artwork over `app/public/kids-logo-white.png` and
 `kids-crown-white.png` (both white-on-transparent, for a dark header) and

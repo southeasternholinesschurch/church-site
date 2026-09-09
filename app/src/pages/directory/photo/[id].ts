@@ -28,7 +28,7 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
    * so locals.user is never set here and must be read from the cookie.
    *
    * And because the middleware never ran, THE PERMISSION GATE NEVER RAN. An
-   * [Kids Ministry] volunteer is staff — `readSession` returns them like anybody else —
+   * Fairhaven Kids volunteer is staff — `readSession` returns them like anybody else —
    * so without the role check below they could walk /directory/photo/1..N and
    * collect a portrait of every adult in the congregation, which is precisely
    * what the kids roles exist to prevent. Children's photos are served by

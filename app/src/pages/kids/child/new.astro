@@ -10,13 +10,13 @@ import { ageOn } from '../../../lib/kids';
 /**
  * Adding a child.
  *
- * Any [Kids Ministry] volunteer, not just the director (the pastor, 2026-09-08). A bus worker
+ * Any Fairhaven Kids volunteer, not just the director (the pastor, 2026-09-08). A bus worker
  * meets a child on the route on a Sunday morning; if adding them needs somebody
  * with more rights, the child simply goes unrecorded.
  *
  * This is the ONLY way a bus-ministry child enters the system — their family is
  * not in the church's records and never will be — so it creates the `people`
- * row, the [Kids Ministry] profile, and their first grown-up in one go. An intake form
+ * row, the Fairhaven Kids profile, and their first grown-up in one go. An intake form
  * that needs three visits gets filled in once.
  */
 const user = Astro.locals.user!;
@@ -79,7 +79,7 @@ if (Astro.request.method === 'POST') {
     /*
      * The profile, then the guardian. Not one transaction: D1 has no
      * transaction here, and the failure modes are both recoverable and visible
-     * — a person with no profile shows up under "Not in [Kids Ministry]" on the children
+     * — a person with no profile shows up under "Not in Fairhaven Kids" on the children
      * list, and a child with no grown-up is obvious on their own page. Neither
      * is silent, which is what would make a transaction worth reaching for.
      */
@@ -185,7 +185,7 @@ const possibleDuplicates = typedFirst && typedLast
     </div>
 
     <div class="k-card" style="margin-bottom:16px;">
-      <h2 style="margin-top:0;">In [Kids Ministry]</h2>
+      <h2 style="margin-top:0;">In Fairhaven Kids</h2>
       <div class="k-grid">
         <label class="k-field"><span>Class</span>
           <select name="classId">
@@ -250,7 +250,7 @@ const possibleDuplicates = typedFirst && typedLast
           church may text a family who never joined it. */}
       <label style="display:flex; gap:10px; align-items:flex-start; font-size:15px;">
         <input type="checkbox" name="guardianConsent" value="1" style="margin-top:4px;" />
-        <span>They have said we may text them about [Kids Ministry] —
+        <span>They have said we may text them about Fairhaven Kids —
           pickup times, delays and cancellations.</span>
       </label>
     </div>

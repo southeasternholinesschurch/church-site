@@ -14,7 +14,7 @@ if (Astro.request.method === 'POST') {
   const date = String(form.get('date') ?? '').trim();
   const kind = String(form.get('kind') ?? '') as any;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) error = 'Pick a date.';
-  // CHURCH kinds only. An [Kids Ministry] register is created from the children's
+  // CHURCH kinds only. An Fairhaven Kids register is created from the children's
   // section, by somebody who is taking it — never from here, where picking one
   // by accident would open a class register in the staff chrome.
   else if (!CHURCH_SERVICE_KINDS.some((k) => k.id === kind)) error = 'Pick a service.';
@@ -37,7 +37,7 @@ const recent = await db.select({
 })
   .from(schema.services)
   /*
-   * The congregation's services only. [Kids Ministry] runs twice a week; without this
+   * The congregation's services only. Fairhaven Kids runs twice a week; without this
    * the 25 most recent rows become mostly children's registers within a few
    * months and Sunday morning drops off the screen.
    */

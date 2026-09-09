@@ -1,5 +1,5 @@
 /**
- * [Kids Currency] arithmetic and the amounts people type.
+ * Fairhaven Bucks arithmetic and the amounts people type.
  *
  * Play money, so nothing here is a security boundary — but a balance a child
  * disputes has to be answerable, and the two ways this goes wrong are a typed

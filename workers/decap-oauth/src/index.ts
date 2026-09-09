@@ -74,7 +74,7 @@ export default {
       return htmlMessage('success', JSON.stringify({ token: tokenData.access_token, provider: 'github' }));
     }
 
-    return new Response('[Your Church Name] — Decap CMS OAuth proxy. Not a page for browsing.', { status: 404 });
+    return new Response('Fairhaven Community Church — Decap CMS OAuth proxy. Not a page for browsing.', { status: 404 });
   },
 };
 

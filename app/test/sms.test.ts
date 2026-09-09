@@ -156,7 +156,7 @@ eq('Sat -> not sent',             dueSunday(new Date('2026-09-12T13:00:00Z')), n
 console.log('\nthe reminder message');
 eq('one segment',  seg(SINGING_REMINDER).segments, 1);
 eq('plain GSM-7',  seg(SINGING_REMINDER).encoding, 'GSM-7');
-eq('names church', SINGING_REMINDER.includes('[Your Church Name]'), true);
+eq('names church', SINGING_REMINDER.includes('Fairhaven Community Church'), true);
 
 
 

@@ -13,7 +13,7 @@ const nowIso = () => new Date().toISOString();
  *
  * There are TWO such tables and there will not be a third without this file
  * changing: `people` (the congregation) and `kid_guardians` (bus-ministry
- * parents, who are deliberately not people — see §5.3 of the [Kids Ministry] brief and
+ * parents, who are deliberately not people — see §5.3 of the Fairhaven Kids brief and
  * the comment on kid_guardians in the schema).
  *
  * That split is the whole reason this module exists. Keeping bus families out

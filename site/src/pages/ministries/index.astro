@@ -13,7 +13,7 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
 ---
 <BaseLayout
   title="Ministries"
-  description="[Kids Ministry], [Youth Ministry], [Ladies Ministry] and [Seniors Ministry] — something for every season of life at [Your Church Name]."
+  description="Fairhaven Kids, Fairhaven Youth, Fairhaven Ladies and Fairhaven Seniors — something for every season of life at Fairhaven Community Church."
 >
   <!-- ============ HEADER ============ -->
   <section class="phead">
@@ -49,7 +49,7 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
             <div class="card__body">
               {/* No logo here on purpose. The marks are pale pastel artwork —
                   low contrast on cream — and the two differ wildly in shape
-                  ([Kids Ministry] portrait, [Youth Ministry] wide), so no single size suits both.
+                  (Fairhaven Kids portrait, Fairhaven Youth wide), so no single size suits both.
                   They appear on each ministry's own dark hero, where they read
                   properly. The name in serif carries this card. */}
               <h2 class="serif card__name">{m.data.name}</h2>

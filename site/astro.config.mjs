@@ -1,7 +1,7 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 
-// [Your Church Name] — public site
+// Fairhaven Community Church — public site
 // Static output, deployed to Cloudflare Pages. See docs/README.md for why
 // this stack was chosen and how the daily/manual rebuild plumbing works.
 export default defineConfig({

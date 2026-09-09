@@ -23,7 +23,7 @@ import { isKidsRole, canIssueCards, canLinkChurchRecords } from '../../../lib/pe
  * should be able to fix it rather than find somebody who can.
  *
  * A child can be here WITHOUT a kid_profile: they are one of the church's
- * children who has never been enrolled in [Kids Ministry]. The page is the enrolment
+ * children who has never been enrolled in Fairhaven Kids. The page is the enrolment
  * path as well as the edit path, which is why almost everything below tolerates
  * `profile` being null.
  */
@@ -65,7 +65,7 @@ if (Astro.request.method === 'POST') {
     const medicalNotes = str(form.get('medicalNotes'));
     const at = nowIso();
     // Enrolling and editing are the same write. A child with no profile who is
-    // given a class has just joined [Kids Ministry]; making that a separate button would
+    // given a class has just joined Fairhaven Kids; making that a separate button would
     // mean two ways to reach one state and a way to get it half done.
     await db.insert(schema.kidProfiles)
       .values({ personId: id, classId, routeId, allergies, medicalNotes, createdAt: at, updatedAt: at })
@@ -194,7 +194,7 @@ if (Astro.request.method === 'POST') {
      *
      * Attendance rows and ledger entries point at this person. A hard delete
      * would cascade and silently change historical totals: a term's attendance
-     * would quietly drop, and a child's [Kids Currency] history would vanish along
+     * would quietly drop, and a child's Fairhaven Bucks history would vanish along
      * with the record of what they earned it for.
      *
      * Archiving takes them out of every list, every register and every
@@ -462,7 +462,7 @@ const SAVED: Record<string, string> = {
   'guardian-removed': 'Guardian removed.',
   awarded: 'Bucks awarded.', spent: 'Bucks spent.', undone: 'That entry was undone.',
   linked: 'Linked. Their details come from the church records and stay in step.',
-  restored: 'Back in [Kids Ministry].',
+  restored: 'Back in Fairhaven Kids.',
   'card-issued': 'New card issued. Any earlier card has stopped working.',
   'card-revoked': 'Card revoked. It will no longer open anything.',
 };
@@ -481,12 +481,12 @@ const consentLabel: Record<string, string> = {
   </div>
   <p class="k-muted" style="margin:0 0 22px;">
     {age !== null ? `${age} years old` : 'No birthday on file'}
-    {profile ? '' : ' · not in [Kids Ministry] yet'}
+    {profile ? '' : ' · not in Fairhaven Kids yet'}
   </p>
 
   {child.archived && (
     <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:18px;">
-      <strong>This child has left [Kids Ministry].</strong>
+      <strong>This child has left Fairhaven Kids.</strong>
       <p class="k-muted" style="margin:6px 0 0;">
         They are hidden from the children's list, the registers and any texts.
         Nothing has been deleted — their attendance and bucks are still here.
@@ -516,7 +516,7 @@ const consentLabel: Record<string, string> = {
   <div class="k-two">
     <div>
       <div class="k-card" style="margin-bottom:18px;">
-        <h2 style="margin-top:0;">In [Kids Ministry]</h2>
+        <h2 style="margin-top:0;">In Fairhaven Kids</h2>
         <form method="POST">
           <input type="hidden" name="action" value="save-profile" />
 
@@ -562,7 +562,7 @@ const consentLabel: Record<string, string> = {
           <label class="k-field"><span>Medical notes</span>
             <textarea name="medicalNotes" rows="2">{profile?.medicalNotes ?? ''}</textarea></label>
 
-          <button class="k-btn" type="submit">{profile ? 'Save' : 'Add to [Kids Ministry]'}</button>
+          <button class="k-btn" type="submit">{profile ? 'Save' : 'Add to Fairhaven Kids'}</button>
         </form>
       </div>
     </div>
@@ -597,7 +597,7 @@ const consentLabel: Record<string, string> = {
     </div>
   </div>
 
-  <h2 style="margin:28px 0 12px;">[Kids Currency]</h2>
+  <h2 style="margin:28px 0 12px;">Fairhaven Bucks</h2>
   <div class="k-card" style="margin-bottom:18px;">
     <div class="k-label" style="color:var(--k-ink-soft);">Balance</div>
     <p style="margin:2px 0 16px; font-size:34px; font-weight:800; line-height:1;">
@@ -849,8 +849,8 @@ const consentLabel: Record<string, string> = {
       <form method="POST" style="margin:10px 0 0;">
         <input type="hidden" name="action" value="archive" />
         <button class="k-btn k-btn--quiet" type="submit"
-                onclick="return confirm('Take this child out of [Kids Ministry]? Their attendance and bucks are kept, and you can bring them back.')">
-          This child has left [Kids Ministry]</button>
+                onclick="return confirm('Take this child out of Fairhaven Kids? Their attendance and bucks are kept, and you can bring them back.')">
+          This child has left Fairhaven Kids</button>
       </form>
       <p class="k-muted" style="margin:10px 0 0; font-size:14px;">
         Takes them off the lists, the registers and any texts. Nothing is

@@ -7,16 +7,16 @@
 --
 -- That decision is right, but it leaves the children's replies tab with a
 -- problem. With one number, an inbound text carries no signal about which part
--- of the church it is answering — so that tab identified [Kids Ministry] conversations by
+-- of the church it is answering — so that tab identified Fairhaven Kids conversations by
 -- INFERRING them from the sender being a known guardian.
 --
 -- Most church parents ARE guardians. So a member texting the church about
 -- anything at all — a prayer request, a bereavement — appeared in the children's
--- replies tab, readable by every [Kids Ministry] volunteer. Not what anybody intended,
+-- replies tab, readable by every Fairhaven Kids volunteer. Not what anybody intended,
 -- and precisely the kind of leak this app is otherwise careful about.
 --
 -- So outbound messages record where they came from, and a conversation counts as
--- [Kids Ministry] only if we started it there. A guardian whose number is not ALSO a
+-- Fairhaven Kids only if we started it there. A guardian whose number is not ALSO a
 -- member's stays unambiguous and needs no marker — a bus family has no other
 -- reason to be texting.
 ALTER TABLE `message_log` ADD `context` text;

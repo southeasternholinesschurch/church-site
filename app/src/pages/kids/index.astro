@@ -3,7 +3,7 @@ import KidsLayout from '../../layouts/KidsLayout.astro';
 import { isKidsRole } from '../../lib/permissions';
 
 /**
- * [Kids Ministry] — the landing page.
+ * Fairhaven Kids — the landing page.
  *
  * The permission model and this chrome are real; the sections below are not
  * built yet. They are listed rather than hidden so a volunteer signing in for
@@ -24,7 +24,7 @@ const SECTIONS: { name: string; note: string; href?: string; directorOnly?: bool
   { name: 'Classes',   note: 'The age groups, who teaches them, and the bus routes.',
     href: '/kids/classes', directorOnly: true },
 
-  { name: '[Kids Currency]',  note: 'Award, spend and the running balance — on each child’s page.',
+  { name: 'Fairhaven Bucks',  note: 'Award, spend and the running balance — on each child’s page.',
     href: '/kids/children' },
   { name: 'Messaging', note: 'Pickup times, delays and cancellations.',
     href: '/kids/messaging' },
@@ -32,11 +32,11 @@ const SECTIONS: { name: string; note: string; href?: string; directorOnly?: bool
 ];
 const visible = SECTIONS.filter((s) => !(s.directorOnly && user.role === 'kids'));
 ---
-<KidsLayout title="[Kids Ministry]" user={user}>
+<KidsLayout title="Fairhaven Kids" user={user}>
   {/* The wordmark IS the heading here. The h1 keeps the text for screen
       readers and for anything that cannot load the image. */}
   <h1 class="k-hero">
-    <img src="/kids-logo-white.png" alt="[Kids Ministry]" width="450" height="220" />
+    <img src="/kids-logo-white.png" alt="Fairhaven Kids" width="450" height="220" />
   </h1>
   <p class="k-muted" style="margin:-4px 0 26px; font-size:17px;">
     {volunteer

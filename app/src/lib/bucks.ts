@@ -1,5 +1,5 @@
 /**
- * [Kids Currency].
+ * Fairhaven Bucks.
  *
  * Play money a child earns for turning up and for doing well, and spends at the
  * prize table. It has no cash value and no relationship to real currency.
@@ -70,7 +70,7 @@ export function parsePerVisit(stored: string | null | undefined): number {
 }
 
 export const REASON_LABEL: Record<string, string> = {
-  attendance: 'Came to [Kids Ministry]',
+  attendance: 'Came to Fairhaven Kids',
   award: 'Awarded',
   spend: 'Spent',
   correction: 'Correction',

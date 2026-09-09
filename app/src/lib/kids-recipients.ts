@@ -73,7 +73,7 @@ export async function buildKidsAudience(db: Db, scope: SendScope | null): Promis
   }).from(schema.kidGuardians)
     // The child, for their name and to skip archived ones.
     .innerJoin(child, eq(child.id, schema.kidGuardians.personId))
-    // Their [Kids Ministry] profile, which carries the route the scope filters on.
+    // Their Fairhaven Kids profile, which carries the route the scope filters on.
     .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.kidGuardians.personId))
     /*
      * LEFT join, and this is the line the first attempt got wrong. An inner

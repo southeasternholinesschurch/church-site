@@ -70,7 +70,7 @@ eq('age outside every class says nothing', classMismatch(30, 5, CLASSES), null);
 eq('in the right class',         classMismatch(8, 3, CLASSES), false);
 eq('has outgrown their class',   classMismatch(11, 3, CLASSES), true);
 
-// ---- which [Kids Ministry] service a day implies ------------------------------------
+// ---- which Fairhaven Kids service a day implies ------------------------------------
 // The noon-UTC trick again: parsing these as midnight UTC puts them on the
 // previous evening in Indianapolis and names the wrong day of the week.
 eq('a Sunday means the Sunday classes',   likelyKidsKind('2026-09-06'), 'kids-sunday');

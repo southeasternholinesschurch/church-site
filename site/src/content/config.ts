@@ -93,13 +93,13 @@ const ministries = defineCollection({
     // mistakes provisional colors/copy for final brand.
     //
     // The men's ministry was pulled on 2026-08-29 pending a rename, because
-    // "[Mens Ministry]" reads as an unintended word. It returned on 2026-09-02 as SEnt,
+    // "Fairhaven Men" reads as an unintended word. It returned on 2026-09-02 as SEnt,
     // named for Isaiah 6:8 — so 'men' IS the men's ministry, not a fifth one.
     accent: z.enum(['men', 'kids', 'youth', 'women', 'seniors']),
     placeholder: z.boolean().default(false),
     summary: z.string(),
     /** When and where the group meets — shown on the ministries page.
-     *  Optional because [Ladies Ministry]/[Seniors Ministry] don't have theirs confirmed. */
+     *  Optional because Fairhaven Ladies/Fairhaven Seniors don't have theirs confirmed. */
     meets: z.string().optional(),
     where: z.string().optional(),
   }),

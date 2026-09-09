@@ -118,7 +118,7 @@ Recorded because each one measured "fine" until it was checked the right way.
 | Give hero was a black rectangle | A screenshot. The mockup's 3-stop grade bottomed out at .28 — the same fault already fixed on Home/About. Weight belongs where the text sits. |
 | Sermons empty state said "see docs/README.md" | Scanning visible copy for repo paths. Same for the Contact form notice. Developer instructions belong in HTML comments. |
 | Footer heading 3.73:1, copyright 2.87:1 | A contrast sweep over every text node against its real composited background. |
-| [Youth Ministry] age chip 4.37:1 | Same sweep. Accents now mix toward cream so the rule holds for the two ministries whose branding isn't set yet. |
+| Fairhaven Youth age chip 4.37:1 | Same sweep. Accents now mix toward cream so the rule holds for the two ministries whose branding isn't set yet. |
 | All-day event rendered a day early **on the live site only** | Comparing the deployed page against the local one. node-ical builds an all-day date at LOCAL midnight of the build machine, so Cloudflare's UTC builder produced a different instant than the pastor's Mac; formatting it in the church timezone then fell back across midnight. A calendar date has no timezone and must never be zone-converted. `ical.ts` re-anchors all-day dates to UTC midnight and `eventTimeZone()` picks the zone per event. Regression check: `TZ=UTC npm run build` and `TZ=Asia/Tokyo npm run build` must produce a byte-identical events page. |
 | Homepage outline jumped h1 → h3 | Parsing the heading sequence. The section labels were `<p class="label">`; `.label` supplies the whole visual treatment, so promoting them to `<h2>` changed nothing visually. |
 

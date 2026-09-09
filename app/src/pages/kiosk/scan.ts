@@ -90,7 +90,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   /*
    * Which meeting this is.
    *
-   * An existing [Kids Ministry] service for today wins — a director may already have
+   * An existing Fairhaven Kids service for today wins — a director may already have
    * opened the register from their phone, and a second service for the same
    * morning would split the register in two. Otherwise the first child through
    * the door creates it, which is right: they have arrived, so there is a
@@ -105,7 +105,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let serviceId = existing?.id;
   if (!serviceId) {
     const kind = likelyKidsKind(today);
-    // No [Kids Ministry] meeting today and none opened by hand. Refusing beats inventing
+    // No Fairhaven Kids meeting today and none opened by hand. Refusing beats inventing
     // a Tuesday service that then shows up in every count.
     if (!kind) return json({ ok: false, reason: 'no-meeting' });
     const created = await db.insert(schema.services)

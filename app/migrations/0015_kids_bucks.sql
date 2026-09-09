@@ -1,4 +1,4 @@
--- [Kids Currency]: the ledger, and the cards children carry.
+-- Fairhaven Bucks: the ledger, and the cards children carry.
 --
 -- Play money. No cash value, no relationship to real currency, and nothing in
 -- this feature ever touches a payment detail.

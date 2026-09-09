@@ -30,7 +30,7 @@ const sameSeries = series ? all.filter((s) => s.data.series === series) : [];
 const more = (sameSeries.length ? sameSeries : all).slice(0, 3);
 const moreLabel = sameSeries.length ? `More from ${series}` : 'Recent Messages';
 ---
-<BaseLayout title={heading} description={`${heading} at [Your Church Name] — ${dateLabel}.`}>
+<BaseLayout title={heading} description={`${heading} at Fairhaven Community Church — ${dateLabel}.`}>
   <!-- ============ PLAYER ============ -->
   <section class="stage" data-par-frame>
     <div class="stage__bg duo par" data-par="70" style="--drift-scale: 1.28;" aria-hidden="true">

@@ -2,7 +2,7 @@
  * Service kinds, in the order they occur in a week.
  *
  * `services.kind` is plain TEXT with no CHECK constraint (see
- * 0000_initial_schema.sql), which is why adding the two [Kids Ministry] kinds needed no
+ * 0000_initial_schema.sql), which is why adding the two Fairhaven Kids kinds needed no
  * migration — the same reason widening `staff.role` needed none.
  *
  * The `sekids` ones are SEPARATE SERVICES, not a flag on the existing Sunday
@@ -16,8 +16,8 @@ export const SERVICE_KINDS = [
   { id: 'sunday-evening', label: 'Sunday Evening' },
   { id: 'wednesday', label: 'Wednesday' },
   { id: 'other', label: 'Other' },
-  { id: 'kids-sunday', label: '[Kids Ministry] · Sunday', kids: true },
-  { id: 'kids-wednesday', label: '[Kids Ministry] Club · Wednesday', kids: true },
+  { id: 'kids-sunday', label: 'Fairhaven Kids · Sunday', kids: true },
+  { id: 'kids-wednesday', label: 'Fairhaven Kids Club · Wednesday', kids: true },
 ] as const;
 
 export type ServiceKind = (typeof SERVICE_KINDS)[number]['id'];
@@ -26,10 +26,10 @@ export type ServiceKind = (typeof SERVICE_KINDS)[number]['id'];
  * The congregation's own services — everything the ATTENDANCE screens should
  * show.
  *
- * [Kids Ministry] runs twice a week. Left in the general list, two extra services a
+ * Fairhaven Kids runs twice a week. Left in the general list, two extra services a
  * week would fill /attendance's 25-row "recent services" table within about
  * three months and push Sunday mornings off the bottom of the one screen the pastor
- * actually reads. They are taken on the [Kids Ministry] register instead, and counted
+ * actually reads. They are taken on the Fairhaven Kids register instead, and counted
  * there.
  */
 export const CHURCH_SERVICE_KINDS = SERVICE_KINDS.filter((k) => !('sekids' in k));
@@ -65,7 +65,7 @@ export function likelyKind(dateIso: string): ServiceKind {
 }
 
 /**
- * The [Kids Ministry] service a volunteer most likely wants, given the day.
+ * The Fairhaven Kids service a volunteer most likely wants, given the day.
  *
  * Sunday classes and the Wednesday club; any other day has no children's
  * meeting, so it returns null rather than guessing. Uses the same noon-UTC

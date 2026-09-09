@@ -131,7 +131,7 @@ export const services = sqliteTable('services', {
    *  exactly the off-by-one-day bug the public site already shipped once. */
   date: text('date').notNull(),
   /**
-   * Plain TEXT in SQLite with no CHECK constraint, so the two [Kids Ministry] kinds
+   * Plain TEXT in SQLite with no CHECK constraint, so the two Fairhaven Kids kinds
    * needed no migration — only this list. They are separate services rather
    * than a flag on Sunday school because `unique(date, kind)` below means a
    * children's register sharing a kind would collide with the service the
@@ -156,7 +156,7 @@ export const attendance = sqliteTable('attendance', {
   serviceId: integer('service_id').notNull().references(() => services.id, { onDelete: 'cascade' }),
   personId: integer('person_id').notNull().references(() => people.id, { onDelete: 'cascade' }),
   /**
-   * Which [Kids Ministry] class, when this row is a children's class register.
+   * Which Fairhaven Kids class, when this row is a children's class register.
    *
    * NULL for every attendance row the congregation already has, and null for a
    * kiosk arrival ("came to church") until a teacher marks the register ("was
@@ -168,7 +168,7 @@ export const attendance = sqliteTable('attendance', {
   createdAt: text('created_at').notNull(),
 }, (t) => ({
   /** Load-bearing well beyond attendance: it is what makes a child who taps
-   *  four times get one row, so release two's [Kids Currency] credit fires exactly
+   *  four times get one row, so release two's Fairhaven Bucks credit fires exactly
    *  once with no application-level locking. Do not weaken it. */
   uniq: unique('attendance_service_person').on(t.serviceId, t.personId),
   classIdx: index('attendance_class_idx').on(t.classId),
@@ -225,7 +225,7 @@ export const staff = sqliteTable('staff', {
   role: text('role', { enum: ['admin', 'editor', 'kids-director', 'kids'] })
     .notNull().default('editor'),
   /**
-   * May this person send [Kids Ministry] texts?
+   * May this person send Fairhaven Kids texts?
    *
    * A CAPABILITY, not a role. Some bus captains send and most volunteers never
    * do — and a captain is a volunteer trusted with the phone bill, not a
@@ -498,7 +498,7 @@ export const appSettings = sqliteTable('app_settings', {
 
 
 /**
- * [Kids Ministry] — the children's-ministry section.
+ * Fairhaven Kids — the children's-ministry section.
  *
  * See migrations/0014_sekids.sql, which carries the reasoning in full. The
  * three decisions worth repeating here, because they are the ones a later
@@ -614,7 +614,7 @@ export const kidGuardians = sqliteTable('kid_guardians', {
 }));
 
 /** Who teaches what. For reports and for "your class" on a teacher's phone —
- *  NOT a restriction. Every [Kids Ministry] volunteer can see every child. */
+ *  NOT a restriction. Every Fairhaven Kids volunteer can see every child. */
 export const kidClassTeachers = sqliteTable('kid_class_teachers', {
   staffId: integer('staff_id').notNull()
     .references(() => staff.id, { onDelete: 'cascade' }),
@@ -632,7 +632,7 @@ export type KidGuardian = typeof kidGuardians.$inferSelect;
 
 
 /**
- * [Kids Currency] — play money, and the cards children carry.
+ * Fairhaven Bucks — play money, and the cards children carry.
  *
  * No cash value, no relationship to real currency, and nothing here ever goes
  * near a payment detail. See migrations/0015_sekids_bucks.sql for the full

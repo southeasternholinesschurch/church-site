@@ -5,8 +5,8 @@ import type { CollectionEntry } from 'astro:content';
 // colour they are — picking the wrong one is the easy mistake. Both are
 // trimmed to their artwork and share a 6.18:1 ratio, so they swap without any
 // shift in the layout.
-import wordmarkOnDark from '../assets/brand/shc-wordmark-on-dark.png';
-import wordmarkOnLight from '../assets/brand/shc-wordmark-on-light.png';
+import wordmarkOnDark from '../assets/brand/wordmark-on-dark.png';
+import wordmarkOnLight from '../assets/brand/wordmark-on-light.png';
 
 interface Props {
   settings: CollectionEntry<'settings'>['data'];
@@ -33,7 +33,7 @@ const current = Astro.url.pathname;
           plain-text span it replaces would otherwise be read out twice.
           densities 1-3 because the old mark was emitted at exactly its 30px
           display size, which is what made it look soft on any retina screen. */}
-      <Image src={wordmark} alt="[Your Church Name]"
+      <Image src={wordmark} alt="Fairhaven Community Church"
              width={210} densities={[1, 2, 3]} class="nav__wordmark" />
     </a>
 

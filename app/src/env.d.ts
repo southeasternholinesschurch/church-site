@@ -35,7 +35,7 @@ interface Env {
   /**
    * Which role the demo user wears. Only read when DEMO_INSTANCE is '1'.
    *
-   * A LOCAL TESTING AFFORDANCE: it is how the [Kids Ministry] permission gate is
+   * A LOCAL TESTING AFFORDANCE: it is how the Fairhaven Kids permission gate is
    * verified without a Google sign-in — DEMO_ROLE=kids in .dev.vars and the
    * app behaves as it does for a volunteer. Unset, or anything unrecognised,
    * means admin, which is what the public demo needs.

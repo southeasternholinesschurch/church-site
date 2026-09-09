@@ -10,7 +10,7 @@ import { isDemoInstance } from '../../lib/demo-instance';
 /**
  * Texting a bus route.
  *
- * The highest-risk screen in [Kids Ministry]: it costs money, it reaches people outside
+ * The highest-risk screen in Fairhaven Kids: it costs money, it reaches people outside
  * the congregation, and it cannot be undone.
  *
  * Reachable by any kids role — the path gate cannot express "has the send
@@ -50,7 +50,7 @@ const routes = scope === 'all' ? allRoutes
 const options: { id: number | null; label: string; handsets: number; excluded: number }[] = [];
 if (scope === 'all') {
   const a = await buildKidsAudience(db, 'all');
-  options.push({ id: null, label: 'Every [Kids Ministry] family', handsets: a.handsets.length,
+  options.push({ id: null, label: 'Every Fairhaven Kids family', handsets: a.handsets.length,
                  excluded: a.excluded.noNumber + a.excluded.optedOut + a.excluded.noConsent });
 }
 for (const r of routes) {
@@ -65,7 +65,7 @@ const TEMPLATES = [
   'The bus will be about {n} minutes late this morning.',
   '{route} is cancelled today because of the weather.',
   'Pickup this Sunday is at {time} from {place}.',
-  'No [Kids Ministry] this week. See you next Sunday!',
+  'No Fairhaven Kids this week. See you next Sunday!',
 ];
 ---
 <KidsLayout title="Messaging" user={user}>
@@ -73,7 +73,7 @@ const TEMPLATES = [
 
   {scope === null ? (
     <div class="k-card" style="max-width:600px;">
-      <p style="margin-top:0;"><strong>You cannot send [Kids Ministry] texts.</strong></p>
+      <p style="margin-top:0;"><strong>You cannot send Fairhaven Kids texts.</strong></p>
       <p class="k-muted" style="margin-bottom:0;">
         Texting costs money and reaches families outside the church, so it is
         given to specific people. Ask the children's director if you need it.

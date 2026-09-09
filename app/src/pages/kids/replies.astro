@@ -24,7 +24,7 @@ import { demoOn, demoBody } from '../../lib/demo';
  * CHILD. The messages still appear in the main inbox as well — nothing is moved
  * or hidden from the staff who already watch it.
  *
- * EVERY [Kids Ministry] volunteer can read this, deliberately. Restricting it to whoever
+ * EVERY Fairhaven Kids volunteer can read this, deliberately. Restricting it to whoever
  * may send would leave a reply about an unassigned route unread, which is the
  * exact failure the section exists to avoid — and it matches the standing
  * decision that all volunteers see all children.
@@ -52,7 +52,7 @@ const canReply = scope !== null;
 const member = alias(schema.people, 'member');
 const child = alias(schema.people, 'child');
 
-/** Every number that belongs to an [Kids Ministry] guardian, and who it is. */
+/** Every number that belongs to an Fairhaven Kids guardian, and who it is. */
 const guardianRows = await db.select({
   name: schema.kidGuardians.name,
   guardianPhone: schema.kidGuardians.phoneE164,
@@ -93,10 +93,10 @@ if (Astro.request.method === 'POST') {
   const to = String(form.get('to') ?? '').trim();
   const text = String(form.get('text') ?? '').trim();
 
-  if (!canReply) error = 'You do not have permission to send [Kids Ministry] texts.';
+  if (!canReply) error = 'You do not have permission to send Fairhaven Kids texts.';
   // The number must be one we already know as a guardian. Without this the
   // reply box is a way to text any number at all from inside the kids section.
-  else if (!numbers.includes(to)) error = 'That is not an [Kids Ministry] family.';
+  else if (!numbers.includes(to)) error = 'That is not an Fairhaven Kids family.';
   else if (!text) error = 'The reply is empty.';
   else if (isDemoInstance(env)) error = DEMO_SEND_REFUSED;
   else if (!smsConfigured(env)) error = 'Texting is not switched on yet.';
@@ -143,7 +143,7 @@ const log = numbers.length
  *     no other reason to be texting the church, and their message must not go
  *     unread, which is the whole point of this tab.
  *   a guardian who IS a member — only once we have texted them from here.
- *     Then their reply is genuinely a reply to [Kids Ministry]. Anything else they send
+ *     Then their reply is genuinely a reply to Fairhaven Kids. Anything else they send
  *     stays where it belongs, in the main inbox, under their own name.
  */
 const byNumber = new Map<string, typeof log>();
@@ -157,16 +157,16 @@ const threads = [...byNumber.entries()]
   .map(([phone, msgs]) => {
     const w = who.get(phone)!;
     /*
-     * For a member, the conversation STARTS when [Kids Ministry] first texted them.
+     * For a member, the conversation STARTS when Fairhaven Kids first texted them.
      *
      * Showing the whole history would undo the filter above one step later: a
      * prayer request they sent last month would become visible to ten
      * volunteers the moment somebody sent them a party reminder. Anything
-     * before that first [Kids Ministry] message is theirs and the main inbox's, not
+     * before that first Fairhaven Kids message is theirs and the main inbox's, not
      * this tab's.
      *
      * A guardian who is not a member has no such history to protect — every
-     * message on that number is [Kids Ministry] by definition.
+     * message on that number is Fairhaven Kids by definition.
      */
     const ordered = [...msgs].reverse();          // oldest first
     const startsAt = w.isMember
@@ -192,7 +192,7 @@ const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
 <KidsLayout title="Replies" user={user}>
   <h1>Replies</h1>
   <p class="k-muted" style="margin:-4px 0 22px; max-width:640px;">
-    What [Kids Ministry] families have texted back. These also appear in the church's main
+    What Fairhaven Kids families have texted back. These also appear in the church's main
     inbox — this page adds who they are and which child they are about.
   </p>
 
@@ -201,7 +201,7 @@ const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
 
   {threads.length === 0 && (
     <div class="k-card"><p class="k-muted" style="margin:0;">
-      Nothing yet. Replies from [Kids Ministry] families will show up here.
+      Nothing yet. Replies from Fairhaven Kids families will show up here.
     </p></div>
   )}
 

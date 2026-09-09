@@ -15,7 +15,7 @@
  *                   deploying the real app does not touch it.
  *
  * Forgetting step 3 is how the demo drifted: it had the old code and none of
- * the [Kids Ministry] tables, so anybody shown it saw an app with no children's
+ * the Fairhaven Kids tables, so anybody shown it saw an app with no children's
  * ministry in it.
  *
  * Safe to re-run. It only ever touches seh-demo — a separate Worker with a

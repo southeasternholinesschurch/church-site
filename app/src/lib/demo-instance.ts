@@ -37,7 +37,7 @@ export const DEMO_USER: SessionUser = {
 /**
  * The demo user, optionally wearing a different role.
  *
- * This exists for ONE reason: the [Kids Ministry] permission gate cannot otherwise be
+ * This exists for ONE reason: the Fairhaven Kids permission gate cannot otherwise be
  * verified before it is deployed. The definition of done for that feature is
  * "sign in as a volunteer and confirm /people, /messaging and /staff are
  * refused" — but signing in needs Google, and the local bypass makes everyone

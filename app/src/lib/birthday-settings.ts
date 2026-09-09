@@ -29,7 +29,7 @@ const KEY_BODY = 'birthday_texts_body';
  */
 export const DEFAULT_BIRTHDAY_BODY =
   'Happy birthday, {first}! We thank God for you today and we are praying for you. '
-  + '- [Your Church Name]';
+  + '- Fairhaven Community Church';
 
 /** 9am. Early enough to be a birthday greeting, late enough not to wake anyone. */
 export const DEFAULT_BIRTHDAY_TIME = '09:00';

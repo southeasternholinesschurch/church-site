@@ -11,7 +11,7 @@ import { demoAvatarSvg } from '../../../lib/demo-avatar';
  *
  * That route sits under the /directory PUBLIC_PREFIX, which means the
  * middleware never runs for it and it has to repeat its own auth by hand — and
- * because an [Kids Ministry] volunteer is staff like anyone else, letting children
+ * because an Fairhaven Kids volunteer is staff like anyone else, letting children
  * through there would also have let volunteers walk the ids for every adult
  * member's portrait. This path is under /kids, so the permission gate has
  * already decided who may be here before a line of this file executes.

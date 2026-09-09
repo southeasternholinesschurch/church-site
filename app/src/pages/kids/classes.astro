@@ -9,7 +9,7 @@ import { getPerVisit, parsePerVisit, KEY_PER_VISIT, DEFAULT_PER_VISIT, MAX_AMOUN
  * Classes, who teaches them, and the bus routes.
  *
  * The director's structural screen. Everything here changes what the OTHER
- * pages are made of, which is why it is the one part of [Kids Ministry] a teacher
+ * pages are made of, which is why it is the one part of Fairhaven Kids a teacher
  * cannot open — the line is about what you can restructure, not what you can
  * see or record.
  *
@@ -173,7 +173,7 @@ if (Astro.request.method === 'POST') {
      */
     if (String(parsePerVisit(raw)) !== raw) {
       error = `The credit has to be a whole number of bucks, 0 to ${MAX_AMOUNT}. `
-            + 'Zero means coming to [Kids Ministry] earns nothing on its own.';
+            + 'Zero means coming to Fairhaven Kids earns nothing on its own.';
     } else {
       await db.insert(schema.appSettings)
         .values({ key: KEY_PER_VISIT, value: raw, updatedAt: at, updatedBy: user.email })
@@ -273,7 +273,7 @@ const teachers = await db.select({
 
 /* Everybody who can sign in, so a pastor who teaches can be assigned as easily
  * as a volunteer. Assignment is for reports and for "your class" on a phone —
- * it restricts nothing, because every [Kids Ministry] volunteer sees every child. */
+ * it restricts nothing, because every Fairhaven Kids volunteer sees every child. */
 const staffRows = await db.select({
   id: schema.staff.id, name: schema.staff.name, email: schema.staff.email, role: schema.staff.role,
 }).from(schema.staff).where(eq(schema.staff.active, true)).orderBy(asc(schema.staff.email));
@@ -291,14 +291,14 @@ const saved = Astro.url.searchParams.get('saved');
 const SAVED: Record<string, string> = {
   class: 'Class saved.', 'class-added': 'Class added.', teacher: 'Teachers updated.',
   route: 'Route saved.', 'route-added': 'Route added.',
-  bucks: '[Kids Currency] setting saved.',
+  bucks: 'Fairhaven Bucks setting saved.',
   captain: 'Who can text this route has been updated.',
 };
 ---
 <KidsLayout title="Classes" user={user}>
   <h1>Classes and routes</h1>
   <p class="k-muted" style="margin:-4px 0 22px;">
-    How [Kids Ministry] is put together. Only a director can change this.
+    How Fairhaven Kids is put together. Only a director can change this.
   </p>
 
   {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
@@ -377,11 +377,11 @@ const SAVED: Record<string, string> = {
     </form>
   </details>
 
-  <h2 style="margin:28px 0 12px;">[Kids Currency]</h2>
+  <h2 style="margin:28px 0 12px;">Fairhaven Bucks</h2>
   <div class="k-card" style="margin-bottom:26px; max-width:520px;">
     <form method="POST">
       <input type="hidden" name="action" value="save-bucks" />
-      <label class="k-field"><span>Bucks for coming to [Kids Ministry]</span>
+      <label class="k-field"><span>Bucks for coming to Fairhaven Kids</span>
         <input name="perVisit" type="number" min="0" max={MAX_AMOUNT} value={perVisit} required /></label>
       <p class="k-muted" style="margin:-6px 0 12px; font-size:14px;">
         Credited once per meeting, whether a child scans their card or a teacher

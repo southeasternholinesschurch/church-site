@@ -3,13 +3,13 @@
 #
 # Editable by hand, or through Decap CMS at /admin once the GitHub OAuth Worker
 # is deployed. See SETUP.md step 3.
-churchName: "[Your Church Name]"
-address: "[123 Example St, City, ST 00000]"
+churchName: "Fairhaven Community Church"
+address: "412 Meadowbrook Road, Fairhaven, IN 46140"
 mapsUrl: "https://maps.google.com/?q=123+Example+St,+City,+ST+00000"
 # The inbox the Contact and Prayer forms deliver to. Register your Web3Forms
 # key against THIS address or the forms will silently go nowhere.
 email: "hello@example.org"
-phone: "(000) 000-0000"
+phone: "(317) 555-0142"
 # The number people text START to, to opt in. Leave EMPTY until Twilio is set
 # up: blank hides the opt-in section, which is deliberate — an opt-in with no
 # number to text would fail the carrier review it exists to pass.

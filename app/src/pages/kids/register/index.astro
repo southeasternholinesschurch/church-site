@@ -34,7 +34,7 @@ if (Astro.request.method === 'POST') {
   const d = String(form.get('date') ?? '').trim();
   const k = String(form.get('kind') ?? '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) error = 'Pick a date.';
-  // [Kids Ministry] kinds only. The congregation's own services are taken on
+  // Fairhaven Kids kinds only. The congregation's own services are taken on
   // /attendance, and offering them here would let a volunteer open the
   // sanctuary register in the children's chrome.
   else if (!KIDS_KIND_IDS.includes(k as any)) error = 'Pick a meeting.';

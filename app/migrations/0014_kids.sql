@@ -1,4 +1,4 @@
--- [Kids Ministry]: children, their guardians, the five classes, and the bus routes.
+-- Fairhaven Kids: children, their guardians, the five classes, and the bus routes.
 --
 -- Release one of the children's-ministry section. Deliberately does NOT create
 -- kid_ledger, kid_cards or kiosk_devices — those are release two, and a table
@@ -153,7 +153,7 @@ CREATE INDEX `kid_guardians_phone_idx` ON `kid_guardians` (`phone_e164`);
 --> statement-breakpoint
 
 -- Who teaches what. For reports and for "your class" on a teacher's phone.
--- NOT a restriction: every [Kids Ministry] volunteer can see every child, which is
+-- NOT a restriction: every Fairhaven Kids volunteer can see every child, which is
 -- the pastor's decision and reasonable at seventy children and ten volunteers.
 CREATE TABLE `kid_class_teachers` (
 	`staff_id` integer NOT NULL,
@@ -176,7 +176,7 @@ CREATE UNIQUE INDEX `kid_class_teachers_pair` ON `kid_class_teachers` (`staff_id
 -- Miss Karen's class").
 --
 -- The existing unique(service_id, person_id) then does real work: a child who
--- taps four times gets one row, so the [Kids Currency] credit in release two fires
+-- taps four times gets one row, so the Fairhaven Bucks credit in release two fires
 -- exactly once with no application-level locking. Do not weaken it.
 --
 -- Nullable, and null for every attendance row that already exists — the whole
@@ -198,6 +198,6 @@ VALUES
 	('Ages 4-6',   'Pre-school and early school', 4,  6, 2, 1, datetime('now')),
 	('Ages 7-9',   NULL,                          7,  9, 3, 1, datetime('now')),
 	('Ages 10-12', NULL,                         10, 12, 4, 1, datetime('now')),
-	-- Teens, technically. the pastor is content for them to live in the [Kids Ministry]
+	-- Teens, technically. the pastor is content for them to live in the Fairhaven Kids
 	-- dashboard rather than have a section of their own.
 	('Ages 13-21', 'Teens',                      13, 21, 5, 1, datetime('now'));

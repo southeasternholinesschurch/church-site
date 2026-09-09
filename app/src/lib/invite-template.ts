@@ -11,7 +11,7 @@
 export const INVITE_LINK_TOKEN = '{link}';
 
 export const DEFAULT_INVITE_MESSAGE =
-  '[Your Church Name] church directory - your personal link, good for 30 days: {link}';
+  'Fairhaven Community Church church directory - your personal link, good for 30 days: {link}';
 
 /** Why a template is unusable, or null if it is fine. */
 export function invalidTemplateReason(t: string): string | null {

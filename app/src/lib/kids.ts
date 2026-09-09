@@ -1,5 +1,5 @@
 /**
- * [Kids Ministry] logic that does not touch the database.
+ * Fairhaven Kids logic that does not touch the database.
  *
  * Kept separate so it can be unit-tested in plain node — see test/kids.test.ts
  * and the note in lib/consent.ts about why these files import no db module.

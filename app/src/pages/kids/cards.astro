@@ -41,7 +41,7 @@ if (Astro.request.method === 'POST') {
     .from(schema.people)
     .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
     .where(and(eq(schema.people.id, personId), eq(schema.people.archived, false))).limit(1);
-  if (!child) return json({ error: 'not an [Kids Ministry] child' }, 400);
+  if (!child) return json({ error: 'not an Fairhaven Kids child' }, 400);
 
   /*
    * IDEMPOTENT. Returns the existing active card if there is one rather than

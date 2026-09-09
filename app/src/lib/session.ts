@@ -19,7 +19,7 @@ import type { Role } from './permissions';
 export interface SessionUser {
   id: number; email: string; name: string | null; role: Role;
   /**
-   * May send [Kids Ministry] texts. A capability rather than a role (§7.1), and read
+   * May send Fairhaven Kids texts. A capability rather than a role (§7.1), and read
    * here so it gets the same free property `role` and `active` already have:
    * re-read from the database on every request, so taking somebody's send
    * rights away lands on their next click rather than in a fortnight.

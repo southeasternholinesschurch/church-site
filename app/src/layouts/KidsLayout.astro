@@ -49,9 +49,9 @@ const showWayBack = !isKidsRole(user.role);
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    {/* The landing page is already called [Kids Ministry]; "[Kids Ministry] · [Kids Ministry]" in a tab
-        is noise. Every other page reads "Registers · [Kids Ministry]". */}
-    <title>{title === '[Kids Ministry]' ? '[Kids Ministry]' : `${title} · [Kids Ministry]`}</title>
+    {/* The landing page is already called Fairhaven Kids; "Fairhaven Kids · Fairhaven Kids" in a tab
+        is noise. Every other page reads "Registers · Fairhaven Kids". */}
+    <title>{title === 'Fairhaven Kids' ? 'Fairhaven Kids' : `${title} · Fairhaven Kids`}</title>
     <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" type="image/png" sizes="32x32" href="/staff-icons/favicon-32.png" />
     <link rel="apple-touch-icon" href="/staff-icons/apple-touch-icon.png" />
@@ -61,7 +61,7 @@ const showWayBack = !isKidsRole(user.role);
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="[Kids Ministry]" />
+    <meta name="apple-mobile-web-app-title" content="Fairhaven Kids" />
   </head>
   <body class="kids">
     <header class="k-bar">
@@ -70,8 +70,8 @@ const showWayBack = !isKidsRole(user.role);
             bar is navy; the source artwork is a pink-to-cyan gradient that
             disappears against it. Trimmed and flattened from
             site/src/assets/brand — see the note in kids.css. */}
-        <a href="/kids" class="k-bar__brand" aria-label="[Kids Ministry] — home">
-          <img src="/kids-logo-white.png" alt="[Kids Ministry]" width="450" height="220" />
+        <a href="/kids" class="k-bar__brand" aria-label="Fairhaven Kids — home">
+          <img src="/kids-logo-white.png" alt="Fairhaven Kids" width="450" height="220" />
         </a>
         <nav class="k-bar__nav">
           {nav.map(([href, label]) => (

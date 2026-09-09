@@ -26,7 +26,7 @@ import { CHURCH_TZ } from './services.ts';
 /** The message. Deliberately one GSM-7 segment: a curly apostrophe or an em
  *  dash here would triple the cost of every reminder ever sent. */
 export const SINGING_REMINDER =
-  '[Your Church Name] - A reminder: You are singing this Sunday! We are praying '
+  'Fairhaven Community Church - A reminder: You are singing this Sunday! We are praying '
   + 'for you as you prepare, that God will help you to sing with the anointing.';
 
 export interface RosterEntry { sunday: string; names: string[] }

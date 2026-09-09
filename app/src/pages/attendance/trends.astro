@@ -17,7 +17,7 @@ const series = await db.all<{ id: number; date: string; kind: string; members: n
   FROM services s
   ${kindFilter === 'all'
       /* "Every service" means every service of the CONGREGATION's. Children's
-       * registers are counted in the [Kids Ministry] section; folding them in here would
+       * registers are counted in the Fairhaven Kids section; folding them in here would
        * silently inflate the church's own attendance line by the same children
        * twice on a Sunday. */
       ? sql`WHERE s.kind NOT IN (${sql.join(KIDS_KIND_IDS.map((k) => sql`${k}`), sql`, `)})`
@@ -71,7 +71,7 @@ if (recentIds.length === 4 && priorIds.length >= 4) {
 }
 
 /* Deliberately a short hand-picked list, not every kind — these are the four
- * lines the pastor actually compares. No [Kids Ministry] kind belongs here: a children's
+ * lines the pastor actually compares. No Fairhaven Kids kind belongs here: a children's
  * register is not a service the congregation attended. */
 const KINDS = [['sunday-morning', 'Sunday Morning'], ['sunday-evening', 'Sunday Evening'],
                ['wednesday', 'Wednesday'], ['all', 'Every service']];

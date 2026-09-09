@@ -1,7 +1,7 @@
 /**
  * Who may reach which URL.
  *
- * The feature IS this file. [Kids Ministry] exists so ten volunteers can take a register
+ * The feature IS this file. Fairhaven Kids exists so ten volunteers can take a register
  * without also holding the congregation's addresses and phone numbers;
  * everything else in it is pages, and this is the part that either works or
  * quietly does not. A leak here is silent — nobody complains about access they
@@ -66,7 +66,7 @@ refuses('kids', '/kids/../people');
 refuses('kids', '//people');
 
 // ---- director-only pages --------------------------------------------------
-// Class structure and the [Kids Currency] credit amount. Deliberately short: the
+// Class structure and the Fairhaven Bucks credit amount. Deliberately short: the
 // director/teacher line is about what you can RESTRUCTURE, not what you can see
 // or record.
 for (const p of ['/kids/classes', '/kids/settings', '/kids/kiosk', '/kids/cards']) {

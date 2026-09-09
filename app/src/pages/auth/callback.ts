@@ -41,7 +41,7 @@ export const GET: APIRoute = async ({ locals, url, cookies, redirect }) => {
    *
    * And only ever a path THIS PERSON MAY HAVE. The middleware would refuse a
    * `next` they cannot reach and bounce them anyway, so this is not a security
-   * check — it is so an [Kids Ministry] volunteer following a stale link lands on their
+   * check — it is so an Fairhaven Kids volunteer following a stale link lands on their
    * own section instead of watching the browser bounce through a page they
    * were never allowed to see. With no `next` at all they go to whichever
    * dashboard is theirs, which is the whole reason a volunteer's sign-in link

@@ -41,7 +41,7 @@ const date = () => `1900-${pad(1 + Math.floor(rnd() * 12))}-${pad(1 + Math.floor
 
 const out = [];
 /*
- * [Kids Currency] first, before anything else is cleared.
+ * Fairhaven Bucks first, before anything else is cleared.
  *
  * kid_ledger references BOTH services and staff with ON DELETE no action —
  * deliberately, so a service that children earned credits at cannot quietly
@@ -135,7 +135,7 @@ for (let w = 10; w >= 1; w--) {
   }
 }
 
-// ---- [Kids Ministry] -----------------------------------------------------------------
+// ---- Fairhaven Kids -----------------------------------------------------------------
 // The children's ministry. Seeded so the section is worth clicking through:
 // classes with children in them, allergies to find, bus-ministry children whose
 // families are NOT members, and a register already half taken.
@@ -158,7 +158,7 @@ for (const [cid, name, desc, lo, hi] of KID_CLASSES) {
 }
 
 /*
- * [Kids Ministry] volunteers, so the classes screen has somebody to assign.
+ * Fairhaven Kids volunteers, so the classes screen has somebody to assign.
  *
  * The staff table is emptied above — that clears whatever a visitor typed into
  * the Access screen — so these are re-created every reseed as the canonical
@@ -197,8 +197,8 @@ const ALLERGIES = ['Peanuts — EpiPen in the office', 'Dairy', 'Bee stings',
 const RELATIONSHIPS = ['mother', 'father', 'grandmother', 'grandfather', 'aunt'];
 const classForAge = (age) => (KID_CLASSES.find(([, , , lo, hi]) => age >= lo && age <= hi) ?? [null])[0];
 
-// The church's own children. Most join [Kids Ministry]; a few deliberately do not, so
-// the "not in [Kids Ministry] yet" case has something in it.
+// The church's own children. Most join Fairhaven Kids; a few deliberately do not, so
+// the "not in Fairhaven Kids yet" case has something in it.
 const churchKids = people.filter((p) => p.kind === 'child');
 const kidRows = [];
 for (const k of churchKids) {
@@ -258,7 +258,7 @@ for (let b = 0; b < 12; b++) {
 }
 
 const creditable = [];
-// Two [Kids Ministry] services, with a register partly taken — some children arrived and
+// Two Fairhaven Kids services, with a register partly taken — some children arrived and
 // were marked by the kiosk (class_id null), others were ticked off in class.
 for (const [kind, offset] of [['kids-sunday', 0], ['kids-wednesday', 3]]) {
   const d = new Date(Date.UTC(2026, 8, 5) - 7 * 86400000 + offset * 86400000);
@@ -275,7 +275,7 @@ for (const [kind, offset] of [['kids-sunday', 0], ['kids-wednesday', 3]]) {
 }
 
 /*
- * [Kids Currency] histories.
+ * Fairhaven Bucks histories.
  *
  * The attendance credits are written alongside the register rows above, one per
  * child per meeting, because that is exactly what the app does — seeding a

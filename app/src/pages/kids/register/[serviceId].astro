@@ -5,7 +5,7 @@ import { asc, eq, sql } from 'drizzle-orm';
 import { formatDate, kindLabel, kindHasClasses, isKidsKind } from '../../../lib/services';
 
 /**
- * Which class, for one [Kids Ministry] meeting.
+ * Which class, for one Fairhaven Kids meeting.
  *
  * A teacher's first tap on a Sunday morning. Each class shows how many of its
  * children are already marked, so somebody arriving late can see at a glance
@@ -18,7 +18,7 @@ if (!Number.isInteger(serviceId)) return Astro.redirect('/kids/register', 302);
 
 const [service] = await db.select().from(schema.services)
   .where(eq(schema.services.id, serviceId)).limit(1);
-// Only [Kids Ministry] meetings. The id in the URL is a number somebody can change, and
+// Only Fairhaven Kids meetings. The id in the URL is a number somebody can change, and
 // the sanctuary register is not this page's business.
 if (!service || !isKidsKind(service.kind)) return Astro.redirect('/kids/register', 302);
 if (!kindHasClasses(service.kind)) return Astro.redirect(`/kids/register/${serviceId}/all`, 302);

@@ -9,7 +9,7 @@
  * little about a page actually working.
  *
  * This caught a stray character sitting in the middle of a fetch call on the
- * [Kids Ministry] register, which the type-checker was happy with.
+ * Fairhaven Kids register, which the type-checker was happy with.
  *
  * Parsing only — nothing here is executed, so a script that talks to the DOM is
  * checked as safely as one that does not.

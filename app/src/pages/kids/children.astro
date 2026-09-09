@@ -8,7 +8,7 @@ import { ageOn, classMismatch, type AgeClass } from '../../lib/kids';
 /**
  * Every child, grouped by class.
  *
- * All [Kids Ministry] volunteers see all children — the pastor's decision, and reasonable at
+ * All Fairhaven Kids volunteers see all children — the pastor's decision, and reasonable at
  * seventy children and ten volunteers. There is no per-class or per-route
  * filtering of what anyone may look at.
  *
@@ -80,9 +80,9 @@ const shown = new Set(classGroups.flatMap((g) => g.kids.map((k) => k.id)));
 const groups = [
   ...classGroups,
   { key: 'unplaced', name: 'Not yet in a class',
-    note: 'Enrolled in [Kids Ministry], but not in a class that is running.',
+    note: 'Enrolled in Fairhaven Kids, but not in a class that is running.',
     kids: rows.filter((r) => r.enrolled !== null && !shown.has(r.id)) },
-  { key: 'unenrolled', name: 'Not in [Kids Ministry]', note: 'Children in the church records who have not been added.',
+  { key: 'unenrolled', name: 'Not in Fairhaven Kids', note: 'Children in the church records who have not been added.',
     kids: rows.filter((r) => r.enrolled === null) },
 ].filter((g) => g.kids.length > 0);
 
@@ -105,7 +105,7 @@ const withAllergies = rows.filter((r) => r.allergies).length;
 <KidsLayout title="Children" user={user}>
   {Astro.url.searchParams.get('saved') === 'archived' && (
     <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">
-      That child has left [Kids Ministry]. Nothing was deleted — you can find them at the
+      That child has left Fairhaven Kids. Nothing was deleted — you can find them at the
       bottom of this page and bring them back.
     </div>
   )}
@@ -114,7 +114,7 @@ const withAllergies = rows.filter((r) => r.allergies).length;
     <div style="flex:1; min-width:240px;">
       <h1>Children</h1>
       <p class="k-muted" style="margin:-4px 0 22px;">
-        {enrolled} in [Kids Ministry] · {onRoute} on a bus route · {withAllergies} with allergies noted
+        {enrolled} in Fairhaven Kids · {onRoute} on a bus route · {withAllergies} with allergies noted
       </p>
     </div>
     <a href="/kids/child/new" class="k-add">+ Add a child</a>
@@ -160,7 +160,7 @@ const withAllergies = rows.filter((r) => r.allergies).length;
   {gone.length > 0 && (
     <details style="margin-top:28px;">
       <summary class="k-muted" style="cursor:pointer; font-size:15px;">
-        {gone.length} {gone.length === 1 ? 'child has' : 'children have'} left [Kids Ministry]
+        {gone.length} {gone.length === 1 ? 'child has' : 'children have'} left Fairhaven Kids
       </summary>
       <div class="k-card" style="padding:6px 8px; margin-top:10px;">
         {gone.map((g) => (

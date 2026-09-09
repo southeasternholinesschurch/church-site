@@ -36,7 +36,7 @@ if (Astro.request.method === 'POST') {
   const [enrolled] = await db.select({ personId: schema.kidProfiles.personId })
     .from(schema.kidProfiles).where(eq(schema.kidProfiles.personId, id)).limit(1);
 
-  if (!enrolled) error = 'That child is not in [Kids Ministry].';
+  if (!enrolled) error = 'That child is not in Fairhaven Kids.';
   else if (act === 'award' || act === 'spend') {
     const amount = parseAmount(String(form.get('amount') ?? ''));
     if (amount === null) error = `Enter a whole number, 1 to ${MAX_AMOUNT}.`;
@@ -108,7 +108,7 @@ const ledger = await db.select().from(schema.kidLedger)
 const balance = balanceOf(ledger);
 const recent = ledger.slice(0, 3);
 
-/* Today's [Kids Ministry] meeting, if there is one, and whether they are already down
+/* Today's Fairhaven Kids meeting, if there is one, and whether they are already down
  * as here. Only offered when a meeting exists — no inventing a Tuesday. */
 const today = churchToday();
 const [service] = await db.select({ id: schema.services.id })
@@ -136,7 +136,7 @@ const SPEND = [1, 2, 5];
 
   {child.archived && (
     <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:14px;">
-      <strong>This child has left [Kids Ministry].</strong>
+      <strong>This child has left Fairhaven Kids.</strong>
     </div>
   )}
 

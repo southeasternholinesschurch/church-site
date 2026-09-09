@@ -20,9 +20,9 @@ export type Role = 'admin' | 'editor' | 'kids-director' | 'kids';
 
 /** For the picker on /staff and the `staff.mjs` script. Order is least to most. */
 export const ROLES: { id: Role; label: string; blurb: string }[] = [
-  { id: 'kids', label: '[Kids Ministry] volunteer',
+  { id: 'kids', label: 'Fairhaven Kids volunteer',
     blurb: 'The children’s section only. Takes attendance, edits a child’s details.' },
-  { id: 'kids-director', label: '[Kids Ministry] director',
+  { id: 'kids-director', label: 'Fairhaven Kids director',
     blurb: 'The children’s section, plus classes, adding children, and settings.' },
   { id: 'editor', label: 'Staff',
     blurb: 'The whole dashboard except who can sign in.' },
@@ -101,7 +101,7 @@ export const canLinkChurchRecords = (role: Role): boolean => role !== 'kids';
 /**
  * WHICH BUS ROUTES THIS PERSON MAY TEXT.
  *
- * 'all'  — every route, and every [Kids Ministry] family
+ * 'all'  — every route, and every Fairhaven Kids family
  * number[] — only these routes, and nobody else
  * null   — may not send at all
  *

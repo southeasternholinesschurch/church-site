@@ -9,7 +9,7 @@
 > when SETUP.md says "and here is why", or when something behaves oddly and you
 > want to know whether it was known about.
 
-# [Your Church Name] — Site & App
+# Fairhaven Community Church — Site & App
 
 This repo holds the church's public website (`/site`) and the staff/member app for
 people, attendance, texting, the bulletin and the directory (`/app`). This doc covers
@@ -55,8 +55,8 @@ Current figures: 128 active people (82 adults, 46 children), 82 listed in the di
 message was confirmed delivered the same day. Everything before that failed with error
 30034; if you are reading old rows in `message_log`, that is why.
 
-The remaining gaps are *content*, not code: [Ladies Ministry] has no photo and [Ladies Ministry] /
-[Seniors Ministry] have no real branding. Both are visible on the page rather than silent, and
+The remaining gaps are *content*, not code: Fairhaven Ladies has no photo and Fairhaven Ladies /
+Fairhaven Seniors have no real branding. Both are visible on the page rather than silent, and
 neither looks broken to a visitor.
 
 For any NEW page, follow [`MIGRATING-PAGES.md`](MIGRATING-PAGES.md) — it carries the
@@ -166,7 +166,7 @@ real values as they arrive.
 
 - [x] Church-owned GitHub repo — done 2026-08-29. Pushed via a dedicated SSH deploy key (`~/.ssh/id_ed25519_seh_site` on the pastor's Mac); repo is [your-github-org/your-repo-name](https://github.com/your-github-org/your-repo-name)
 - [x] Breeze export received and inspected 2026-08-29 (`docs/breeze-export-notes.md`). the pastor dropped the manual adult/child review at import time. It mattered in the end — adult/child now drives directory visibility, the attendance split AND who appears in the bulletin's birthday list — and it was cleaned up as the directory was built. Two junk records still carry `child` (see Still Outstanding).
-- [x] SHC logo — done 2026-08-29. Real files live in `site/src/assets/brand/` (icon mark, dark and white horizontal lockups) and are wired into the nav/footer/favicon/PWA icons via Astro's image pipeline (auto-optimized to WebP). [Kids Ministry]/[Youth Ministry] marks are in too; [Ladies Ministry]/[Mens Ministry]/[Seniors Ministry] still have no real logo.
+- [x] SHC logo — done 2026-08-29. Real files live in `site/src/assets/brand/` (icon mark, dark and white horizontal lockups) and are wired into the nav/footer/favicon/PWA icons via Astro's image pipeline (auto-optimized to WebP). Fairhaven Kids/Fairhaven Youth marks are in too; Fairhaven Ladies/Fairhaven Men/Fairhaven Seniors still have no real logo.
 - [x] Fonts — settled. Texta (body/UI, self-hosted from the pastor's own files) + Instrument Serif (display, Google Fonts, OFL). BD Script was used in an earlier direction and has been dropped. Still open: the Texta web-embedding licence — see the note in the stack-choices table above.
 - [x] Calendar feed — done 2026-08-29, live and connected (currently empty, waiting on real events)
 - [x] **`YOUTUBE_API_KEY`** — fully done. Created on a church-owned Google Cloud project, added BOTH as a GitHub Actions secret (the nightly sermon import runs on it) and as a Cloudflare secret on the site Worker. `/api/live-status` returns `configured: true` and the Livestream page detects a live service; verified against a real test stream. Channel ID: `UC…YOUR_CHANNEL_ID`
@@ -191,9 +191,9 @@ digital options instead. Don't reinstate either without asking.
 - [x] All four staff portraits done. Notes for future ones: Portraits are circle-cropped, so head-and-shoulders works best. `focus` in the CMS moves the crop vertically, but ONLY on a non-square photo — a square source fills the circle exactly and `focus` does nothing. For a tall portrait, crop it square first and keep the uncropped original alongside (see `pastor-full.jpg`), because re-cropping later otherwise means digging the source out of git history. Note `a-wide-congregation-shot.jpg` in the photo library is a wide congregation shot and is deliberately NOT offered as a portrait
 - [x] Staff page complete — four entries, real photos, the church's own bios. To add someone: `/admin` → Staff & Leadership (a new photo must be added to `src/lib/staff-assets.ts` first so it appears in the dropdown).
 - [x] Kids Club time — Wednesdays at 7:00 (confirmed 2026-08-30)
-- Ministry **locations** are deliberately not published for [Youth Ministry] / [Ladies Ministry] / [Seniors Ministry] — the pastor's call. The `where` field is simply omitted on those, so no row renders. Don't add placeholders back.
-- [ ] [Ladies Ministry] photo, and real branding (logo + colors) for [Ladies Ministry] and [Seniors Ministry]. **These no longer show any marker on the site** — a ministry without a logo simply shows none, and a card without a photo shows a panel tinted in that ministry's colour. Nothing looks broken to a visitor, so the outstanding work is tracked here rather than advertised on a public page
-- [x] Ministry meeting times — all four complete ([Kids Ministry] Sun 4:30 + Kids Club Wed 7:00; [Youth Ministry] Sun 4:30; [Ladies Ministry] monthly; [Seniors Ministry] Sunday school + every other month). Locations deliberately not published.
+- Ministry **locations** are deliberately not published for Fairhaven Youth / Fairhaven Ladies / Fairhaven Seniors — the pastor's call. The `where` field is simply omitted on those, so no row renders. Don't add placeholders back.
+- [ ] Fairhaven Ladies photo, and real branding (logo + colors) for Fairhaven Ladies and Fairhaven Seniors. **These no longer show any marker on the site** — a ministry without a logo simply shows none, and a card without a photo shows a panel tinted in that ministry's colour. Nothing looks broken to a visitor, so the outstanding work is tracked here rather than advertised on a public page
+- [x] Ministry meeting times — all four complete (Fairhaven Kids Sun 4:30 + Kids Club Wed 7:00; Fairhaven Youth Sun 4:30; Fairhaven Ladies monthly; Fairhaven Seniors Sunday school + every other month). Locations deliberately not published.
 
 Search the repo for `TODO(the pastor)` and `REPLACE_WITH` to find every one of these in place.
 
@@ -298,7 +298,7 @@ The rest of this section is the record of how each piece was set up, 2026-08-29.
    returned 200`.
 6. ✅ **decap-oauth Worker**: deployed at
    https://decap-oauth.YOUR-SUBDOMAIN.workers.dev. GitHub OAuth App created
-   ("[Your Church Name] CMS", org-owned), callback URL
+   ("Fairhaven Community Church CMS", org-owned), callback URL
    `https://decap-oauth.YOUR-SUBDOMAIN.workers.dev/callback`, "Expire user access
    tokens" left **unchecked** (this Worker doesn't implement token refresh — see its
    `src/index.ts` comments — so a non-expiring token is what it expects).
@@ -649,9 +649,9 @@ public-facing content edits.
 YouTube video ID (not the full URL — just the 11 characters after `v=`), fill in title/series/
 speaker/date/scripture, publish through the workflow. That's the whole weekly task.
 
-**Ministries**: 4 fixed entries ([Kids Ministry]/[Youth Ministry]/[Ladies Ministry]/[Seniors Ministry]) — edit existing ones rather
+**Ministries**: 4 fixed entries (Fairhaven Kids/Fairhaven Youth/Fairhaven Ladies/Fairhaven Seniors) — edit existing ones rather
 than creating new ones. Uncheck "Placeholder content" once real copy/branding lands for
-[Ladies Ministry]/[Seniors Ministry]. A 5th (men's ministry) was pulled entirely 2026-08-29 — "[Mens Ministry]" reads as an
+Fairhaven Ladies/Fairhaven Seniors. A 5th (men's ministry) was pulled entirely 2026-08-29 — "Fairhaven Men" reads as an
 unintended word — add it back via a new content file once the pastor has a real name for it.
 
 **Livestream override**: Site Settings → Livestream Override. Turn "active" on and paste the
@@ -716,17 +716,17 @@ own accent names, so it can't drift out of step with the content collection:
 
 | Tag | Ministry |
 |---|---|
-| `#sekids` | [Kids Ministry] |
-| `#seyouth` | [Youth Ministry] |
-| `#seladies` | [Ladies Ministry] |
-| `#seseniors` | [Seniors Ministry] |
+| `#sekids` | Fairhaven Kids |
+| `#seyouth` | Fairhaven Youth |
+| `#seladies` | Fairhaven Ladies |
+| `#seseniors` | Fairhaven Seniors |
 
 Details worth knowing:
 
-- **Case doesn't matter.** `#[Kids Ministry]`, `#sekids` and `#SEKIDS` all work — phone
+- **Case doesn't matter.** `#Fairhaven Kids`, `#sekids` and `#SEKIDS` all work — phone
   keyboards autocapitalise.
 - **Several tags are fine.** `#sekids #seyouth` puts a joint event under both.
-  Under [Kids Ministry] it shows a "[Youth Ministry]" chip and vice versa, so a shared event
+  Under Fairhaven Kids it shows a "Fairhaven Youth" chip and vice versa, so a shared event
   reads as shared; the ministry's own chip is dropped where it would be
   circular.
 - **The tag is removed from the text before display.** Nobody reads "#sekids"
@@ -980,9 +980,9 @@ declined. Adding one later is a self-contained job that touches nothing else.
 Only two things, and both are decisions rather than gaps:
 
 - **PWA offline caching** — declined, see above.
-- **A men's ministry page** — pulled entirely 2026-08-29. The brief listed [Mens Ministry]
-  alongside [Ladies Ministry] and [Seniors Ministry]; the name reads badly written down. Four ministries
-  exist: [Kids Ministry], [Youth Ministry], [Ladies Ministry], [Seniors Ministry].
+- **A men's ministry page** — pulled entirely 2026-08-29. The brief listed Fairhaven Men
+  alongside Fairhaven Ladies and Fairhaven Seniors; the name reads badly written down. Four ministries
+  exist: Fairhaven Kids, Fairhaven Youth, Fairhaven Ladies, Fairhaven Seniors.
 
 Everything else in the brief is built. If some other part of this document says a
 feature is "not built yet", that sentence is older than the feature — check the running
@@ -992,7 +992,7 @@ system before believing it.
 
 ## Still outstanding (content, not code)
 
-- [ ] **[Ladies Ministry] photo, and real branding (logo + colours) for [Ladies Ministry] and [Seniors Ministry].**
+- [ ] **Fairhaven Ladies photo, and real branding (logo + colours) for Fairhaven Ladies and Fairhaven Seniors.**
   They run on the brief's provisional palette values. Nothing shows a marker on the
   site — a ministry without a logo simply shows none, and a card without a photo shows
   a panel tinted in that ministry's colour — so this is tracked here rather than

@@ -55,7 +55,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     .where(eq(schema.kidRouteCaptains.staffId, user.id))
     .orderBy(asc(schema.kidRouteCaptains.routeId));
   const scope = kidsSendScope(user.role, user.kidsCanText, assigned.map((a) => a.routeId));
-  if (scope === null) return json({ error: 'You do not have permission to send [Kids Ministry] texts.' }, 403);
+  if (scope === null) return json({ error: 'You do not have permission to send Fairhaven Kids texts.' }, 403);
 
   const routeId = body?.routeId == null ? null : Number(body.routeId);
   if (routeId !== null && !Number.isInteger(routeId)) return json({ error: 'bad route' }, 400);

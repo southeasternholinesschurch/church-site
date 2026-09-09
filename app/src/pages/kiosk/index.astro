@@ -28,7 +28,7 @@ const demo = isDemoInstance(Astro.locals.runtime.env);
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>[Kids Ministry] check-in</title>
+    <title>Fairhaven Kids check-in</title>
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#081334" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -38,7 +38,7 @@ const demo = isDemoInstance(Astro.locals.runtime.env);
   <body>
     <!-- waiting -->
     <main id="wait" class="screen">
-      <img class="mark" src="/kids-logo-white.png" alt="[Kids Ministry]" />
+      <img class="mark" src="/kids-logo-white.png" alt="Fairhaven Kids" />
       <h1>Tap your card</h1>
       <p class="sub" id="sub">Hold it on the tablet to check in</p>
       <button id="start" class="start" hidden>Start check-in</button>
@@ -191,7 +191,7 @@ const demo = isDemoInstance(Astro.locals.runtime.env);
          *
          * A seven-year-old holds a card to a tablet and something has to
          * happen. The name landing with weight, a crown, and a burst in the
-         * [Kids Ministry] colours — enough that it is worth doing again next week,
+         * Fairhaven Kids colours — enough that it is worth doing again next week,
          * which is the whole behaviour the bucks are meant to encourage.
          *
          * Everything here is cheap: one canvas, ~70 particles, no library and
@@ -335,7 +335,7 @@ const demo = isDemoInstance(Astro.locals.runtime.env);
                    "that card was revoked" tells whoever is holding it something
                    about a child they may have no business knowing. */
                 nopeTitle.textContent = d && d.reason === 'no-meeting'
-                  ? 'No [Kids Ministry] today' : 'Try again';
+                  ? 'No Fairhaven Kids today' : 'Try again';
                 nopeSub.textContent = d && d.reason === 'no-meeting'
                   ? 'Check-in opens on Sunday and Wednesday'
                   : 'Ask a helper if it keeps happening';

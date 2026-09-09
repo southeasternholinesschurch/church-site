@@ -29,7 +29,7 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
  *
  * This page kept its own list, so a ministry could show one photo here and a
  * different one on its own page — which is precisely what ministry-assets.ts
- * exists to prevent, and what happened the moment [Youth Ministry]'s photo changed.
+ * exists to prevent, and what happened the moment Fairhaven Youth's photo changed.
  */
 const ministryImages = MINISTRY_PHOTOS;
 
@@ -86,7 +86,7 @@ const ministryImages = MINISTRY_PHOTOS;
             </div>
           );
         })}
-        <p class="times__addr">[123 Example Street]<br />[City, ST 00000]</p>
+        <p class="times__addr">412 Meadowbrook Road<br />Fairhaven, IN 46140</p>
       </div>
     </div>
   </section>
@@ -112,7 +112,7 @@ const ministryImages = MINISTRY_PHOTOS;
           );
         })}
       </dl>
-      <p class="gather__addr reveal">[123 Example Street]<br />[City, ST 00000]</p>
+      <p class="gather__addr reveal">412 Meadowbrook Road<br />Fairhaven, IN 46140</p>
     </div>
   </section>
 
