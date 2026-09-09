@@ -30,7 +30,7 @@ session happens to expire.
 
 ```bash
 npm install
-npx wrangler d1 migrations apply CHANGEME-app --local
+npx wrangler d1 migrations apply changeme-app --local
 node scripts/staff.mjs add you@gmail.com --admin
 npm run dev            # http://localhost:4322
 ```
@@ -124,8 +124,8 @@ Not yet: photo uploads, the bulletin editor (Phase 4) and the member directory
 
 ## Deployed
 
-**https://app.example.org** — Cloudflare Worker `CHANGEME-app`, D1
-database `CHANGEME-app`. Deployed with `npx wrangler deploy` from this directory.
+**https://app.example.org** — Cloudflare Worker `changeme-app`, D1
+database `changeme-app`. Deployed with `npx wrangler deploy` from this directory.
 Not yet connected to Workers Builds, so a `git push` does NOT redeploy it (the
 public site does work that way — do not assume the same here).
 

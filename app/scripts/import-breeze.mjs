@@ -173,7 +173,7 @@ const lines = people.map((p) => {
 const tmp = path.join(os.tmpdir(), `breeze-import-${Date.now()}.sql`);
 fs.writeFileSync(tmp, lines.join('\n'), { mode: 0o600 });
 try {
-  const args = ['wrangler', 'd1', 'execute', 'CHANGEME-app', REMOTE ? '--remote' : '--local', '--file', tmp, '--yes'];
+  const args = ['wrangler', 'd1', 'execute', 'changeme-app', REMOTE ? '--remote' : '--local', '--file', tmp, '--yes'];
   execFileSync('npx', args, { stdio: 'inherit' });
   console.log(`\nImported into the ${REMOTE ? 'remote' : 'local'} database.`);
 } finally {

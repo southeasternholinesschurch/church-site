@@ -86,7 +86,7 @@ If you are an AI agent working through this, or a volunteer following along:
 outstanding:
 
 ```bash
-grep -rn "\[Your Church Name\]\|\[123 Example\|\[City, ST\|CHANGEME\|YOUR-SUBDOMAIN\|example.org" \
+grep -rni "\[Your Church Name\]\|\[123 Example\|\[City, ST\|changeme\|YOUR-SUBDOMAIN\|example.org" \
   site/src app/src workers --include="*.astro" --include="*.ts" --include="*.yaml" --include="*.jsonc" --include="*.toml"
 ```
 
@@ -380,8 +380,8 @@ build. That separation is deliberate and worth keeping.
 ```bash
 cd app
 npm install
-npx wrangler d1 create CHANGEME-app          # copy the database_id it prints
-npx wrangler r2 bucket create CHANGEME-photos
+npx wrangler d1 create changeme-app          # copy the database_id it prints
+npx wrangler r2 bucket create changeme-photos
 ```
 
 Put the name and `database_id` into `app/wrangler.jsonc`, along with your app
@@ -391,11 +391,11 @@ create the bucket before you deploy, not after.
 Then create the tables:
 
 ```bash
-npx wrangler d1 migrations apply CHANGEME-app --local     # your machine
-npx wrangler d1 migrations apply CHANGEME-app --remote    # production
+npx wrangler d1 migrations apply changeme-app --local     # your machine
+npx wrangler d1 migrations apply changeme-app --remote    # production
 ```
 
-**Check:** `npx wrangler d1 execute CHANGEME-app --remote --command "select name from sqlite_master where type='table';"`
+**Check:** `npx wrangler d1 execute changeme-app --remote --command "select name from sqlite_master where type='table';"`
 lists people, groups, bulletins, message_log and the rest.
 
 ## Step 11. Staff sign-in
@@ -413,7 +413,7 @@ Sign-in is allow-listed, not open — a Google account is not enough by itself.
 The first account is added directly:
 
 ```bash
-npx wrangler d1 execute CHANGEME-app --remote \
+npx wrangler d1 execute changeme-app --remote \
   --command "insert into staff_users (email, role, active, created_at) values ('you@example.org','admin',1,datetime('now'));"
 ```
 

@@ -144,7 +144,7 @@ Worker — none are in the repo. `npx wrangler secret list` shows what is set.
 | `SMS_CRON_SECRET` | Shared secret the `sms-cron` Worker presents to `/api/sms/run-due`, which is public to the middleware and guarded by this alone |
 | `DEPLOY_HOOK_URL` | Fires a site rebuild from the app's "Publish the website now" button. Server-side only — the random ID in the URL *is* the credential. |
 
-The app also binds `DB` (D1, `CHANGEME-app`) and `PHOTOS` (R2, `CHANGEME-photos`) in
+The app also binds `DB` (D1, `changeme-app`) and `PHOTOS` (R2, `changeme-photos`) in
 `app/wrangler.jsonc`. A binding to a bucket that does not exist fails every deploy, so
 if you clone this into a fresh Cloudflare account, create the bucket first.
 
@@ -234,8 +234,8 @@ The app talks to a **local copy** of the D1 database in dev, not production. Que
 either one directly:
 
 ```bash
-npx wrangler d1 execute CHANGEME-app --local  --command "SELECT count(*) FROM people;"
-npx wrangler d1 execute CHANGEME-app --remote --command "SELECT count(*) FROM people;"
+npx wrangler d1 execute changeme-app --local  --command "SELECT count(*) FROM people;"
+npx wrangler d1 execute changeme-app --remote --command "SELECT count(*) FROM people;"
 ```
 
 Add `--json` when you want to parse the output; the human-readable form is not stable
@@ -291,7 +291,7 @@ The rest of this section is the record of how each piece was set up, 2026-08-29.
    "Publish the website now", so there is nothing to bookmark. Fired server-side
    because the hook URL has no authentication of its own — the random ID in it
    IS the credential, so a link on a page would hand it to every browser that
-   loaded the page. Held as the DEPLOY_HOOK_URL secret on the CHANGEME-app Worker.
+   loaded the page. Held as the DEPLOY_HOOK_URL secret on the changeme-app Worker.
 5. ✅ **rebuild-cron Worker**: deployed (`workers/rebuild-cron`), `DEPLOY_HOOK_URL` secret set
    to the deploy hook from step 4, cron fires daily at 09:00 UTC. Manually verified working:
    `curl https://rebuild-cron.YOUR-SUBDOMAIN.workers.dev` → `ok: deploy hook
@@ -404,7 +404,7 @@ The app's Worker is connected to this repo through **Workers Builds**, the same
 mechanism the public site uses, so a push to `main` that touches `app/**` builds and
 deploys it. No API token, no GitHub secrets.
 
-Settings on the `CHANGEME-app` Worker → Settings → Build:
+Settings on the `changeme-app` Worker → Settings → Build:
 
 | Field | Value |
 |---|---|
@@ -421,7 +421,7 @@ containing static files"**. That message sends you looking for a missing `dist/`
 real fault is that it is in the wrong folder and nothing was ever built. Cost one failed
 build on 2026-09-01.
 
-**Connect git to the EXISTING `CHANGEME-app` Worker.** Do not use "Create application" and
+**Connect git to the EXISTING `changeme-app` Worker.** Do not use "Create application" and
 point it at the repo — that makes a *second* Worker, and `app.example.org`
 stays attached to the first one, so the site would look unchanged no matter how many
 times it deployed. The site has already been bitten by a version of this: its Worker is

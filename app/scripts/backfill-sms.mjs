@@ -28,7 +28,7 @@ const scope = REMOTE ? '--remote' : '--local';
 
 const sql = (q) => {
   const out = execFileSync('npx',
-    ['wrangler', 'd1', 'execute', 'CHANGEME-app', scope, '--json', '--command', q],
+    ['wrangler', 'd1', 'execute', 'changeme-app', scope, '--json', '--command', q],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
   return JSON.parse(out.slice(out.indexOf('[')))[0]?.results ?? [];
 };
@@ -85,7 +85,7 @@ stmts.push(`UPDATE people
 
 // D1 caps how much one command can carry, so send it in chunks.
 for (let i = 0; i < stmts.length; i += 40) {
-  execFileSync('npx', ['wrangler', 'd1', 'execute', 'CHANGEME-app', scope, '--command',
+  execFileSync('npx', ['wrangler', 'd1', 'execute', 'changeme-app', scope, '--command',
     stmts.slice(i, i + 40).join('\n')], { stdio: ['ignore', 'ignore', 'pipe'] });
 }
 console.log(`\nWritten to the ${REMOTE ? 'remote' : 'local'} database.`);
