@@ -1,0 +1,256 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
+import { readForm } from '../../lib/form';
+import { CHURCH_TZ } from '../../lib/services';
+import { countSegments, sendOne, smsConfigured } from '../../lib/sms';
+import { isDemoInstance, DEMO_SEND_REFUSED } from '../../lib/demo-instance';
+import { kidsSendScope } from '../../lib/permissions';
+import { demoOn, demoBody } from '../../lib/demo';
+
+/**
+ * What the families text back.
+ *
+ * §7.7: a parent who is told "pickup is at 8:15" replies — "he's sick today",
+ * "we've moved". Those land in message_log with a null person_id, because a
+ * bus-ministry guardian is deliberately not a `people` row, and so they surface
+ * on /messaging/inbox as an unrecognised number that a volunteer cannot reach
+ * anyway. A reply nobody reads is worse than no reply channel, because the
+ * parent believes they have told you.
+ *
+ * So this tab does what the main inbox cannot: says WHO texted and about WHICH
+ * CHILD. The messages still appear in the main inbox as well — nothing is moved
+ * or hidden from the staff who already watch it.
+ *
+ * EVERY [Kids Ministry] volunteer can read this, deliberately. Restricting it to whoever
+ * may send would leave a reply about an unassigned route unread, which is the
+ * exact failure the section exists to avoid — and it matches the standing
+ * decision that all volunteers see all children.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+const assigned = await db.select({ routeId: schema.kidRouteCaptains.routeId })
+  .from(schema.kidRouteCaptains).where(eq(schema.kidRouteCaptains.staffId, user.id));
+const scope = kidsSendScope(user.role, user.kidsCanText, assigned.map((a) => a.routeId));
+/*
+ * REPLYING is a send, so it needs the capability — but it is NOT route-scoped
+ * the way a broadcast is.
+ *
+ * Route scoping exists to stop somebody broadcasting to families they do not
+ * serve. A one-to-one answer to a parent who has just texted the church is a
+ * different act: they started it, they are already opted in, and the
+ * alternative is their message going unanswered because the only person
+ * reading it happens to hold a different route. the pastor should narrow this if he
+ * disagrees; it is one condition.
+ */
+const canReply = scope !== null;
+
+const member = alias(schema.people, 'member');
+const child = alias(schema.people, 'child');
+
+/** Every number that belongs to an [Kids Ministry] guardian, and who it is. */
+const guardianRows = await db.select({
+  name: schema.kidGuardians.name,
+  guardianPhone: schema.kidGuardians.phoneE164,
+  memberPhone: member.phoneE164,
+  memberId: schema.kidGuardians.memberPersonId,
+  childFirstName: child.firstName,
+  routeName: schema.kidRoutes.name,
+}).from(schema.kidGuardians)
+  .innerJoin(child, eq(child.id, schema.kidGuardians.personId))
+  .leftJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.kidGuardians.personId))
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
+  .leftJoin(member, eq(member.id, schema.kidGuardians.memberPersonId))
+  .where(eq(child.archived, false));
+
+/** number → who to show for it. Same resolution as the audience builder: a
+ *  linked guardian's number comes from their member record. */
+const who = new Map<string, {
+  name: string; children: string[]; routes: string[];
+  memberId: number | null; isMember: boolean;
+}>();
+for (const g of guardianRows) {
+  const linked = g.memberId !== null && g.memberPhone !== null;
+  const phone = linked ? g.memberPhone : g.guardianPhone;
+  if (!phone) continue;
+  const e = who.get(phone) ?? {
+    name: g.name, children: [], routes: [], memberId: g.memberId, isMember: linked,
+  };
+  if (linked) e.isMember = true;
+  if (!e.children.includes(g.childFirstName)) e.children.push(g.childFirstName);
+  if (g.routeName && !e.routes.includes(g.routeName)) e.routes.push(g.routeName);
+  who.set(phone, e);
+}
+const numbers = [...who.keys()];
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const to = String(form.get('to') ?? '').trim();
+  const text = String(form.get('text') ?? '').trim();
+
+  if (!canReply) error = 'You do not have permission to send [Kids Ministry] texts.';
+  // The number must be one we already know as a guardian. Without this the
+  // reply box is a way to text any number at all from inside the kids section.
+  else if (!numbers.includes(to)) error = 'That is not an [Kids Ministry] family.';
+  else if (!text) error = 'The reply is empty.';
+  else if (isDemoInstance(env)) error = DEMO_SEND_REFUSED;
+  else if (!smsConfigured(env)) error = 'Texting is not switched on yet.';
+  else {
+    const result = await sendOne(env, to, text);
+    await db.insert(schema.messageLog).values({
+      personId: who.get(to)?.memberId ?? null,
+      phoneE164: to, body: text, direction: 'out',
+      twilioSid: result.sid ?? null,
+      status: result.sid ? 'queued' : 'failed',
+      errorCode: result.error ?? null,
+      segments: countSegments(text).segments,
+      context: 'kids',
+      createdAt: nowIso(),
+    });
+    return Astro.redirect(`/kids/replies?sent=${encodeURIComponent(to)}`, 303);
+  }
+}
+
+const demo = demoOn(Astro.url, user);
+const log = numbers.length
+  ? await db.select({
+      id: schema.messageLog.id,
+      phoneE164: schema.messageLog.phoneE164,
+      body: schema.messageLog.body,
+      direction: schema.messageLog.direction,
+      context: schema.messageLog.context,
+      createdAt: schema.messageLog.createdAt,
+    }).from(schema.messageLog)
+      .where(inArray(schema.messageLog.phoneE164, numbers))
+      .orderBy(desc(schema.messageLog.id)).limit(300)
+  : [];
+
+/*
+ * WHICH CONVERSATIONS BELONG HERE.
+ *
+ * There is one Twilio number, so an inbound text carries no signal about which
+ * part of the church it answers. Deciding purely by "is the sender a guardian"
+ * swept in every church parent who texted about anything at all — a prayer
+ * request, a bereavement — and put it in front of ten volunteers.
+ *
+ * So:
+ *   a guardian whose number is NOT also a member's — always. A bus family has
+ *     no other reason to be texting the church, and their message must not go
+ *     unread, which is the whole point of this tab.
+ *   a guardian who IS a member — only once we have texted them from here.
+ *     Then their reply is genuinely a reply to [Kids Ministry]. Anything else they send
+ *     stays where it belongs, in the main inbox, under their own name.
+ */
+const byNumber = new Map<string, typeof log>();
+for (const m of log) byNumber.set(m.phoneE164, [...(byNumber.get(m.phoneE164) ?? []), m]);
+const threads = [...byNumber.entries()]
+  .filter(([phone, msgs]) => {
+    const w = who.get(phone)!;
+    if (!w.isMember) return true;
+    return msgs.some((m) => m.direction === 'out' && m.context === 'kids');
+  })
+  .map(([phone, msgs]) => {
+    const w = who.get(phone)!;
+    /*
+     * For a member, the conversation STARTS when [Kids Ministry] first texted them.
+     *
+     * Showing the whole history would undo the filter above one step later: a
+     * prayer request they sent last month would become visible to ten
+     * volunteers the moment somebody sent them a party reminder. Anything
+     * before that first [Kids Ministry] message is theirs and the main inbox's, not
+     * this tab's.
+     *
+     * A guardian who is not a member has no such history to protect — every
+     * message on that number is [Kids Ministry] by definition.
+     */
+    const ordered = [...msgs].reverse();          // oldest first
+    const startsAt = w.isMember
+      ? ordered.findIndex((m) => m.direction === 'out' && m.context === 'kids')
+      : 0;
+    const ours = startsAt < 0 ? [] : ordered.slice(startsAt);
+    return {
+    phone,
+    who: w,
+    msgs: ours.slice(-6),
+    last: msgs[0]!,
+    // A thread whose newest message came FROM them is one nobody has answered.
+    unanswered: msgs[0]!.direction === 'in',
+    };
+  })
+  .sort((a, b) => b.last.id - a.last.id);
+
+const sentTo = Astro.url.searchParams.get('sent');
+const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
+  dateStyle: 'medium', timeStyle: 'short', timeZone: CHURCH_TZ,
+});
+---
+<KidsLayout title="Replies" user={user}>
+  <h1>Replies</h1>
+  <p class="k-muted" style="margin:-4px 0 22px; max-width:640px;">
+    What [Kids Ministry] families have texted back. These also appear in the church's main
+    inbox — this page adds who they are and which child they are about.
+  </p>
+
+  {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
+  {sentTo && <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">Reply sent.</div>}
+
+  {threads.length === 0 && (
+    <div class="k-card"><p class="k-muted" style="margin:0;">
+      Nothing yet. Replies from [Kids Ministry] families will show up here.
+    </p></div>
+  )}
+
+  {threads.map((t) => (
+    <div class="k-card" style="margin-bottom:16px;"
+         class:list={[t.unanswered && 'is-waiting']}>
+      <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">
+        <strong style="font-size:17px;">{t.who.name}</strong>
+        <span class="k-muted" style="font-size:14px;">
+          {t.who.children.join(', ')}{t.who.routes.length ? ` · ${t.who.routes.join(', ')}` : ''}
+        </span>
+        {t.unanswered && <span class="k-wait">waiting</span>}
+      </div>
+
+      <div style="margin:12px 0 0;">
+        {t.msgs.map((m) => (
+          <div class:list={['k-msg', m.direction === 'in' ? 'k-msg--in' : 'k-msg--out']}>
+            <p style="margin:0;">{demoBody(m.id, demo, m.body)}</p>
+            <span class="k-msg__when">{m.direction === 'in' ? '' : 'sent · '}{when(m.createdAt)}</span>
+          </div>
+        ))}
+      </div>
+
+      {canReply ? (
+        <form method="POST" style="margin:12px 0 0; display:flex; gap:8px; flex-wrap:wrap;">
+          <input type="hidden" name="to" value={t.phone} />
+          <input name="text" placeholder="Reply…" autocomplete="off" required
+                 style="flex:1; min-width:180px; padding:10px 12px; font:inherit; font-size:16px;
+                        color:var(--k-ink); border:1px solid rgba(13,27,69,.22);
+                        border-radius:9px; background:#fff;" />
+          <button class="k-btn" type="submit">Send</button>
+        </form>
+      ) : (
+        <p class="k-muted" style="margin:12px 0 0; font-size:14px;">
+          Ask the children's director if this needs an answer.
+        </p>
+      )}
+    </div>
+  ))}
+</KidsLayout>
+
+<style>
+  .is-waiting { border-left:5px solid var(--k-orange); }
+  .k-wait { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+            padding:3px 9px; border-radius:999px; background:var(--k-orange); color:#fff; }
+  .k-msg { padding:9px 12px; border-radius:12px; margin-bottom:8px; max-width:80%; }
+  .k-msg--in { background:rgba(13,27,69,.07); }
+  .k-msg--out { background:rgba(94,208,224,.16); margin-left:auto; }
+  .k-msg__when { display:block; margin-top:4px; font-size:12px; color:var(--k-ink-soft); }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+</style>

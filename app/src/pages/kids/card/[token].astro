@@ -1,0 +1,66 @@
+---
+import KidsLayout from '../../../layouts/KidsLayout.astro';
+import { getDb, schema } from '../../../db';
+import { and, eq } from 'drizzle-orm';
+
+/**
+ * What an NFC card opens.
+ *
+ * The tag holds this URL and nothing else. The token in it is opaque random
+ * hex — not the child's id, not their name, nothing derivable — because a card
+ * is a physical object handed to a seven-year-old and some of them will end up
+ * in a car park.
+ *
+ * AND IT IS MEANINGLESS WITHOUT A SESSION. This page sits under /kids, so the
+ * middleware has already sent anyone without a staff session to /login before a
+ * line of it runs. Whoever finds a card in a car park gets a sign-in page and
+ * learns nothing — not the child's name, not that the token is even real.
+ *
+ * On a teacher's phone the tap is instant: iOS and Android both open a URL from
+ * a tag without an app, their 14-day session is already in Safari or Chrome,
+ * and they land on the child ready to award. That is the whole mechanism — no
+ * second login, no PIN, no separate app.
+ */
+const db = getDb(Astro.locals.runtime.env);
+const token = String(Astro.params.token ?? '');
+
+/*
+ * Only an ACTIVE card resolves. A revoked one is treated exactly as an unknown
+ * one — that is the point of revoking: the lost card in the car park stops
+ * working, and does not helpfully announce that it used to belong to somebody.
+ */
+const [card] = token
+  ? await db.select({ personId: schema.kidCards.personId })
+      .from(schema.kidCards)
+      .innerJoin(schema.people, eq(schema.people.id, schema.kidCards.personId))
+      .where(and(
+        eq(schema.kidCards.token, token),
+        eq(schema.kidCards.active, true),
+        // A card for an archived child leads nowhere either.
+        eq(schema.people.archived, false),
+      )).limit(1)
+  : [];
+
+/*
+ * Straight to the CLASSROOM page, not the profile.
+ *
+ * A tap happens in a room full of children, so it lands on the screen with a
+ * balance and six big buttons — not the one with the guardian addresses and the
+ * photo upload. Everything else is one link away from there.
+ */
+if (card) return Astro.redirect(`/kids/child/${card.personId}/quick`, 302);
+
+const user = Astro.locals.user!;
+---
+<KidsLayout title="Card not recognised" user={user}>
+  <h1>That card is not recognised</h1>
+  <div class="k-card" style="max-width:560px;">
+    <p style="margin-top:0;">
+      Either it has been replaced with a new one, or it was never issued.
+    </p>
+    <p class="k-muted" style="margin-bottom:0;">
+      Find the child in <a href="/kids/children">the children list</a> and issue
+      them a new card from their page.
+    </p>
+  </div>
+</KidsLayout>

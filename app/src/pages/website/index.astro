@@ -1,0 +1,115 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const canPublish = Boolean(env.DEPLOY_HOOK_URL);
+
+/**
+ * The launcher (build brief §6) — every place the church is administered, in
+ * one list, so nobody has to remember which service does what.
+ *
+ * Mostly links, deliberately. The CMS, Cloudflare and Twilio are full
+ * applications with their own logins; wrapping them would mean maintaining a
+ * worse copy of each. The ONE thing that earns a real button is publishing,
+ * because the deploy hook URL is a secret that must not reach a browser.
+ */
+const groups: { title: string; note?: string; links: { href: string; label: string; note: string }[] }[] = [
+  {
+    title: 'The website',
+    links: [
+      { href: 'https://example.org/admin/', label: 'Edit site content',
+        note: 'Sermons, ministries, staff, beliefs and site settings' },
+      { href: 'https://example.org', label: 'View the site', note: 'What visitors see' },
+      { href: 'https://example.org/bulletin', label: 'This week’s bulletin',
+        note: 'Not in the menu — reachable by link only' },
+    ],
+  },
+  {
+    title: 'Services we depend on',
+    links: [
+      { href: 'https://studio.youtube.com', label: 'YouTube Studio',
+        note: 'Livestreams and sermon uploads. Titles drive the sermon archive.' },
+      { href: 'https://www.icloud.com/calendar', label: 'Church calendar',
+        note: 'The events page reads this. Edits appear after the nightly rebuild.' },
+      { href: 'https://www.zeffy.com', label: 'Zeffy', note: 'Online giving' },
+      { href: 'https://console.twilio.com', label: 'Twilio', note: 'Text messaging — numbers, campaign, billing' },
+    ],
+  },
+  {
+    title: 'Infrastructure',
+    note: 'You should rarely need these.',
+    links: [
+      { href: 'https://dash.cloudflare.com', label: 'Cloudflare',
+        note: 'Hosting, the domain, and both apps' },
+      { href: 'https://console.cloud.google.com', label: 'Google Cloud',
+        note: 'The YouTube key and the staff sign-in' },
+      { href: 'https://github.com/your-github-org/your-repo-name',
+        label: 'The code', note: 'Everything that runs the site and this app' },
+    ],
+  },
+];
+---
+<AppLayout title="Website" user={user}>
+  <h1>Website</h1>
+  <p class="muted" style="max-width:56ch; margin:-4px 0 26px;">
+    Everywhere the church is administered, in one place.
+  </p>
+
+  <div class="card" style="margin-bottom:24px;">
+    <h2>Publish changes</h2>
+    <p class="muted" style="margin:0 0 14px; max-width:60ch;">
+      The site rebuilds itself every night, which picks up calendar changes and
+      drops sermons that have aged out. Use this only when you have made an edit
+      and want it live now rather than tomorrow.
+    </p>
+    <button class="btn" type="button" id="publish" disabled={!canPublish}>Publish the website now</button>
+    <span id="publish-status" class="muted" style="margin-left:12px;"></span>
+    {!canPublish && (
+      <p class="notice" style="margin:16px 0 0;">
+        Not connected yet. The Cloudflare deploy hook still needs to be added as
+        a secret before this button can do anything.
+      </p>
+    )}
+  </div>
+
+  {groups.map((g) => (
+    <div class="card" style="margin-bottom:20px;">
+      <h2>{g.title}</h2>
+      {g.note && <p class="muted" style="margin:-6px 0 14px; font-size:15px;">{g.note}</p>}
+      <ul class="links">
+        {g.links.map((l) => (
+          <li>
+            <a href={l.href} target="_blank" rel="noreferrer">{l.label} <span aria-hidden="true">↗</span></a>
+            <span class="links__note">{l.note}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  ))}
+</AppLayout>
+
+<style>
+  .links { list-style: none; margin: 0; padding: 0; }
+  .links li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px;
+              padding: 12px 0; border-bottom: 1px solid var(--hair); }
+  .links li:last-child { border-bottom: 0; }
+  .links a { font-weight: 600; font-size: 17px; white-space: nowrap; }
+  .links__note { color: var(--ink-soft); font-size: 15px; }
+  @media (max-width: 700px) { .links a { white-space: normal; } }
+</style>
+
+<script>
+  const btn = document.getElementById('publish') as HTMLButtonElement;
+  const status = document.getElementById('publish-status')!;
+  btn?.addEventListener('click', async () => {
+    btn.disabled = true;
+    status.textContent = 'Asking Cloudflare to rebuild…';
+    const res = await fetch('/api/site/publish', { method: 'POST' });
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    if (!res.ok) { status.textContent = data.error ?? 'That did not work.'; btn.disabled = false; return; }
+    // The rebuild itself takes a minute or two after Cloudflare accepts it.
+    status.textContent = 'Started. The site updates in a minute or two.';
+    setTimeout(() => { btn.disabled = false; status.textContent = ''; }, 20000);
+  });
+</script>

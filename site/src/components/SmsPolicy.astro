@@ -1,0 +1,206 @@
+---
+import { getCollection } from 'astro:content';
+
+/**
+ * The SMS policy, supplied by the pastor for 10DLC / carrier compliance and
+ * published verbatim. The wording is deliberately NOT edited — it is the text
+ * the church is standing behind, and a compliance document that has been
+ * "improved" no longer says what was approved.
+ *
+ * Rendered by both /privacy and /terms so either URL a registration form asks
+ * for resolves to the same document with a 200, rather than one of them
+ * redirecting or 404ing at exactly the wrong moment.
+ */
+const [settingsEntry] = await getCollection('settings');
+const s = settingsEntry.data;
+---
+<div class="legal">
+  <p class="legal__eff">Effective Date: August 31, 2026</p>
+
+  <p>
+    [Your Church Name] (“[Your Church Name],” “the Church,” “we,”
+    “us,” or “our”) respects your privacy and is committed to using text messaging
+    responsibly. This SMS/Text Messaging Privacy Policy and Terms and Conditions
+    explains how we collect, use, protect, and manage telephone numbers and other
+    information associated with our church text messaging program.
+  </p>
+  <p>
+    By voluntarily providing your mobile telephone number and consenting to receive
+    text messages from [Your Church Name], you agree to the practices and
+    terms described below.
+  </p>
+
+  <h2>1. Purpose of Our Text Messaging Program</h2>
+  <p>[Your Church Name] may use text messaging to communicate important church-related information, including but not limited to:</p>
+  <ul>
+    <li>Church announcements and reminders;</li>
+    <li>Service times and schedule changes;</li>
+    <li>Special services, meetings, programs, and events;</li>
+    <li>Weather-related or emergency notifications;</li>
+    <li>Ministry updates;</li>
+    <li>Volunteer and ministry reminders;</li>
+    <li>Children's and youth ministry information;</li>
+    <li>Outreach and community information;</li>
+    <li>Prayer-related information;</li>
+    <li>Registration or event reminders; and</li>
+    <li>Other information reasonably related to the ministry and activities of [Your Church Name].</li>
+  </ul>
+  <p>We intend to use text messaging as a helpful communication tool and not as a means of excessive, abusive, or unwanted communication. We will make reasonable efforts to ensure that our messages are relevant to the purpose for which you provided your telephone number.</p>
+
+  <h2>2. Your Consent</h2>
+  <p>By voluntarily opting in to receive text messages from [Your Church Name], you authorize the Church to send text messages to the mobile telephone number you provide.</p>
+  <p>Your consent to receive text messages is not a condition of attending church, participating in church activities, making a donation, purchasing anything, or receiving any church service.</p>
+  <p>You may revoke your consent at any time by following the opt-out instructions described below.</p>
+  <p>Your consent applies only to communications from [Your Church Name] and is not transferable to another organization, business, or entity.</p>
+
+  <h2>3. No Sale or Sharing of Your Telephone Number</h2>
+  {/* ADDED 2026-08-31, not part of the pastor's original text. Carriers look for an
+      UNQUALIFIED statement about opt-in data specifically — the surrounding
+      paragraphs only promise not to share numbers "for marketing purposes",
+      and that qualifier is the usual reason a campaign is rejected even when
+      the three stated requirements are met. Kept first in the section so a
+      reviewer scanning for it finds it immediately. */}
+  <p>
+    <strong>No mobile information will be shared with third parties or affiliates
+    for marketing or promotional purposes. Text messaging originator opt-in data
+    and consent will not be shared with any third parties.</strong>
+  </p>
+  <p>[Your Church Name] will not sell, rent, lease, or give away your mobile telephone number to third parties for their own marketing or advertising purposes.</p>
+  <p>We will not provide your telephone number to another organization for that organization to use for its own independent text messaging, advertising, or marketing campaigns.</p>
+  <p>Your telephone number may be disclosed only when reasonably necessary to operate our communication program or when required or permitted by law. For example, we may use a third-party text messaging service provider to transmit messages on our behalf. Such service providers may process your telephone number solely as necessary to provide communication services to the Church and are not authorized by us to use your number for their own independent marketing purposes.</p>
+  <p>We may also disclose information when reasonably necessary to comply with applicable law, legal process, court orders, governmental requests, or to protect the rights, safety, or property of the Church or others.</p>
+
+  <h2>4. How We Use Your Information</h2>
+  <p>We may collect and use information associated with your participation in our text messaging program, including your:</p>
+  <ul>
+    <li>Mobile telephone number;</li>
+    <li>Name, if provided;</li>
+    <li>Opt-in or consent information;</li>
+    <li>Opt-out information;</li>
+    <li>Message preferences; and</li>
+    <li>Information reasonably necessary to administer and operate our texting program.</li>
+  </ul>
+  <p>We use this information primarily to:</p>
+  <ol>
+    <li>Send the text messages you have requested;</li>
+    <li>Maintain records of consent and opt-out requests;</li>
+    <li>Prevent messages from being sent after you have opted out;</li>
+    <li>Respond to requests or inquiries;</li>
+    <li>Maintain and improve our communication systems; and</li>
+    <li>Comply with applicable legal and regulatory requirements.</li>
+  </ol>
+  <p>We do not use your telephone number to send unrelated commercial advertising.</p>
+
+  <h2>5. How to Stop Receiving Text Messages</h2>
+  <p>You may stop receiving messages from [Your Church Name] at any time.</p>
+  <p>Simply reply <strong>STOP</strong> to any text message from us.</p>
+  <p>You may also use other commonly recognized opt-out language, such as UNSUBSCRIBE, CANCEL, END, or QUIT, or contact the Church directly and request that your number be removed from our texting program.</p>
+  <p>After receiving an opt-out request, we will take reasonable steps to stop sending further messages to that number, except for communications that may be necessary to process or confirm your opt-out request or that are otherwise permitted or required by law.</p>
+  <p>If you opt out, you may still receive communications that are not sent through our SMS program, such as postal mail, email, personal telephone calls, or in-person communication, unless you separately request that those communications also be discontinued.</p>
+
+  <h2>6. Rejoining the Text Messaging Program</h2>
+  <p>If you later wish to receive text messages from [Your Church Name] after opting out, you may provide your consent again through an available Church enrollment or opt-in process.</p>
+  <p>Rejoining the program constitutes a new request to receive text messages and does not automatically restore previous consent.</p>
+
+  <h2>7. Message Frequency</h2>
+  <p>Message frequency will vary depending upon the Church's activities, events, ministry needs, and circumstances.</p>
+  <p>We do not intend to send excessive or unnecessary messages.</p>
+  <p>[Your Church Name] reserves the right to determine the appropriate frequency of messages based on legitimate church communication needs, while making reasonable efforts to avoid excessive messaging.</p>
+
+  <h2>8. Message and Data Rates</h2>
+  <p>Message and data rates may apply depending upon your mobile telephone plan and wireless carrier.</p>
+  <p>[Your Church Name] does not control or guarantee the rates, fees, coverage, or availability charged or provided by your wireless carrier.</p>
+
+  <h2>9. No Guarantee of Delivery</h2>
+  <p>We make reasonable efforts to deliver text messages to subscribers who have opted in. However, we cannot guarantee that every message will be successfully delivered.</p>
+  <p>Message delivery may be affected by your wireless carrier, network availability, mobile device settings, service interruptions, geographic location, technical limitations, or other circumstances outside our control.</p>
+  <p>[Your Church Name] is not responsible for messages that are delayed, undelivered, blocked, filtered, or otherwise affected by your wireless carrier or mobile device.</p>
+
+  <h2>10. Responsible Use of Text Messaging</h2>
+  <p>[Your Church Name] is committed to using text messaging responsibly. We will not intentionally use our texting program to:</p>
+  <ul>
+    <li>Harass or threaten recipients;</li>
+    <li>Send deceptive or fraudulent messages;</li>
+    <li>Send inappropriate or abusive content;</li>
+    <li>Sell or distribute recipients' telephone numbers for marketing purposes;</li>
+    <li>Circumvent an individual's request to stop receiving messages; or</li>
+    <li>Send messages unrelated to the legitimate purposes of our church communication program.</li>
+  </ul>
+  <p>We will make reasonable efforts to honor requests to stop receiving messages and to maintain accurate records of opt-in and opt-out requests.</p>
+
+  <h2>11. Privacy and Security</h2>
+  <p>We take reasonable administrative, technical, and organizational measures to protect information associated with our text messaging program from unauthorized access, use, disclosure, alteration, or destruction.</p>
+  <p>However, no electronic transmission or storage system can be guaranteed to be completely secure. Accordingly, we cannot guarantee absolute security of information transmitted to or stored by us or our service providers.</p>
+
+  <h2>12. Third-Party Service Providers</h2>
+  <p>[Your Church Name] may use third-party service providers to facilitate text messaging, store contact information, manage subscriptions, or deliver messages.</p>
+  <p>These providers may have access to information necessary to perform services on behalf of the Church. We expect such providers to handle information in accordance with applicable law and our instructions.</p>
+  <p>Our use of a third-party service provider does not constitute a sale, rental, or giveaway of your telephone number for that provider's independent marketing purposes.</p>
+
+  <h2>13. Children's Privacy</h2>
+  <p>Our text messaging program is intended to be used with appropriate consent and in accordance with applicable law.</p>
+  <p>Where a text messaging program is specifically directed toward children or minors, [Your Church Name] will use reasonable measures appropriate to the circumstances to obtain any consent required by applicable law.</p>
+  <p>Parents or legal guardians who believe a minor has provided information or enrolled in a messaging program without appropriate authorization may contact the Church to request review or removal.</p>
+
+  <h2>14. Changes to These Terms</h2>
+  <p>[Your Church Name] may occasionally update this SMS/Text Messaging Privacy Policy and Terms and Conditions.</p>
+  <p>When changes are made, the revised version will be posted on this website with an updated effective date.</p>
+  <p>Your continued participation in the texting program after any changes become effective constitutes your continued use of the program subject to the revised terms, to the extent permitted by applicable law.</p>
+
+  <h2>15. Limitation of Liability</h2>
+  <p>To the fullest extent permitted by applicable law, [Your Church Name] shall not be responsible for indirect, incidental, special, consequential, or other damages arising from the use of, inability to use, delay of, or failure to receive text messages, including circumstances caused by wireless carriers, telecommunications networks, mobile devices, service providers, technical failures, or circumstances beyond the Church's reasonable control.</p>
+  <p>Nothing in these terms is intended to waive or limit any right or protection that cannot lawfully be waived or limited.</p>
+
+  <h2>16. Compliance With Applicable Law</h2>
+  <p>[Your Church Name] intends to operate its text messaging program in accordance with applicable federal and state laws and regulations governing communications, privacy, consumer protection, and text messaging.</p>
+  <p>Nothing in this policy is intended to create rights or obligations beyond those required by applicable law.</p>
+
+  <h2>17. Contact Us</h2>
+  <p>If you have questions about our text messaging program, believe you received a message in error, want to request removal of your telephone number, or have questions about how your information is used, please contact:</p>
+  <address class="legal__addr">
+    [Your Church Name]<br />
+    [123 Example Street]<br />
+    Indianapolis, Indiana 46203<br />
+    {s.phone && <><a href={`tel:${s.phone.replace(/[^\d+]/g, '')}`}>{s.phone}</a><br /></>}
+    <a href={`mailto:${s.email}`}>{s.email}</a><br />
+    <a href="https://example.org">example.org</a>
+  </address>
+  <p>You may also opt out of text messaging at any time by replying <strong>STOP</strong> to a message from [Your Church Name].</p>
+
+  <h2>18. Agreement</h2>
+  <p>By voluntarily opting in to receive SMS/text messages from [Your Church Name], you acknowledge that you have had an opportunity to review this SMS/Text Messaging Privacy Policy and Terms and Conditions and agree to its applicable provisions.</p>
+  <p>Your participation is voluntary, and you may revoke your consent at any time.</p>
+
+  {/* Set apart because this is the block a carrier reviewer looks for. */}
+  <div class="legal__disclosure">
+    <h2 style="margin-top:0;">SMS Program Disclosure</h2>
+    <p style="margin-bottom:0;">
+      <strong>[Your Church Name] SMS Messaging:</strong> By opting in, you agree to
+      receive recurring text messages from [Your Church Name] regarding church
+      services, events, announcements, ministry activities, reminders, and related
+      information. Message frequency varies. Message and data rates may apply. Reply
+      <strong>STOP</strong> at any time to opt out. Reply <strong>HELP</strong> for assistance
+      or contact the Church using the information above. Consent is not a condition of
+      attending church, participating in church activities, making a donation, or receiving
+      services.
+    </p>
+  </div>
+</div>
+
+<style>
+  .legal { max-width: 68ch; }
+  .legal__eff { font-size: 13px; font-weight: 700; letter-spacing: .14em;
+                text-transform: uppercase; color: var(--red); margin: 0 0 28px; }
+  .legal h2 { font-family: var(--font-body); font-size: 17px; font-weight: 700;
+              line-height: 1.35; margin: 38px 0 12px; color: var(--ink); }
+  .legal p { margin: 0 0 14px; font-size: 16px; line-height: 1.75; color: var(--ink-soft); }
+  .legal ul, .legal ol { margin: 0 0 16px; padding-left: 22px; }
+  .legal li { font-size: 16px; line-height: 1.7; color: var(--ink-soft); margin-bottom: 6px; }
+  .legal strong { color: var(--ink); }
+  .legal a { color: var(--red); text-decoration: underline; text-underline-offset: 3px; }
+  .legal__addr { font-style: normal; font-size: 16px; line-height: 1.8;
+                 color: var(--ink-soft); margin: 0 0 16px; }
+  .legal__disclosure { margin-top: 44px; padding: 24px clamp(20px, 3vw, 28px);
+                       background: var(--cream-deep); border-radius: var(--radius-lg); }
+  .legal__disclosure p { color: var(--ink); margin-bottom: 0; }
+</style>

@@ -1,0 +1,326 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { and, eq, or } from 'drizzle-orm';
+import { parseAnnouncements, parsePrayerRequests, weeksCarried, formatServiceDate } from '../../lib/bulletin';
+import { celebrationsFor } from '../../lib/celebrations';
+import { singingForBulletin } from '../../lib/singing-sheet';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/bulletin', 302);
+
+const saved = Astro.url.searchParams.get('saved');
+const deploy = Astro.url.searchParams.get('deploy');
+
+/*
+ * Loaded BEFORE the POST handler, because the handler needs its service date.
+ *
+ * It used to be read after, and the prayer-request code added on 2026-09-05
+ * referenced it from inside the handler — a temporal dead zone, so EVERY save
+ * threw a ReferenceError and silently did nothing. The page still rendered
+ * fine, which is what made it look like the bulletin simply would not save.
+ */
+const [b] = await db.select().from(schema.bulletins).where(eq(schema.bulletins.id, id)).limit(1);
+if (!b) return new Response('Not found', { status: 404 });
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? 'save');
+
+  const aWhen = form.getAll('a_when').map(String);
+  const aHead = form.getAll('a_heading').map(String);
+  const aBody = form.getAll('a_detail').map(String);
+  const announcements = aHead.map((heading, i) => ({
+    when: (aWhen[i] ?? '').trim(), heading: heading.trim(), detail: (aBody[i] ?? '').trim(),
+  })).filter((a) => a.heading);
+
+  /*
+   * Prayer requests. `since` rides along in a hidden field so a request that
+   * has been carried for six weeks still says six weeks after this save —
+   * re-stamping it with today's date on every edit would quietly reset the
+   * age of every request the moment anybody touched the form.
+   *
+   * A blank line is a removal. That is the only way one leaves the list; the
+   * software never drops a request on its own.
+   */
+  const pText = form.getAll('p_text').map(String);
+  const pSince = form.getAll('p_since').map(String);
+  const prayerRequests = pText
+    .map((text, i) => ({ text: text.trim(), since: (pSince[i] ?? '').trim() || b.serviceDate }))
+    .filter((p) => p.text);
+
+  const str = (k: string) => { const v = form.get(k); return typeof v === 'string' && v.trim() ? v.trim() : null; };
+
+  await db.update(schema.bulletins).set({
+    title: str('title') ?? 'Morning Worship',
+    preacher: str('preacher'),
+    announcements: JSON.stringify(announcements),
+    prayerRequests: JSON.stringify(prayerRequests),
+    scripture: str('scripture'),
+    scriptureRef: str('scriptureRef'),
+    ...(action.startsWith('publish') ? { status: 'published' as const, publishedAt: nowIso() } : {}),
+    ...(action === 'unpublish' ? { status: 'draft' as const } : {}),
+    updatedAt: nowIso(),
+  }).where(eq(schema.bulletins.id, id));
+
+  /**
+   * "Publish and put it live" — save, publish, and trigger the website rebuild
+   * in one press, so nobody has to know that publishing here and publishing
+   * the website are two different things.
+   *
+   * The rebuild is fired AFTER the write, and a failure to reach Cloudflare
+   * does not undo the publish: the bulletin is correctly saved either way, and
+   * the nightly rebuild will carry it out regardless. Reported rather than
+   * swallowed.
+   */
+  let deployNote = '';
+  if (action === 'publish-live') {
+    const hook = Astro.locals.runtime.env.DEPLOY_HOOK_URL;
+    if (!hook) deployNote = '&deploy=unconfigured';
+    else {
+      try {
+        const res = await fetch(hook, { method: 'POST' });
+        deployNote = res.ok ? '&deploy=started' : '&deploy=failed';
+      } catch { deployNote = '&deploy=failed'; }
+    }
+  }
+
+  return Astro.redirect(`/bulletin/${id}?saved=${action}${deployNote}`, 303);
+}
+
+
+
+const anns = parseAnnouncements(b.announcements);
+const prayers = parsePrayerRequests(b.prayerRequests);
+
+// Read-only preview of what the bulletin will carry. Nothing here is edited on
+// this screen — it comes from the directory — but it goes out under the pastor's
+// name, so he should be able to see it before pressing publish rather than
+// discovering it in a pew.
+const celebrants = await db.select({
+  firstName: schema.people.firstName, lastName: schema.people.lastName,
+  birthday: schema.people.birthday, anniversary: schema.people.anniversary,
+    adultChild: schema.people.adultChild,
+}).from(schema.people)
+  .where(and(
+    eq(schema.people.archived, false),
+    or(
+      eq(schema.people.adultChild, 'child'),
+      and(eq(schema.people.adultChild, 'adult'),
+          eq(schema.people.includeInDirectory, true)),
+    ),
+  ));
+const cel = celebrationsFor(celebrants, b.serviceDate);
+// Shown read-only, exactly as the website will print it — the sheet is the
+// place to change it, not this page.
+const singing = await singingForBulletin(Astro.locals.runtime.env, b.serviceDate);
+const fmtSunday = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US',
+    { month: 'long', day: 'numeric', timeZone: 'UTC' });
+const annRows = [...anns, ...Array(2).fill({ when: '', heading: '', detail: '' })];
+// Three spare lines, so adding one never needs a page reload.
+const prayerRows = [...prayers, ...Array(3).fill({ text: '', since: '' })];
+---
+<AppLayout title={`Bulletin · ${b.serviceDate}`} user={user}>
+  <p style="margin:0 0 4px;"><a href="/bulletin">← All bulletins</a></p>
+  <h1 style="margin-bottom:2px;">{formatServiceDate(b.serviceDate)}</h1>
+  <p class="muted" style="margin:0 0 18px;">
+    {b.status === 'published'
+      ? <>Published — this is what the website shows.</>
+      : <>Draft — not visible on the website.</>}
+  </p>
+
+  {saved === 'publish' && (
+    <p class="notice notice--ok">
+      Published. It appears on the website after the next rebuild —
+      <a href="/website"> publish the website now</a> to do that immediately.
+    </p>
+  )}
+  {deploy === 'started' && (
+    <p class="notice notice--ok">
+      Published, and the website is rebuilding. Give it a minute or two, then
+      check <a href="https://example.org/bulletin" target="_blank" rel="noreferrer">the live bulletin</a>.
+    </p>
+  )}
+  {deploy === 'failed' && (
+    <p class="notice">
+      The bulletin is published, but the website rebuild could not be started.
+      It will still go live at tonight's rebuild, or try again from
+      <a href="/website"> the Website page</a>.
+    </p>
+  )}
+  {deploy === 'unconfigured' && (
+    <p class="notice">
+      The bulletin is published. The website rebuild is not connected yet, so it
+      appears at tonight's rebuild.
+    </p>
+  )}
+  {saved === 'save' && <p class="notice notice--ok">Saved.</p>}
+  {saved === 'unpublish' && <p class="notice">Taken down. The website will drop it at the next rebuild.</p>}
+
+  <form method="POST">
+    <div class="card" style="margin-bottom:20px;">
+      <div class="row2">
+        <label class="field" style="margin:0;">
+          <span>Service</span><input name="title" value={b.title} />
+        </label>
+        <label class="field" style="margin:0;">
+          <span>Preaching</span>
+          <input name="preacher" value={b.preacher ?? ''} placeholder="Pastor [Name]" />
+        </label>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>Today's text</h2>
+      <label class="field"><span>Passage</span>
+        <textarea name="scripture" rows="3">{b.scripture ?? ''}</textarea></label>
+      <label class="field" style="max-width:340px;"><span>Reference</span>
+        <input name="scriptureRef" value={b.scriptureRef ?? ''} placeholder="John 3:16" /></label>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>Announcements</h2>
+      <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+        Church events come through from the calendar automatically — these are for
+        anything else.
+      </p>
+      {annRows.map((a) => (
+        <div class="ann3">
+          <input name="a_when" value={a.when} placeholder="Sunday · 6pm" />
+          <input name="a_heading" value={a.heading} placeholder="Heading" />
+          <input name="a_detail" value={a.detail} placeholder="The detail" />
+        </div>
+      ))}
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>Prayer requests</h2>
+      <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+        These <strong>carry over</strong> to next week's bulletin, so nobody
+        falls off the list because somebody forgot to retype them. Clear the
+        line to take one off — that is the only way one is ever removed.
+      </p>
+      <div class="prayers">
+        {prayerRows.map((p) => {
+          const weeks = p.since ? weeksCarried(p.since, b.serviceDate) : 0;
+          return (
+            <div class="prow">
+              <input name="p_text" value={p.text} placeholder="Ada Aldridge — recovering from surgery" />
+              <input type="hidden" name="p_since" value={p.since} />
+              <span class="pw muted">
+                {!p.text ? '' : weeks === 0 ? 'new this week' : weeks === 1 ? '1 week' : `${weeks} weeks`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>Singing</h2>
+      <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+        Pulled from the singing schedule automatically — the same sheet that
+        sends the Monday reminder, so the two can never disagree. To change it,
+        edit the sheet; it updates here and on the website on its own.
+      </p>
+      {singing && (singing.slots.length > 0 || singing.next) ? (
+        <>
+          {singing.slots.length > 0 ? (
+            <ul class="cel__l">
+              {singing.slots.map((s) => (
+                <li><strong>{s.label}:</strong> {s.note ?? s.names.join(', ')}</li>
+              ))}
+            </ul>
+          ) : (
+            <p class="muted" style="font-size:15px;">
+              Nothing on the sheet for this Sunday.
+            </p>
+          )}
+          {singing.next && singing.next.slots.length > 0 && (
+            <p class="muted" style="margin:12px 0 0; font-size:15px;">
+              <strong>Next Sunday, {fmtSunday(singing.next.sunday)}:</strong>{' '}
+              {singing.next.slots.map((s) => `${s.label} — ${s.note ?? s.names.join(', ')}`).join(' · ')}
+            </p>
+          )}
+        </>
+      ) : (
+        <p class="muted" style="font-size:15px;">
+          Nothing on the singing schedule for this Sunday or the next one, so
+          this section will not appear on the website at all.
+        </p>
+      )}
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>{cel?.month} birthdays and anniversaries</h2>
+      <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+        Pulled from the directory automatically for the month this bulletin is
+        for — nothing to type. Anyone not listed in the directory is not here
+        either, and children never are. To change a date, edit that person.
+      </p>
+      {cel && (cel.birthdays.length > 0 || cel.anniversaries.length > 0) ? (
+        <div class="celgrid">
+          <div>
+            <p class="cel__k">Birthdays</p>
+            {cel.birthdays.length === 0
+              ? <p class="muted" style="font-size:15px;">None this month.</p>
+              : <ul class="cel__l">{cel.birthdays.map((c) => <li>{c.day} · {c.name}</li>)}</ul>}
+          </div>
+          <div>
+            <p class="cel__k">Anniversaries</p>
+            {cel.anniversaries.length === 0
+              ? <p class="muted" style="font-size:15px;">None this month.</p>
+              : <ul class="cel__l">{cel.anniversaries.map((c) => <li>{c.day} · {c.name}</li>)}</ul>}
+          </div>
+        </div>
+      ) : (
+        <p class="muted" style="font-size:15px;">
+          Nobody has a birthday or anniversary on file this month, so this
+          section will not appear on the website at all.
+        </p>
+      )}
+    </div>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+      <button class="btn btn--ghost" type="submit" name="action" value="save">Save draft</button>
+      <button class="btn" type="submit" name="action" value="publish-live">
+        {b.status === 'published' ? 'Save and update the website' : 'Publish and put it on the website'}
+      </button>
+      {b.status === 'published' && (
+        <button class="btn btn--danger" type="submit" name="action" value="unpublish">Take it down</button>
+      )}
+      <span class="muted" style="font-size:14px; flex-basis:100%;">
+        “Save draft” keeps it private. The other button publishes it and rebuilds
+        the website straight away.
+      </span>
+    </div>
+  </form>
+</AppLayout>
+
+<style>
+  .prow { display:flex; gap:10px; align-items:center; margin-bottom:8px; }
+  .prow input[name="p_text"] { flex:1; }
+  /* Fixed width so the inputs line up rather than stepping in and out as the
+     wording goes from "new this week" to "12 weeks". */
+  .pw { flex:none; width:96px; font-size:13px; text-align:right; }
+
+  .celgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .cel__k { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+            text-transform: uppercase; color: var(--ink-soft); }
+  .cel__l { margin: 0; padding: 0; list-style: none; font-size: 15px; line-height: 1.9; }
+  @media (max-width: 620px) { .celgrid { grid-template-columns: 1fr; gap: 18px; } }
+
+  .row2 { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap: 10px; margin-bottom: 8px; }
+  .ann3 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) minmax(0,2fr);
+          gap: 10px; margin-bottom: 8px; }
+  .row2 input, .ann3 input { width: 100%; font: inherit; min-height: 42px; padding: 8px 11px;
+    border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; }
+  .row2 input:focus-visible, .ann3 input:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  @media (max-width: 700px) {
+    .row2, .ann3 { grid-template-columns: 1fr; gap: 6px; margin-bottom: 14px; }
+  }
+</style>

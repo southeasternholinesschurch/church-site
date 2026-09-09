@@ -1,0 +1,41 @@
+# Core church facts. Everything on the public site reads from here, so this is
+# the first file to fill in — and for a lot of the site, the only one.
+#
+# Editable by hand, or through Decap CMS at /admin once the GitHub OAuth Worker
+# is deployed. See SETUP.md step 3.
+churchName: "[Your Church Name]"
+address: "[123 Example St, City, ST 00000]"
+mapsUrl: "https://maps.google.com/?q=123+Example+St,+City,+ST+00000"
+# The inbox the Contact and Prayer forms deliver to. Register your Web3Forms
+# key against THIS address or the forms will silently go nowhere.
+email: "hello@example.org"
+phone: "(000) 000-0000"
+# The number people text START to, to opt in. Leave EMPTY until Twilio is set
+# up: blank hides the opt-in section, which is deliberate — an opt-in with no
+# number to text would fail the carrier review it exists to pass.
+smsNumber: ""
+# Local wall-clock, 24-hour. Used for the livestream countdown and the bulletin,
+# so the times here must be the times you actually meet.
+serviceTimes:
+  - label: "Sunday Morning Worship"
+    day: Sunday
+    time: "10:00"
+  - label: "Sunday Evening Worship"
+    day: Sunday
+    time: "18:00"
+  - label: "Wednesday Prayer"
+    day: Wednesday
+    time: "19:00"
+socials:
+  facebook: ""
+  instagram: ""
+  youtubeUrl: "https://www.youtube.com/@yourchannel"
+  # The UC... channel ID, NOT the @handle. Needed for livestream detection and
+  # the sermon importer. SETUP.md step 6 shows where to find it.
+  youtubeChannelId: ""
+# Online giving. Zeffy takes no cut, which is why it was chosen.
+zeffyUrl: "https://www.zeffy.com/"
+# givingLinksUrl: "https://linktr.ee/yourchurch"   # optional — a page gathering other giving options
+# The https:// form of your calendar's public webcal:// URL. Blank is fine —
+# the Events page simply shows nothing until you set it.
+calendarFeedUrl: ""

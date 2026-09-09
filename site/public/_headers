@@ -1,0 +1,40 @@
+# Security response headers for the static site.
+#
+# WHY THIS FILE AND NOT site/worker/index.ts: static assets are matched BEFORE
+# the Worker runs (see the note in wrangler.jsonc), so a header set in Worker
+# code never reaches an HTML page — the Worker only ever sees /api/* and paths
+# with no file behind them. Workers Assets does honour _headers; verified with
+# `wrangler dev` against this exact wrangler version, on both an HTML page and
+# a font file, and /_headers itself correctly 404s rather than being served.
+# Re-check with one curl after the first deploy (see docs/README.md).
+#
+# The CSP is REPORT-ONLY for now: violations appear in the browser console and
+# nothing is blocked. TO ENFORCE: rename the two Content-Security-Policy-Report-Only
+# keys below to Content-Security-Policy. Do that only after clicking through the
+# site — especially /admin, a sermon page with a video, and submitting a form.
+# No report collection endpoint is configured, so violations are visible in
+# DevTools only, not aggregated anywhere.
+
+# script-src and connect-src carry cloudflareinsights.com for the Web Analytics
+# beacon: it loads from static.cloudflareinsights.com and POSTs its results to
+# cloudflareinsights.com. Both are needed — allowing only the script leaves the
+# beacon loading and silently unable to report anything.
+/*
+  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self' https://api.web3forms.com; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://cloudflareinsights.com; media-src 'self'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# The CMS is a single page that loads Decap from unpkg and talks to GitHub, so
+# the site-wide policy above would break it outright. Scoped rather than
+# loosened globally: nothing else on the site may load third-party script.
+#
+# The `!` line is load-bearing. Rules here ACCUMULATE — without it /admin
+# receives BOTH policies, and a browser given two CSP headers enforces the
+# intersection, so the tight policy would go on blocking unpkg and the CMS
+# would be broken with no clue why. Verified: with the unset, /admin carries
+# exactly one policy (the one below) and ordinary pages carry exactly one
+# (the one above, with no unpkg in it).
+/admin/*
+  ! Content-Security-Policy-Report-Only
+  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com blob:; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com https://unpkg.com https://decap-oauth.YOUR-SUBDOMAIN.workers.dev; frame-src 'self' blob:

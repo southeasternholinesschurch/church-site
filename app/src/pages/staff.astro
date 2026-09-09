@@ -1,0 +1,187 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { readForm } from '../lib/form';
+import { asc, eq } from 'drizzle-orm';
+import { getDb, schema, nowIso } from '../db';
+import { ROLES, type Role } from '../lib/permissions';
+
+/**
+ * Who can sign in to this dashboard.
+ *
+ * Sign-in is allow-list only: /auth/callback looks the Google address up in
+ * this table and refuses anyone who is not on it, without saying whether the
+ * address exists. So this page IS the access control, and adding a row is the
+ * whole of granting access.
+ *
+ * There was no way to do this from the app at all until now — it took someone
+ * with database access — which is a poor place to be when a volunteer needs
+ * bringing on before Sunday.
+ */
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const user = Astro.locals.user!;
+
+/*
+ * Admins only.
+ *
+ * This USED to be the only role check in the app, and the comment here said so.
+ * It no longer is: the middleware now runs lib/permissions.ts on every request
+ * and has already refused a non-admin before this page renders. The check
+ * stays anyway, because a page that grants access should not depend on
+ * something else having remembered to guard it.
+ *
+ * Sent to the dashboard rather than shown a refusal, because "you are not an
+ * admin" is a fact about somebody else's permissions that they do not need.
+ */
+if (user.role !== 'admin') return Astro.redirect('/', 302);
+
+let error: string | null = null;
+const saved = Astro.url.searchParams.get('saved');
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? '');
+  const id = Number(form.get('id') ?? 0);
+
+  if (act === 'add') {
+    const email = String(form.get('email') ?? '').trim().toLowerCase();
+    const name = String(form.get('name') ?? '').trim() || null;
+    /*
+     * Validated against the list rather than cast: `role` decides what this
+     * person can reach, and a value the permission gate does not recognise
+     * would fall through its final branch and be treated as an admin. An
+     * unrecognised submission becomes the LEAST privileged role, never the
+     * most.
+     */
+    const submitted = String(form.get('role') ?? '');
+    const role: Role = ROLES.some((r) => r.id === submitted)
+      ? (submitted as Role) : 'kids';
+
+    // Checked here rather than trusted from the form: this is the gate.
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      error = 'That does not look like an email address.';
+    } else {
+      const [existing] = await db.select({ id: schema.staff.id, active: schema.staff.active })
+        .from(schema.staff).where(eq(schema.staff.email, email)).limit(1);
+      if (existing) {
+        // Re-adding someone who was turned off is the same intent as adding
+        // them, so do that rather than refusing with "already exists".
+        await db.update(schema.staff).set({ active: true, name, role })
+          .where(eq(schema.staff.id, existing.id));
+        return Astro.redirect('/staff?saved=restored', 303);
+      }
+      await db.insert(schema.staff).values({ email, name, role, active: true, createdAt: nowIso() });
+      return Astro.redirect('/staff?saved=added', 303);
+    }
+  }
+
+  if ((act === 'disable' || act === 'enable') && id) {
+    /*
+     * You cannot switch yourself off.
+     *
+     * Sign-in is allow-list only and there is no other way in, so removing
+     * your own access locks you out of the app entirely — with no reset link,
+     * no password, and no way back except someone with database credentials.
+     * The button is hidden on your own row as well, but the rule lives here,
+     * because a hidden button is not a guard.
+     */
+    if (id === user.id) {
+      error = 'You cannot remove your own access — you would be locked out with no way back in.';
+    } else {
+      await db.update(schema.staff).set({ active: act === 'enable' })
+        .where(eq(schema.staff.id, id));
+      return Astro.redirect(`/staff?saved=${act === 'enable' ? 'enabled' : 'disabled'}`, 303);
+    }
+  }
+}
+
+const people = await db.select().from(schema.staff).orderBy(asc(schema.staff.email));
+const activeCount = people.filter((p) => p.active).length;
+const fmt = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium' }) : 'never';
+---
+<AppLayout title="Who can sign in" user={user}>
+  <h1>Who can sign in</h1>
+  <p class="muted" style="margin-top:-6px;">
+    People sign in with Google. Only the addresses listed here are let in — everyone
+    else is turned away, so adding someone here is how you give them access.
+  </p>
+
+  {saved === 'added' && <p class="notice notice--ok">Added. They can sign in now, with that Google account.</p>}
+  {saved === 'restored' && <p class="notice notice--ok">That address was already here and has been switched back on.</p>}
+  {saved === 'disabled' && <p class="notice notice--ok">Access removed. Any session they have ends the next time they load a page.</p>}
+  {saved === 'enabled' && <p class="notice notice--ok">Access restored.</p>}
+  {error && <p class="notice notice--bad">{error}</p>}
+
+  <div class="card" style="max-width:660px; margin-bottom:24px;">
+    <h2 style="margin-top:0;">Add someone</h2>
+    <p class="muted" style="margin:-6px 0 16px;">
+      It must be the <strong>Google address they will sign in with</strong> — usually
+      their Gmail. An address that is not a Google account cannot sign in.
+    </p>
+    <form method="POST">
+      <input type="hidden" name="action" value="add" />
+      <label class="field"><span>Email</span>
+        <input name="email" type="email" required placeholder="name@gmail.com" autocomplete="off" /></label>
+      <label class="field"><span>Name</span>
+        <input name="name" placeholder="So you know who this is" autocomplete="off" /></label>
+      <label class="field" style="max-width:280px;"><span>Role</span>
+        <select name="role">
+          {ROLES.map((r) => (
+            <option value={r.id} selected={r.id === 'kids'}>{r.label} — {r.blurb}</option>
+          ))}
+        </select>
+      </label>
+      <button class="btn" type="submit">Add them</button>
+    </form>
+  </div>
+
+  <div class="card" style="max-width:660px;">
+    <h2 style="margin-top:0;">{activeCount} {activeCount === 1 ? 'person has' : 'people have'} access</h2>
+    <table>
+      <thead><tr><th>Email</th><th>Role</th><th>Last signed in</th><th></th></tr></thead>
+      <tbody>
+        {people.map((p) => (
+          <tr class={p.active ? '' : 'off'}>
+            <td>
+              {p.email}
+              {p.name && <span class="muted"> · {p.name}</span>}
+              {p.id === user.id && <span class="you">you</span>}
+              {!p.active && <span class="muted"> · no access</span>}
+            </td>
+            <td>{ROLES.find((r) => r.id === p.role)?.label ?? p.role}</td>
+            <td class="muted">{fmt(p.lastLoginAt)}</td>
+            <td style="text-align:right;">
+              {p.id === user.id ? (
+                <span class="muted" style="font-size:13px;">—</span>
+              ) : p.active ? (
+                <form method="POST" style="margin:0;"
+                      onsubmit={`return confirm('Remove access for ${p.email}?')`}>
+                  <input type="hidden" name="action" value="disable" />
+                  <input type="hidden" name="id" value={p.id} />
+                  <button class="linkbtn" type="submit">Remove access</button>
+                </form>
+              ) : (
+                <form method="POST" style="margin:0;">
+                  <input type="hidden" name="action" value="enable" />
+                  <input type="hidden" name="id" value={p.id} />
+                  <button class="linkbtn" type="submit">Give access back</button>
+                </form>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>
+
+<style>
+  .off td { opacity: .55; }
+  .you { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 700;
+         letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft);
+         border: 1px solid var(--hair); border-radius: 999px; padding: 2px 8px; }
+  .linkbtn { font: inherit; font-size: 14px; background: none; border: 0; padding: 0;
+             color: var(--red); text-decoration: underline; cursor: pointer; }
+  .linkbtn:hover { color: var(--red-deep); }
+</style>

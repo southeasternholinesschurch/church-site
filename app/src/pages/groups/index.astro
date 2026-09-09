@@ -1,0 +1,104 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { asc, eq, sql } from 'drizzle-orm';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+let error: string | null = null;
+
+/**
+ * Groups existed only as tables and an always-empty dropdown on the compose
+ * screen — a control that looked usable and never was. Worse than absent,
+ * because it implies a feature that is not there.
+ */
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+
+  if (action === 'create') {
+    const name = String(form.get('name') ?? '').trim();
+    if (!name) error = 'Give the group a name.';
+    else {
+      await db.insert(schema.groups)
+        .values({ name, description: String(form.get('description') ?? '').trim() || null,
+                  createdAt: nowIso() })
+        .onConflictDoNothing();
+      return Astro.redirect('/groups', 303);
+    }
+  }
+
+  if (action === 'delete') {
+    const id = Number(form.get('groupId'));
+    // The membership rows go with it via ON DELETE CASCADE; nobody is removed
+    // from the church by deleting a list.
+    if (id) await db.delete(schema.groups).where(eq(schema.groups.id, id));
+    return Astro.redirect('/groups', 303);
+  }
+}
+
+const groups = await db.select({
+  id: schema.groups.id, name: schema.groups.name, description: schema.groups.description,
+  members: sql<number>`(select count(*) from people_groups pg where pg.group_id = groups.id)`,
+  reachable: sql<number>`(
+    select count(*) from people_groups pg
+      join people p on p.id = pg.person_id
+     where pg.group_id = groups.id and p.archived = 0
+       and p.phone_e164 is not null and p.sms_consent = 'opted_in')`,
+}).from(schema.groups).orderBy(asc(schema.groups.name));
+---
+<AppLayout title="Groups" user={user}>
+  <h1>Groups</h1>
+  <p class="muted" style="max-width:58ch; margin:-4px 0 24px;">
+    Named lists for sending to part of the church rather than everyone. Add
+    people to a group from their own page.
+  </p>
+
+  {error && <p class="notice">{error}</p>}
+
+  <div class="card" style="margin-bottom:24px;">
+    <h2>New group</h2>
+    <form method="POST" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+      <input type="hidden" name="action" value="create" />
+      <label class="field" style="margin:0; flex:1; min-width:190px;">
+        <span>Name</span><input name="name" placeholder="[Youth Ministry] parents" required />
+      </label>
+      <label class="field" style="margin:0; flex:2; min-width:210px;">
+        <span>What it is for</span><input name="description" placeholder="Optional" />
+      </label>
+      <button class="btn" type="submit">Create</button>
+    </form>
+  </div>
+
+  <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+    <table class="t-stack">
+      <thead><tr><th>Group</th><th>People</th><th>Can be texted</th><th></th></tr></thead>
+      <tbody>
+        {groups.length === 0 ? (
+          <tr><td colspan="4" class="muted" style="padding:22px;">
+            No groups yet. Until there is one, Messaging can only send to everyone.
+          </td></tr>
+        ) : groups.map((g) => (
+          <tr>
+            <td>{g.name}{g.description && <><br /><span class="muted" style="font-size:14px;">{g.description}</span></>}</td>
+            <td data-label="People">{g.members}</td>
+            <td data-label="Can be texted">
+              {g.reachable}
+              {g.members > g.reachable && (
+                <span class="muted"> · {g.members - g.reachable} without a number or opt-in</span>
+              )}
+            </td>
+            <td data-label="">
+              <form method="POST" onsubmit="return confirm('Delete this group? Nobody is removed from the church — only the list.')">
+                <input type="hidden" name="action" value="delete" />
+                <input type="hidden" name="groupId" value={g.id} />
+                <button class="btn btn--ghost" style="min-height:36px; padding:6px 12px;" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>

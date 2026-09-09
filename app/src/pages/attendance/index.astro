@@ -1,0 +1,95 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { desc, eq, notInArray, sql } from 'drizzle-orm';
+import { CHURCH_SERVICE_KINDS, KIDS_KIND_IDS, kindLabel, churchToday, likelyKind, formatDate } from '../../lib/services';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const date = String(form.get('date') ?? '').trim();
+  const kind = String(form.get('kind') ?? '') as any;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) error = 'Pick a date.';
+  // CHURCH kinds only. An [Kids Ministry] register is created from the children's
+  // section, by somebody who is taking it — never from here, where picking one
+  // by accident would open a class register in the staff chrome.
+  else if (!CHURCH_SERVICE_KINDS.some((k) => k.id === kind)) error = 'Pick a service.';
+  else {
+    const existing = await db.select({ id: schema.services.id }).from(schema.services)
+      .where(sql`date = ${date} and kind = ${kind}`).limit(1);
+    // Re-opening the same service rather than refusing: a volunteer coming back
+    // to finish should land in the list they started, not an error.
+    if (existing[0]) return Astro.redirect(`/attendance/${existing[0].id}`, 303);
+    const created = await db.insert(schema.services)
+      .values({ date, kind, createdAt: nowIso() }).returning({ id: schema.services.id });
+    return Astro.redirect(`/attendance/${created[0]!.id}`, 303);
+  }
+}
+
+const recent = await db.select({
+  id: schema.services.id, date: schema.services.date, kind: schema.services.kind,
+  present: sql<number>`(select count(*) from attendance a where a.service_id = services.id)`,
+  visitors: sql<number>`(select count(*) from visitors v where v.service_id = services.id)`,
+})
+  .from(schema.services)
+  /*
+   * The congregation's services only. [Kids Ministry] runs twice a week; without this
+   * the 25 most recent rows become mostly children's registers within a few
+   * months and Sunday morning drops off the screen.
+   */
+  .where(notInArray(schema.services.kind, KIDS_KIND_IDS))
+  .orderBy(desc(schema.services.date), desc(schema.services.id)).limit(25);
+
+const today = churchToday();
+---
+<AppLayout title="Attendance" user={user}>
+  <h1>Attendance</h1>
+  {error && <p class="notice">{error}</p>}
+
+  <div class="card" style="margin-bottom:26px;">
+    <h2>Take attendance</h2>
+    <form method="POST" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+      <label class="field" style="margin:0; flex:1; min-width:170px;">
+        <span>Date</span><input type="date" name="date" value={today} required />
+      </label>
+      <label class="field" style="margin:0; flex:1; min-width:190px;">
+        <span>Service</span>
+        <select name="kind">
+          {CHURCH_SERVICE_KINDS.map((k) => (
+            <option value={k.id} selected={k.id === likelyKind(today)}>{k.label}</option>
+          ))}
+        </select>
+      </label>
+      <button class="btn" type="submit">Start</button>
+    </form>
+    <p class="muted" style="font-size:14px; margin:14px 0 0;">
+      Starting a service that already exists reopens it — nothing is lost if you
+      come back to finish later.
+    </p>
+  </div>
+
+  <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+    <table class="t-stack">
+      <thead><tr><th>Date</th><th>Service</th><th>Present</th><th>Visitors</th><th></th></tr></thead>
+      <tbody>
+        {recent.length === 0 ? (
+          <tr><td colspan="5" class="muted" style="padding:22px;">
+            No services recorded yet. Take attendance above and the trends will build from there.
+          </td></tr>
+        ) : recent.map((s) => (
+          <tr>
+            <td>{formatDate(s.date)}</td>
+            <td data-label="Service">{kindLabel(s.kind)}</td>
+            <td data-label="Present"><strong>{s.present}</strong></td>
+            <td data-label="Visitors">{s.visitors || <span class="muted">—</span>}</td>
+            <td data-label=""><a href={`/attendance/${s.id}`}>Open</a></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>

@@ -1,0 +1,160 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { getDb, schema } from '../../db';
+import { and, eq, or, like, sql, asc } from 'drizzle-orm';
+import { demoOn, demoPerson } from '../../lib/demo';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+const q = (Astro.url.searchParams.get('q') ?? '').trim();
+const filter = Astro.url.searchParams.get('filter') ?? '';
+
+// The archived view is the ONLY one that shows them; every other filter hides
+// them, which is what archiving is for.
+const where = [eq(schema.people.archived, filter === 'archived')];
+if (q) {
+  // Parameterised by Drizzle — the search box is user input reaching SQL, and
+  // hand-built strings are how that goes wrong.
+  const term = `%${q}%`;
+  where.push(or(
+    like(schema.people.firstName, term),
+    like(schema.people.lastName, term),
+    like(schema.people.email, term),
+    like(schema.people.phone, term),
+  )!);
+}
+if (filter === 'unknown') where.push(eq(schema.people.adultChild, 'unknown'));
+if (filter === 'adults') where.push(eq(schema.people.adultChild, 'adult'));
+if (filter === 'children') where.push(eq(schema.people.adultChild, 'child'));
+if (filter === 'no-email') where.push(sql`(email is null or email = '')`);
+if (filter === 'textable') where.push(sql`phone_e164 is not null and sms_consent = 'opted_in'`);
+if (filter === 'opted-out') where.push(eq(schema.people.smsConsent, 'opted_out'));
+if (filter === 'needs-profile') where.push(eq(schema.people.needsProfile, true));
+/*
+ * "Missing details" — the filter this list existed without.
+ *
+ * The directory and this page read the SAME row; there is no second copy and
+ * nothing to sync. But this table only ever showed name, phone and email, so a
+ * birthday or address sitting on the record was invisible here while being
+ * plainly visible in the directory — which reads exactly like the dashboard is
+ * missing data it actually has. The "On file" column below fixes the looking;
+ * this fixes the finding.
+ */
+if (filter === 'incomplete') {
+  where.push(sql`(birthday is null or birthday = ''
+                  or address_street is null or address_street = '')`);
+}
+
+const demo = demoOn(Astro.url, user);
+const rows = (await db.select().from(schema.people)
+  .where(and(...where))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName))
+  .limit(500))
+  // Display only — nothing is written, so demo mode cannot corrupt anything.
+  .map((r) => demoPerson(r, r.id, demo));
+
+const FILTERS: [string, string][] = [
+  ['', 'Everyone'], ['unknown', 'Unconfirmed'], ['adults', 'Adults'],
+  ['children', 'Children'], ['no-email', 'No email'],
+  ['incomplete', 'Missing details'],
+];
+const href = (f: string) => `/people${f || q ? '?' : ''}${[f && `filter=${f}`, q && `q=${encodeURIComponent(q)}`].filter(Boolean).join('&')}`;
+---
+<AppLayout title="People" user={user}>
+  {demo && (
+    <p class="demo-flag">Demo mode — names, numbers and addresses on this page
+    are invented. Counts and dates are real. <a href="/people">Turn it off</a>.</p>
+  )}
+  <div style="display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
+    <h1 style="margin:0;">People</h1>
+    <span class="muted">{rows.length}{rows.length === 500 ? '+' : ''} shown</span>
+    <a class="btn" href="/people/new" style="margin-left:auto;">Add a person</a>
+    <a class="btn btn--ghost" href="/api/people/export?texting=1" download>Texting list (CSV)</a>
+    <a class="btn btn--ghost" href="/api/people/export" download>Everyone (CSV)</a>
+  </div>
+
+  <form method="GET" action="/people" style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+    <input name="q" value={q} placeholder="Search name, email or phone"
+           style="flex:1; min-width:220px; min-height:44px; padding:9px 12px; border:1px solid var(--hair); border-radius:6px;" />
+    {filter && <input type="hidden" name="filter" value={filter} />}
+    <button class="btn btn--ghost" type="submit">Search</button>
+  </form>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+    {FILTERS.map(([f, label]) => (
+      <a href={href(f)} class="chip"
+         style={filter === f ? 'background:var(--ink);color:var(--cream);text-decoration:none' : 'text-decoration:none'}>{label}</a>
+    ))}
+  </div>
+
+  {rows.length === 0 ? (
+    <div class="card"><p style="margin:0;" class="muted">
+      {q || filter ? 'Nobody matches that.' : 'No people yet — import the Breeze export to get started.'}
+    </p></div>
+  ) : (
+    <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+      <table class="t-stack">
+        <thead>
+          <tr><th>Name</th><th>Phone</th><th>Email</th><th>On file</th><th>Adult / child</th><th>Directory</th><th>Texts</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr>
+              <td>
+                <a href={`/people/${p.id}`} style="font-weight:600;">{p.lastName}, {p.firstName}</a>
+                {p.needsProfile && <> <span class="chip chip--warn">needs a name</span></>}
+              </td>
+              <td data-label="Phone">{p.phone ?? <span class="muted">—</span>}</td>
+              <td data-label="Email" style="word-break:break-all;">{p.email ?? <span class="muted">—</span>}</td>
+              {/* What the directory holds for this person, shown HERE so a gap
+                  is visible while scanning rather than only after opening the
+                  record. Same row, same fields — this is the same data the
+                  directory prints. */}
+              <td data-label="On file">
+                <span class={p.birthday ? 'on' : 'off'} title={p.birthday ? `Birthday: ${p.birthday.slice(5)}` : 'No birthday on file'}>bday</span>
+                <span class={p.anniversary ? 'on' : 'off'} title={p.anniversary ? `Anniversary: ${p.anniversary.slice(5)}` : 'No anniversary on file'}>anniv</span>
+                <span class={p.addressStreet ? 'on' : 'off'} title={p.addressStreet ?? 'No address on file'}>addr</span>
+                <span class={p.photoKey ? 'on' : 'off'} title={p.photoKey ? 'Has a photo' : 'No photo'}>photo</span>
+              </td>
+              <td data-label="Status">
+                {p.adultChild === 'unknown'
+                  ? <span class="chip chip--warn">Unconfirmed</span>
+                  : <span class="chip">{p.adultChild}</span>}
+              </td>
+              <td data-label="Directory">
+                {p.adultChild !== 'adult'
+                  ? <span class="muted">—</span>
+                  : p.includeInDirectory
+                    ? <span class="chip">{p.directoryStatus === 'none' ? 'included' : p.directoryStatus}</span>
+                    : <span class="muted">not included</span>}
+              </td>
+              <td data-label="Texts">
+                {!p.phoneE164 ? <span class="muted">no number</span>
+                  : p.smsConsent === 'opted_in' ? <span class="chip">on</span>
+                  : p.smsConsent === 'opted_out' ? <span class="chip chip--warn">opted out</span>
+                  : <span class="muted">not asked</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AppLayout>
+
+<style>
+  /* Unmistakable, because a screenshot of demo data that is mistaken for real
+     data is the one way this feature could do harm. */
+  .demo-flag { background:#fdf0d9; border-left:4px solid #b8860b; color:#5c4405;
+               padding:10px 14px; margin:0 0 18px; font-size:14px; border-radius:3px; }
+  .demo-flag a { color:#5c4405; }
+
+  /* "On file" markers. Present is quiet and dark; missing is struck through
+     and pale — the eye is scanning for GAPS, so the gaps are what change
+     shape rather than the hits. */
+  .on, .off { display:inline-block; margin-right:6px; font-size:12px; font-weight:700;
+              letter-spacing:.04em; }
+  .on  { color:#1e5b28; }
+  .off { color:#b6ada0; text-decoration:line-through; }
+</style>

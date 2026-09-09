@@ -1,0 +1,86 @@
+name: Import sermons
+
+# Keeps the Sermons page current without anyone running anything.
+#
+# The site already rebuilds nightly (the rebuild-cron Worker), which slides the
+# rolling window and drops services as they age out — but that only ever
+# REMOVES. Adding new services needs the import, which is what this does.
+#
+# Committing the new markdown is what publishes them: the push triggers
+# Cloudflare Workers Builds exactly like a hand-made commit.
+#
+# The one credential is YOUTUBE_API_KEY (repo secret, YouTube Data API v3,
+# read-only). It is what makes the job trustworthy rather than merely working:
+# the API carries video durations, and durations are how a restarted stream's
+# short fragments are told apart from the real recording. --strict refuses to
+# run without it — see the guard in the importer for why a keyless nightly run
+# would actively corrupt the archive.
+#
+# Quota is not a concern: ~30 units a night against a 10,000/day allowance.
+
+on:
+  schedule:
+    # 09:00 UTC daily (~4–5am Indianapolis). Uploads lag the service by days,
+    # so a daily check catches everything without hammering the feed.
+    - cron: '0 9 * * *'
+  workflow_dispatch: # so it can also be run by hand from the Actions tab
+
+# The job's whole purpose is to commit; nothing else is needed.
+permissions:
+  contents: write
+
+concurrency:
+  group: import-sermons
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the TIP of main, not the SHA that triggered the run.
+          # A manual run started from a stale page (or any run queued behind a
+          # push) otherwise lands on an old commit, and the push is rejected as
+          # non-fast-forward. That is exactly how the first real run failed.
+          ref: main
+          # Full history: a shallow clone can't rebase onto origin below.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No `npm ci` on purpose: the importer uses only node builtins (fs, path,
+      # url, fetch), so the job stays fast and cannot be broken by a dependency.
+
+      - name: Import new services
+        working-directory: site
+        # --strict is the important flag. Unattended, the dangerous failure is
+        # a SILENT one: if the channel's titling changes, nothing parses, and
+        # without --strict the job would cheerfully commit nothing while the
+        # archive quietly went stale. --strict fails the run instead, so it
+        # shows up as a red X rather than as months of missing services.
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: node scripts/import-sermons.mjs --write --prune --strict
+
+      - name: Commit any new services
+        run: |
+          if [ -z "$(git status --porcelain site/src/content/sermons)" ]; then
+            echo "No new services — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/src/content/sermons
+          # Name what changed, so the history is readable at a glance.
+          added=$(git diff --cached --name-only --diff-filter=A | wc -l | tr -d ' ')
+          removed=$(git diff --cached --name-only --diff-filter=D | wc -l | tr -d ' ')
+          git commit -m "Sermons: +${added} new, -${removed} aged out" \
+                     -m "Automated by .github/workflows/import-sermons.yml from the channel's public RSS feed."
+
+          # Absorb anything pushed while this job was running. The commit only
+          # ever touches site/src/content/sermons, so a rebase here cannot
+          # conflict with work happening anywhere else in the repo.
+          git pull --rebase origin main
+          git push

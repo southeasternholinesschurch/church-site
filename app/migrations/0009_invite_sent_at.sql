@@ -1,0 +1,13 @@
+-- When an invite was actually DELIVERED to Twilio, as opposed to created.
+--
+-- createInvite marks a person 'invited' the moment a link is minted, which is
+-- before the text is sent and regardless of whether the send works. The batch
+-- sender used that status to decide who still needed one, so anyone who had
+-- been texted but had not yet OPENED their link stayed in the queue and was
+-- texted again on the next batch. Five people received a duplicate on
+-- 2026-09-01 before this was caught.
+--
+-- Recording it on the invite rather than the person because createInvite
+-- reuses a person's live invite: one row per person per 30-day window, which
+-- is exactly the granularity "have we already texted them?" needs.
+ALTER TABLE `directory_invites` ADD `sent_at` text;

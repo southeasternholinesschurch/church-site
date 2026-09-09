@@ -1,0 +1,367 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { readForm } from '../lib/form';
+import { and, asc, eq, isNotNull, ne, sql } from 'drizzle-orm';
+import { getDb, schema, nowIso } from '../db';
+import { createInvite, getInviteTemplate, setInviteTemplate, renderInvite,
+         invalidTemplateReason, DEFAULT_INVITE_MESSAGE, INVITE_LINK_TOKEN } from '../lib/directory';
+import { sendOne, smsConfigured, countSegments } from '../lib/sms';
+
+/**
+ * Send directory invitations to everyone who should have one, a batch at a time.
+ *
+ * NOT in the dashboard nav (removed 2026-09-03, the pastor's call): the rollout is
+ * done, so a permanent tab for a job that is finished is clutter. The page
+ * still works at /invites for the next intake, and a single person is invited
+ * from the button on their own profile — which is the common case now.
+ *
+ * Deliberately NOT a single "invite everyone" button. Three reasons, in order
+ * of how much they cost if ignored:
+ *
+ *  1. Until 2026-09-01 this system had delivered exactly ONE text in its life.
+ *     Going from one to sixty-two in a click means finding out about a bad
+ *     link or confusing wording sixty-two times at once, from people, on a
+ *     Sunday. Batches let the first few be checked before the rest follow.
+ *  2. A Worker on the free plan may make 50 outbound requests per incoming
+ *     request. Sixty-odd sends would fail partway through and leave nobody
+ *     sure who had received one.
+ *  3. Sending is not undoable. A page that makes the irreversible thing take
+ *     several deliberate presses is the right shape for it.
+ *
+ * Re-running is safe: createInvite reuses a person's live link rather than
+ * minting a new one, and anyone already active is skipped.
+ */
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const user = Astro.locals.user!;
+
+/** The one definition of "should be invited", used by both the preview and the send. */
+const ELIGIBLE = and(
+  eq(schema.people.archived, false),
+  eq(schema.people.adultChild, 'adult'),
+  eq(schema.people.includeInDirectory, true),
+  eq(schema.people.smsConsent, 'opted_in'),
+  isNotNull(schema.people.phoneE164),
+  ne(schema.people.phoneE164, ''),
+  // Already signed in on a device — a second link helps nobody.
+  ne(schema.people.directoryStatus, 'active'),
+  ne(schema.people.directoryStatus, 'revoked'),
+  /*
+   * And not already texted.
+   *
+   * This clause is the one that matters and the one that was missing.
+   * createInvite marks somebody 'invited' the moment a link is minted — before
+   * the text is sent, and whether or not it works — so status alone left
+   * anyone who had been texted but had not yet OPENED their link sitting in
+   * the queue, to be texted again on the next batch. Five people got a
+   * duplicate on 2026-09-01 that way.
+   *
+   * Keyed on the invite's sent_at rather than the person's status, so a send
+   * that FAILED (sent_at still null) is correctly retried while a send that
+   * worked is not repeated.
+   */
+  sql`NOT EXISTS (
+    SELECT 1 FROM directory_invites i
+    WHERE i.person_id = people.id AND i.sent_at IS NOT NULL
+      AND i.expires_at > ${Date.now()}
+  )`,
+);
+
+let sent = 0, failed = 0, ran = false;
+let templateError: string | null = null;
+let templateSaved = false;
+const failures: string[] = [];
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? 'send');
+
+  if (act === 'save-message') {
+    // Saving wording sends nothing. Kept a separate action so a mis-click on
+    // the editor can never turn into sixty-two text messages.
+    templateError = await setInviteTemplate(env, String(form.get('template') ?? ''), user.email);
+    templateSaved = !templateError;
+  }
+
+  /*
+   * How many one press sends.
+   *
+   * The button says "everyone", and for any realistic number it is everyone.
+   * The cap exists only because a Worker on the free plan may make 50 outbound
+   * requests per incoming request, and each text is one — so a run larger than
+   * that would die partway through and leave nobody sure who had received one.
+   * 45 leaves headroom. If anyone is left over the page says so plainly and
+   * asks for another press, rather than quietly stopping.
+   */
+  const PER_RUN = 45;
+
+  if (act === 'send' && smsConfigured(env)) {
+    // Read once, outside the loop, so every person in a batch is sent exactly
+    // the same wording even if someone saves an edit mid-send.
+    const template = await getInviteTemplate(env);
+    // Re-queried HERE rather than trusted from the page that drew the button:
+    // the form can be replayed, and somebody may have been archived or
+    // un-listed since it was rendered.
+    const batch = await db.select({
+      id: schema.people.id, firstName: schema.people.firstName,
+      lastName: schema.people.lastName, phoneE164: schema.people.phoneE164,
+    }).from(schema.people).where(ELIGIBLE)
+      .orderBy(asc(schema.people.lastName), asc(schema.people.firstName))
+      .limit(PER_RUN);
+
+    for (const p of batch) {
+      const token = await createInvite(env, p.id, user.email);
+      const body = renderInvite(template, Astro.url.origin, token);
+      const result = await sendOne(env, p.phoneE164!, body);
+      await db.insert(schema.messageLog).values({
+        personId: p.id, phoneE164: p.phoneE164!, body,
+        direction: 'out', twilioSid: result.sid ?? null,
+        status: result.ok ? (result.status ?? 'queued') : 'failed',
+        errorCode: result.errorCode ?? null,
+        segments: countSegments(body).segments, createdAt: nowIso(),
+      });
+      if (result.ok) {
+        sent++;
+        // Stamped only on success, and only after Twilio has accepted it, so
+        // a failure leaves the person in the queue for the next batch.
+        await db.update(schema.directoryInvites)
+          .set({ sentAt: nowIso() })
+          .where(and(eq(schema.directoryInvites.personId, p.id),
+                     eq(schema.directoryInvites.token, token)));
+      } else {
+        failed++;
+        // Named, not counted. "3 failed" is not actionable; a name is.
+        failures.push(`${p.firstName} ${p.lastName}${result.errorCode ? ` (${result.errorCode})` : ''}`);
+      }
+    }
+    ran = true;
+  }
+}
+
+const waiting = await db.select({
+  id: schema.people.id, firstName: schema.people.firstName,
+  lastName: schema.people.lastName, phone: schema.people.phone,
+}).from(schema.people).where(ELIGIBLE)
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+
+const LISTED = and(
+  eq(schema.people.archived, false),
+  eq(schema.people.adultChild, 'adult'),
+  eq(schema.people.includeInDirectory, true),
+);
+const count = async (extra: ReturnType<typeof and>) =>
+  (await db.select({ c: sql<number>`count(*)` }).from(schema.people)
+    .where(and(LISTED, extra)))[0]?.c ?? 0;
+
+const listed   = await count(undefined);
+const active   = await count(eq(schema.people.directoryStatus, 'active'));
+const noPhone  = await count(sql`(phone_e164 IS NULL OR phone_e164 = '')`);
+const optedOut = await count(ne(schema.people.smsConsent, 'opted_in'));
+const awaitingOpen = await count(sql`EXISTS (
+  SELECT 1 FROM directory_invites i
+  WHERE i.person_id = people.id AND i.sent_at IS NOT NULL AND i.used_at IS NULL
+    AND i.expires_at > ${Date.now()}
+)`);
+
+const template = await getInviteTemplate(env);
+// A realistic link length, so the segment count and cost are honest rather
+// than optimistic — the real token is 24 characters.
+const sample = renderInvite(template, Astro.url.origin, 'xxxxxxxxxxxxxxxxxxxxxxxx');
+const seg = countSegments(sample);
+const isDefault = template === DEFAULT_INVITE_MESSAGE;
+---
+<AppLayout title="Send directory invitations" user={user}>
+  <h1>Send directory invitations</h1>
+  <p class="muted" style="margin-top:-6px;">
+    Each person gets their own private link. It keeps working for 30 days,
+    however many times they open it.
+  </p>
+
+  {!smsConfigured(env) && (
+    <p class="notice notice--bad">Texting is not connected, so nothing can be sent.</p>
+  )}
+
+  {ran && sent > 0 && (
+    <p class="notice notice--ok">
+      Sent {sent} invitation{sent === 1 ? '' : 's'}.
+      {waiting.length === 0
+        ? <> That is everyone who can be texted.</>
+        : <> <strong>{waiting.length} still to go</strong> — press the button again to
+             send the rest. (One press can carry 45 texts; anything above that
+             needs a second.)</>}
+    </p>
+  )}
+  {ran && failed > 0 && (
+    <p class="notice notice--bad">
+      {failed} did not send: {failures.join(', ')}. They stay in the list below and
+      will be tried again in the next batch.
+    </p>
+  )}
+  {ran && sent === 0 && failed === 0 && (
+    <p class="notice">Nobody was eligible, so nothing was sent.</p>
+  )}
+
+  <div class="card" style="max-width:720px;">
+    <h2 style="margin-top:0;">Who this reaches</h2>
+    <dl class="tally">
+      <div><dt>Listed in the directory</dt><dd>{listed}</dd></div>
+      <div><dt>Already signed in</dt><dd>{active}</dd></div>
+      <div><dt>Texted, not opened yet</dt><dd>{awaitingOpen}</dd></div>
+      <div><dt>No number we can text</dt><dd>{noPhone}</dd></div>
+      <div><dt>Opted out of texts</dt><dd>{optedOut}</dd></div>
+      <div class="tally__k"><dt>Waiting for an invitation</dt><dd>{waiting.length}</dd></div>
+    </dl>
+    <p class="muted" style="font-size:14px; margin-bottom:0;">
+      Anyone with no number, or who has opted out of texts, is never sent one —
+      they need their link handed over another way. <strong>Nobody is texted twice
+      by this page:</strong> a person drops off the list as soon as a text
+      reaches them, not when they open it. If a send fails they stay on, and are
+      tried again next batch. To deliberately re-send to one person, use the
+      button on their own page.
+    </p>
+  </div>
+
+  {waiting.length > 0 && smsConfigured(env) && (
+    <>
+      <div class="card" style="max-width:720px;">
+        <h2 style="margin-top:0;">Edit the message</h2>
+        <p class="muted" style="margin:-6px 0 14px;">
+          This is the text each person receives. Change it here and press Save —
+          saving never sends anything.
+        </p>
+
+        {templateSaved && <p class="notice notice--ok">Message saved. Nothing was sent.</p>}
+        {templateError && <p class="notice notice--bad">{templateError}</p>}
+
+        <form method="POST">
+          <input type="hidden" name="action" value="save-message" />
+          <label class="field">
+            <span>Message text</span>
+            <textarea id="tpl" name="template" rows="4">{template}</textarea>
+          </label>
+          <p class="muted" style="font-size:14px; margin:-6px 0 12px;">
+            <code>{INVITE_LINK_TOKEN}</code> is where each person's own private link
+            goes. It has to be in there — without it they get a text about a
+            directory and no way into it.
+          </p>
+
+          <p class="label" style="margin:14px 0 6px; color:var(--ink-soft);">How it will arrive</p>
+          <p class="sms-preview" id="preview">{sample}</p>
+          <p class="muted" id="meter" style="font-size:14px;">
+            {seg.segments} message{seg.segments === 1 ? '' : 's'} each ·
+            about ${(waiting.length * seg.segments * 0.0109).toFixed(2)} to send to all {waiting.length}
+          </p>
+
+          <div class="batch">
+            <button class="btn btn--ghost" type="submit">Save message</button>
+            {!isDefault && (
+              <button class="btn btn--ghost" type="submit" name="template"
+                      value={DEFAULT_INVITE_MESSAGE}
+                      onclick="return confirm('Put the message back to the original wording?')">
+                Reset to the original
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+
+      <div class="card" style="max-width:720px;">
+        <h2 style="margin-top:0;">Send a batch</h2>
+        <p class="muted" style="margin-top:-6px;">
+          Everyone listed below gets their personal link. Nobody who has already
+          been texted is included, so pressing this twice is safe — but the texts
+          themselves cannot be unsent.
+        </p>
+        <div class="batch">
+          <form method="POST"
+                onsubmit={`return confirm('Text all ${waiting.length} remaining people their directory link? This cannot be undone.')`}>
+            <input type="hidden" name="action" value="send" />
+            <button class="btn" type="submit">
+              Send to all {waiting.length} remaining
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card" style="max-width:720px;">
+        <h2 style="margin-top:0;">Who will receive one</h2>
+        <ol class="queue">
+          {waiting.map((p) => (
+            <li><span>{p.firstName} {p.lastName}</span><span class="muted">{p.phone}</span></li>
+          ))}
+        </ol>
+      </div>
+    </>
+  )}
+
+  {waiting.length === 0 && (
+    <p class="notice notice--ok">
+      Everyone who can be texted has been invited. The {noPhone} without a number
+      still need their link handed over in person.
+    </p>
+  )}
+</AppLayout>
+
+<style>
+  .tally { margin: 0 0 16px; display: grid; gap: 2px; }
+  .tally div { display: flex; justify-content: space-between; gap: 16px;
+               padding: 9px 0; border-bottom: 1px solid var(--hair); }
+  .tally dt { margin: 0; color: var(--ink-soft); }
+  .tally dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tally__k dt { color: var(--ink); font-weight: 700; }
+  .tally__k dd { font-size: 19px; }
+  .sms-preview { background: var(--cream-deep); border-radius: var(--radius);
+                 padding: 14px 16px; font-size: 15px; line-height: 1.6; margin: 0 0 12px; }
+  .batch { display: flex; gap: 12px; flex-wrap: wrap; }
+  .batch form { margin: 0; }
+  .queue { margin: 0; padding-left: 22px; }
+  .queue li { padding: 6px 0; display: flex; justify-content: space-between;
+              gap: 16px; border-bottom: 1px solid var(--hair); }
+  .queue li:last-child { border-bottom: 0; }
+  #tpl { width: 100%; font: inherit; font-size: 16px; line-height: 1.55; padding: 10px 12px;
+         border: 1px solid var(--hair); border-radius: var(--radius); background: #fff;
+         resize: vertical; }
+  .warn { color: var(--red-deep); font-weight: 700; }
+  code { background: var(--cream-deep); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+</style>
+
+<script is:inline define:vars={{ linkToken: INVITE_LINK_TOKEN, sampleLink: `${Astro.url.origin}/directory/join/xxxxxxxxxxxxxxxxxxxxxxxx`, people: waiting.length }}>
+  // Live preview and segment count. The point is that the cost of a reword is
+  // visible BEFORE saving: one curly apostrophe drops the per-segment budget
+  // from 160 characters to 70 and can silently double the bill.
+  const GSM = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+            + "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+  const EXT = "^{}\\[~]|€";
+  const tpl = document.getElementById('tpl');
+  const preview = document.getElementById('preview');
+  const meter = document.getElementById('meter');
+
+  function measure(body) {
+    let units = 0, unicode = false;
+    for (const ch of [...body]) {
+      if (GSM.includes(ch)) units += 1;
+      else if (EXT.includes(ch)) units += 2;
+      else { unicode = true; break; }
+    }
+    if (unicode) {
+      const u = [...body].reduce((n, c) => n + (c.codePointAt(0) > 0xffff ? 2 : 1), 0);
+      return { segments: u <= 70 ? 1 : Math.ceil(u / 67), unicode: true };
+    }
+    return { segments: units <= 160 ? 1 : Math.ceil(units / 153), unicode: false };
+  }
+
+  function update() {
+    const body = tpl.value.split(linkToken).join(sampleLink);
+    preview.textContent = body;
+    const missing = !tpl.value.includes(linkToken);
+    const { segments, unicode } = measure(body);
+    const cost = (people * segments * 0.0109).toFixed(2);
+    meter.innerHTML = missing
+      ? '<span class="warn">This message has no ' + linkToken + ' in it, so nobody could get in. It will not save.</span>'
+      : segments + ' message' + (segments === 1 ? '' : 's') + ' each · about $' + cost
+        + ' to send to all ' + people
+        + (unicode ? ' · <span class="warn">a special character (probably a curly quote or dash) cut the limit from 160 to 70</span>' : '');
+  }
+  tpl.addEventListener('input', update);
+  update();
+</script>

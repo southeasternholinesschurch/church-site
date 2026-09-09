@@ -1,0 +1,37 @@
+---
+/**
+ * The head tags that make the directory installable — and nothing else.
+ *
+ * Kept OUT of AppLayout on purpose. The staff app shares that layout, and a
+ * manifest link there would have Chrome offering volunteers an install prompt
+ * for the dashboard: a second icon nobody asked for, pointing at a tool most
+ * of them open twice a year. The directory's pages each carry their own
+ * <html>, so this component is how the three of them stay in step.
+ */
+---
+<link rel="manifest" href="/directory.webmanifest" />
+<meta name="theme-color" content="#1a1512" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+{/* mobile-web-app-capable is the standard spelling; Safari still reads only
+    the apple- one. Both, until it catches up. */}
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+{/* The name printed under the icon. Without it iOS falls back to <title>,
+    which here is "Church Directory · [Your Church Name]" and gets cut to
+    something like "Church Dir…". */}
+<meta name="apple-mobile-web-app-title" content="Directory" />
+
+<script is:inline>
+  // Scoped to /directory, from a worker at the root: a service worker cannot
+  // claim a scope above its own path, so the file has to live at /sw.js even
+  // though it has no business anywhere but here.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js', { scope: '/directory' })
+        // Being installable is a nicety. It must never be the reason a member
+        // cannot read the directory.
+        .catch(() => {});
+    });
+  }
+</script>

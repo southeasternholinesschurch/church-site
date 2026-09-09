@@ -1,0 +1,124 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import heroImg from '../../assets/photos/hymnal.jpg';
+
+const beliefs = (await getCollection('beliefs')).sort((a, b) => a.data.order - b.data.order);
+const rendered = await Promise.all(beliefs.map((b) => b.render()));
+---
+<BaseLayout
+  title="What We Believe"
+  description="Our beliefs are rooted in the timeless truth of God's Word and shaped by a passion for holy living."
+>
+  <!-- ============ HERO ============ -->
+  <section class="bhero" data-par-frame>
+    <div class="bhero__img duo par" data-par="70" style="--drift-scale: 1.26;">
+      <Image src={heroImg} alt="" widths={[900, 1400, 2000, 2400]} sizes="140vw"
+             fetchpriority="high" loading="eager" />
+    </div>
+    <div class="bhero__grade" aria-hidden="true"></div>
+    <div class="bhero__body par-fg" data-par="-24">
+      <a href="/about" class="bhero__back load d1">← About</a>
+      <p class="label load d1 bhero__eyebrow">What We Believe</p>
+      <h1 class="serif load d2">Earnestly contend for the faith.</h1>
+      <blockquote class="bhero__verse load d3">
+        <p>“…earnestly contend for the faith which was once delivered unto the saints.”</p>
+        <cite>Jude 3</cite>
+      </blockquote>
+    </div>
+  </section>
+
+  <!-- ============ INTRO ============ -->
+  <section class="wrap intro-wrap">
+    <p class="intro reveal">
+      At [Your Church Name], our beliefs are rooted in the timeless truth of
+      God's Word and shaped by a passion for holy living. Here's a simple overview of
+      what we hold dear.
+    </p>
+  </section>
+
+  <!-- ============ ARTICLES ============ -->
+  <section class="wrap arts-wrap">
+    <div class="arts">
+      {beliefs.map((b, i) => {
+        const { Content } = rendered[i];
+        return (
+          <article class="art reveal">
+            <p class="art__n">{String(b.data.order).padStart(2, '0')}</p>
+            <div class="art__body">
+              <h2 class="serif art__t">{b.data.title}</h2>
+              <div class="art__p"><Content /></div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section class="wrap cta-wrap">
+    <div class="cta reveal">
+      <div>
+        <h2 class="serif cta__title">Questions about any of this?</h2>
+        <p class="cta__p">
+          Ask. Nobody here minds a hard question, and you don't have to agree with
+          everything to come and sit with us on a Sunday.
+        </p>
+      </div>
+      <a href="/contact" class="btn btn--solid cta__btn">Get in touch</a>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* NOTE: .bhero__img declares no transform — a scoped one would outrank .par */
+  .bhero { position: relative; overflow: clip; background: var(--ink); color: var(--cream);
+           min-height: 58vh; display: flex; flex-direction: column; }
+  .bhero__img { position: absolute; inset: 0; z-index: 0; }
+  .bhero__img :global(img) { width: 100%; height: 100%; object-fit: cover; }
+  .bhero__grade { position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg, rgba(26,21,18,.6) 0%, rgba(26,21,18,.28) 26%,
+                                        rgba(26,21,18,.7) 64%, rgba(26,21,18,.96) 100%); }
+  .bhero__body { position: relative; z-index: 3; margin-top: auto;
+                 padding: 130px var(--pad) clamp(46px,6vw,72px); }
+  .bhero__back { display: inline-block; font-size: 14px; font-weight: 700;
+                 color: rgba(244,239,231,.7); margin-bottom: 26px; }
+  .bhero__back:hover { color: var(--cream); }
+  .bhero__eyebrow { color: var(--red-tint); margin: 0 0 18px; }
+  .bhero h1 { margin: 0; font-size: clamp(38px,5.4vw,76px); line-height: 1.02; letter-spacing: -.02em; max-width: 18ch; }
+  .bhero__verse { margin: 24px 0 0; padding-left: 20px; border-left: 2px solid var(--red); max-width: 54ch; }
+  .bhero__verse p { margin: 0; font-family: var(--font-display); font-size: clamp(18px,2.2vw,24px);
+                    line-height: 1.45; color: rgba(244,239,231,.86); }
+  .bhero__verse cite { display: block; margin-top: 10px; font-style: normal; font-size: 11px;
+                       font-weight: 700; letter-spacing: .28em; text-transform: uppercase;
+                       color: var(--red-tint); font-family: var(--font-body); }
+
+  .intro-wrap { padding-block: clamp(50px,6vw,80px) 0; }
+  .intro { margin: 0; max-width: 62ch; font-size: clamp(19px,2.2vw,24px); line-height: 1.62;
+           font-family: var(--font-display); color: var(--ink); }
+
+  .arts-wrap { padding-block: clamp(46px,5vw,70px) 0; }
+  .arts { max-width: 860px; }
+  .art { display: grid; grid-template-columns: 62px minmax(0,1fr); gap: 24px;
+         padding-block: 30px; border-top: 1px solid var(--hair); }
+  .art:first-child { border-top: 0; padding-top: 0; }
+  .art__n { margin: 0; font-family: var(--font-display); font-size: 22px; color: var(--red); padding-top: 4px; }
+  .art__t { margin: 0 0 10px; font-size: clamp(24px,2.8vw,32px); line-height: 1.14; }
+  .art__p :global(p) { margin: 0; font-size: 18px; line-height: 1.8; color: var(--ink-soft); }
+
+  .cta-wrap { padding-block: clamp(70px,8vw,110px); }
+  .cta { background: var(--ink); color: var(--cream); border-radius: var(--radius-lg);
+         padding: clamp(40px,5vw,64px); display: flex; align-items: center;
+         justify-content: space-between; gap: 34px; flex-wrap: wrap; }
+  .cta__title { margin: 0 0 10px; font-size: clamp(26px,3.4vw,38px); line-height: 1.14; }
+  .cta__p { margin: 0; font-size: 16px; line-height: 1.7; color: rgba(244,239,231,.72); max-width: 50ch; }
+  .cta__btn { flex-shrink: 0; }
+
+  @media (max-width: 860px) {
+    .bhero__body { padding: 108px var(--pad) 46px; }
+    .art { grid-template-columns: 1fr; gap: 6px; }
+    .art__n { padding-top: 0; }
+    .cta__btn { width: 100%; }
+  }
+</style>

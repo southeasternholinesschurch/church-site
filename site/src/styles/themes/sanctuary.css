@@ -1,0 +1,35 @@
+/* SANCTUARY — warm, editorial, timeless.
+ *
+ * Cream paper rather than white, ink with a little warmth in it, and one
+ * deep red. Photography sits on this without looking pasted on, which pure
+ * white never quite manages. Hierarchy comes from SIZE, not weight: the
+ * display face has no bold, and that is what keeps it from shouting.
+ *
+ * Suits an established, traditional congregation. This is the direction the
+ * original build used.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;600;700&display=swap');
+
+:root {
+  --ink: #1a1512;
+  --ink-soft: #4a4038;
+  --accent: #b01818;
+  --accent-deep: #8e1313;
+  --accent-tint: #f0d5d5;      /* the accent, for DARK grounds only */
+  --paper: #f4efe7;
+  --paper-deep: #eae2d6;
+
+  --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --display-weight: 400;
+  --display-tracking: -0.01em;
+
+  --radius: 3px;
+  --radius-lg: 4px;
+
+  --kids-a: #8cb8ec;  --kids-b: #e9b6dc;
+  --youth-a: #7b6fd4; --youth-b: #2fc7d4;
+  --men-a: #30483c;   --men-b: #547860;
+  --women-a: #c77ba4; --women-b: #c77ba4;
+  --seniors-a: #b08d3e; --seniors-b: #b08d3e;
+}

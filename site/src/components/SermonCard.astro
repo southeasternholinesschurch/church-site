@@ -1,0 +1,90 @@
+---
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  sermon: CollectionEntry<'sermons'>;
+  /** The most recent service gets a larger, split treatment. */
+  featured?: boolean;
+}
+const { sermon, featured = false } = Astro.props;
+const { title, series, speaker, date, scripture, youtubeId, service, serviceType } = sermon.data;
+
+const dateLabel = date.toLocaleDateString('en-US', {
+  weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  // the frontmatter date is date-only and coerces to UTC midnight; without
+  // pinning the zone it renders a day early for anyone west of UTC
+  timeZone: 'UTC',
+});
+
+// Imported entries have no sermon title — the service label is the heading.
+// If someone adds a title in the CMS it takes over, and the service label
+// drops back to being the kicker.
+const heading = title?.trim() || service;
+// …and then there is nothing left for the kicker to say. Labelling
+// "Sunday Morning Worship" with "Sunday Morning" above it is the same words
+// twice, which is most of the archive: the imported entries carry no title
+// until someone adds one. So the kicker is dropped rather than repeated.
+const kicker = series?.trim() || (title?.trim() ? service : null);
+
+const thumb = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
+---
+<article class:list={['card', featured && 'card--featured', 'reveal']}>
+  <a href={`/sermons/${sermon.slug}`} class="card__link">
+    <div class="duo card__thumb">
+      <img src={thumb} alt="" loading="lazy" width="480" height="360" />
+      <div class="card__veil"></div>
+      <span class="card__play" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M8 5l11 7-11 7z"></path></svg>
+      </span>
+    </div>
+    <div class="card__body">
+      {kicker && <span class="label card__kicker">{kicker}</span>}
+      <h3 class="serif card__title">{heading}</h3>
+      <p class="card__meta">{speaker ? `${speaker} · ${dateLabel}` : dateLabel}</p>
+      {scripture && <p class="card__scripture">{scripture}</p>}
+      {featured && <span class="btn btn--ink card__cta">Watch</span>}
+    </div>
+  </a>
+</article>
+
+<style>
+  .card__link { display: block; color: inherit; }
+  .card__thumb { aspect-ratio: 16/9; border-radius: var(--radius); }
+  .card__thumb :global(img) { width: 100%; height: 100%; object-fit: cover; }
+  /* sits above the duotone layers so it isn't blended away */
+  .card__veil { position: absolute; inset: 0; z-index: 2;
+                background: linear-gradient(180deg, transparent 45%, rgba(26,21,18,.55) 100%); }
+  .card__play {
+    position: absolute; z-index: 3; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 52px; height: 52px; border-radius: 999px; border: 1px solid rgba(244,239,231,.7);
+    display: flex; align-items: center; justify-content: center; color: var(--cream);
+    transition: background-color .35s var(--ease), border-color .35s var(--ease);
+  }
+  .card__link:hover .card__play { background: rgba(244,239,231,.16); border-color: var(--cream); }
+
+  .card__body { padding-top: 14px; }
+  /* The kicker is optional, and most cards do without one. Its line box is
+     pinned here rather than inherited, and reserved on the heading when it is
+     absent, so headings stay on one line across a grid row instead of
+     staggering by the height of an eyebrow only some cards have. */
+  .card__kicker { color: var(--red); display: block; line-height: 18px; }
+  .card__title { margin: 8px 0 6px; font-size: 25px; line-height: 1.22; }
+  .card__body > .card__title:first-child { margin-top: 26px; } /* 18 + 8 */
+  .card__meta { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .card__scripture { margin: 5px 0 0; font-size: 14px; color: var(--red); }
+  .card__cta { margin-top: 22px; }
+
+  /* featured: side-by-side, bigger type */
+  .card--featured .card__link { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1fr);
+                                gap: 54px; align-items: center; }
+  .card--featured .card__body { padding-top: 0; }
+  .card--featured .card__title { font-size: clamp(32px,4vw,48px); line-height: 1.12; margin: 14px 0 12px; }
+  .card--featured .card__meta { font-size: 16px; }
+  .card--featured .card__scripture { font-size: 16px; }
+  .card--featured .card__play { width: 62px; height: 62px; }
+
+  @media (max-width: 860px) {
+    .card--featured .card__link { grid-template-columns: 1fr; gap: 22px; }
+    .card__title { font-size: 22px; }
+  }
+</style>

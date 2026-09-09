@@ -1,0 +1,276 @@
+---
+import KidsLayout from '../../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../../db';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { readForm } from '../../../lib/form';
+import { toE164 } from '../../../lib/sms';
+import { churchToday } from '../../../lib/services';
+import { ageOn } from '../../../lib/kids';
+
+/**
+ * Adding a child.
+ *
+ * Any [Kids Ministry] volunteer, not just the director (the pastor, 2026-09-08). A bus worker
+ * meets a child on the route on a Sunday morning; if adding them needs somebody
+ * with more rights, the child simply goes unrecorded.
+ *
+ * This is the ONLY way a bus-ministry child enters the system — their family is
+ * not in the church's records and never will be — so it creates the `people`
+ * row, the [Kids Ministry] profile, and their first grown-up in one go. An intake form
+ * that needs three visits gets filled in once.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+const classRows = await db.select().from(schema.kidClasses)
+  .where(eq(schema.kidClasses.active, true)).orderBy(asc(schema.kidClasses.sort));
+const routeRows = await db.select().from(schema.kidRoutes)
+  .where(eq(schema.kidRoutes.active, true)).orderBy(asc(schema.kidRoutes.name));
+
+let error: string | null = null;
+/** What they typed, so a rejected form comes back filled in rather than blank. */
+let v: Record<string, string> = {};
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const get = (k: string) => String(form.get(k) ?? '').trim();
+  const orNull = (k: string) => get(k) || null;
+  v = Object.fromEntries([...form.entries()]
+    .filter(([, val]) => typeof val === 'string')) as Record<string, string>;
+
+  const firstName = get('firstName');
+  const lastName = get('lastName');
+  const birthday = get('birthday');
+
+  if (!firstName || !lastName) {
+    error = 'A first and last name are both needed.';
+  } else if (birthday && !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) {
+    error = 'The date of birth should look like 2019-07-04.';
+  } else if (birthday && ageOn(birthday, churchToday()) === null) {
+    // Catches a year typed as 2109, or a birthday in the future — both of which
+    // would otherwise sit in the record producing a nonsense age forever.
+    error = 'That date of birth does not look right.';
+  } else {
+    const at = nowIso();
+    const [created] = await db.insert(schema.people).values({
+      firstName, lastName,
+      adultChild: 'child',
+      birthday: birthday || null,
+      addressStreet: orNull('addressStreet'), addressCity: orNull('addressCity'),
+      addressState: orNull('addressState'), addressZip: orNull('addressZip'),
+      /*
+       * NEVER in the directory. This is a standing rule of the whole app, not a
+       * default somebody may flip: the member directory is adults who have
+       * consented, and a child appearing in it is the exact failure the design
+       * guards against. Set explicitly here rather than left to the column
+       * default, so that reading this code answers the question.
+       */
+      includeInDirectory: false,
+      directoryStatus: 'none',
+      // A CHILD's own consent is meaningless — they have no phone here, and
+      // anything sent about them goes to a guardian.
+      smsConsent: 'unknown',
+      archived: false,
+      createdAt: at, updatedAt: at,
+    }).returning({ id: schema.people.id });
+
+    const personId = created!.id;
+
+    /*
+     * The profile, then the guardian. Not one transaction: D1 has no
+     * transaction here, and the failure modes are both recoverable and visible
+     * — a person with no profile shows up under "Not in [Kids Ministry]" on the children
+     * list, and a child with no grown-up is obvious on their own page. Neither
+     * is silent, which is what would make a transaction worth reaching for.
+     */
+    await db.insert(schema.kidProfiles).values({
+      personId,
+      classId: Number(get('classId')) || null,
+      routeId: Number(get('routeId')) || null,
+      allergies: orNull('allergies'),
+      medicalNotes: orNull('medicalNotes'),
+      createdAt: at, updatedAt: at,
+    });
+
+    const gName = get('guardianName');
+    if (gName) {
+      const gPhone = orNull('guardianPhone');
+      await db.insert(schema.kidGuardians).values({
+        personId, name: gName,
+        relationship: orNull('guardianRelationship'),
+        phone: gPhone, phoneE164: toE164(gPhone),
+        email: orNull('guardianEmail'),
+        isPrimary: true,
+        /*
+         * 'unknown' unless somebody ticked the box to say the family actually
+         * agreed. Consent is a thing a family gives; a form must never assume
+         * it, and an intake form assuming it is how a church ends up texting
+         * people who never said yes.
+         */
+        ...(get('guardianConsent') === '1'
+          ? { smsConsent: 'opted_in' as const, smsConsentSource: 'verbal-at-intake', smsConsentAt: at }
+          : { smsConsent: 'unknown' as const }),
+        createdAt: at, updatedAt: at,
+      });
+    }
+
+    return Astro.redirect(`/kids/child/${personId}?saved=created`, 303);
+  }
+}
+
+/*
+ * Anybody already on file with this name.
+ *
+ * Not a block — two children really can be called James Boone, and refusing
+ * would send a volunteer away with nothing recorded. A warning with a link is
+ * the right shape: ten people add children from their own phones, and the
+ * duplicate that matters is the one nobody noticed.
+ */
+const typedFirst = (v.firstName ?? '').trim();
+const typedLast = (v.lastName ?? '').trim();
+const possibleDuplicates = typedFirst && typedLast
+  ? await db.select({ id: schema.people.id, firstName: schema.people.firstName,
+                      lastName: schema.people.lastName, birthday: schema.people.birthday })
+      .from(schema.people)
+      .where(and(
+        eq(schema.people.archived, false),
+        sql`lower(first_name) = ${typedFirst.toLowerCase()}`,
+        sql`lower(last_name) = ${typedLast.toLowerCase()}`,
+      )).limit(4)
+  : [];
+---
+<KidsLayout title="Add a child" user={user}>
+  <p style="margin:0 0 6px;"><a href="/kids/children" style="font-size:15px;">← All children</a></p>
+  <h1>Add a child</h1>
+  <p class="k-muted" style="margin:-4px 0 22px;">
+    For a child who is not in the church’s records — a bus-ministry child, or a visitor who keeps coming.
+  </p>
+
+  {error && (
+    <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;">
+      <strong>{error}</strong>
+    </div>
+  )}
+
+  {possibleDuplicates.length > 0 && (
+    <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:18px;">
+      <strong>Somebody with that name is already on file.</strong>
+      <ul style="margin:8px 0 0; padding-left:20px;">
+        {possibleDuplicates.map((d) => (
+          <li><a href={`/kids/child/${d.id}`}>{d.firstName} {d.lastName}</a>
+            {d.birthday && <span class="k-muted"> · born {d.birthday}</span>}</li>
+        ))}
+      </ul>
+      <p class="k-muted" style="margin:8px 0 0; font-size:14px;">
+        Check it is not the same child before adding another.
+      </p>
+    </div>
+  )}
+
+  <form method="POST">
+    <div class="k-card" style="margin-bottom:16px;">
+      <h2 style="margin-top:0;">The child</h2>
+      <div class="k-grid">
+        <label class="k-field"><span>First name</span>
+          <input name="firstName" value={v.firstName ?? ''} required autocomplete="off" /></label>
+        <label class="k-field"><span>Last name</span>
+          <input name="lastName" value={v.lastName ?? ''} required autocomplete="off" /></label>
+        <label class="k-field"><span>Date of birth</span>
+          <input type="date" name="birthday" value={v.birthday ?? ''} /></label>
+      </div>
+      <p class="k-muted" style="margin:-4px 0 0; font-size:14px;">
+        A date of birth is optional — most bus-ministry children arrive without one.
+        It only decides which class we suggest.
+      </p>
+    </div>
+
+    <div class="k-card" style="margin-bottom:16px;">
+      <h2 style="margin-top:0;">In [Kids Ministry]</h2>
+      <div class="k-grid">
+        <label class="k-field"><span>Class</span>
+          <select name="classId">
+            <option value="">— choose later —</option>
+            {classRows.map((c) => (
+              <option value={c.id} selected={v.classId === String(c.id)}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+        <label class="k-field"><span>Bus route</span>
+          <select name="routeId">
+            <option value="">— no route —</option>
+            {routeRows.map((r) => (
+              <option value={r.id} selected={v.routeId === String(r.id)}>{r.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label class="k-field"><span>Allergies</span>
+        <input name="allergies" value={v.allergies ?? ''}
+               placeholder="Peanuts — EpiPen in the office" autocomplete="off" /></label>
+      <label class="k-field" style="margin-bottom:0;"><span>Medical notes</span>
+        <textarea name="medicalNotes" rows="2">{v.medicalNotes ?? ''}</textarea></label>
+    </div>
+
+    <div class="k-card" style="margin-bottom:16px;">
+      <h2 style="margin-top:0;">Where they live</h2>
+      <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
+        Only needed for a child on a bus route — it is how the driver finds them.
+      </p>
+      <label class="k-field"><span>Street</span>
+        <input name="addressStreet" value={v.addressStreet ?? ''} autocomplete="off" /></label>
+      <div class="k-grid">
+        <label class="k-field"><span>City</span>
+          <input name="addressCity" value={v.addressCity ?? ''} autocomplete="off" /></label>
+        <label class="k-field"><span>State</span>
+          <input name="addressState" value={v.addressState ?? 'IN'} maxlength="2" autocomplete="off" /></label>
+        <label class="k-field"><span>ZIP</span>
+          <input name="addressZip" value={v.addressZip ?? ''} autocomplete="off" /></label>
+      </div>
+    </div>
+
+    <div class="k-card" style="margin-bottom:18px;">
+      <h2 style="margin-top:0;">A grown-up</h2>
+      <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
+        Whoever we ring about this child. You can add more later.
+      </p>
+      <div class="k-grid">
+        <label class="k-field"><span>Name</span>
+          <input name="guardianName" value={v.guardianName ?? ''} autocomplete="off" /></label>
+        <label class="k-field"><span>Relationship</span>
+          <input name="guardianRelationship" value={v.guardianRelationship ?? ''}
+                 placeholder="mother" autocomplete="off" /></label>
+        <label class="k-field"><span>Phone</span>
+          <input name="guardianPhone" value={v.guardianPhone ?? ''}
+                 placeholder="(317) 555-0142" autocomplete="off" /></label>
+        <label class="k-field"><span>Email</span>
+          <input type="email" name="guardianEmail" value={v.guardianEmail ?? ''} autocomplete="off" /></label>
+      </div>
+      {/* Unticked by default and it must stay that way. A pre-ticked consent
+          box is not consent, and this is the form that decides whether the
+          church may text a family who never joined it. */}
+      <label style="display:flex; gap:10px; align-items:flex-start; font-size:15px;">
+        <input type="checkbox" name="guardianConsent" value="1" style="margin-top:4px;" />
+        <span>They have said we may text them about [Kids Ministry] —
+          pickup times, delays and cancellations.</span>
+      </label>
+    </div>
+
+    <button class="k-btn" type="submit">Add this child</button>
+    <a href="/kids/children" class="k-btn k-btn--quiet" style="margin-left:10px; text-decoration:none;">Cancel</a>
+  </form>
+</KidsLayout>
+
+<style>
+  .k-grid { display:grid; gap:0 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .k-field { display:block; margin-bottom:14px; }
+  .k-field > span { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--k-ink-soft); margin-bottom:5px; }
+  .k-field input, .k-field select, .k-field textarea {
+    width:100%; padding:10px 12px; font:inherit; font-size:16px; color:var(--k-ink);
+    border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:11px 20px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer;
+           display:inline-block; }
+  .k-btn--quiet { background:transparent; color:var(--k-text);
+                  border:1px solid var(--k-line); font-weight:600; }
+</style>

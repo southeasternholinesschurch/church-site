@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+site/.astro/
+
+# Cloudflare Workers
+.wrangler/
+
+# env / secrets — never commit real keys
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.log
+
+# Local dev-preview tooling config (machine-specific paths)
+.claude/
+
+# Raw photo dump (~1GB of originals) — working set lives in design/photos/
+photos-for-design/
+
+# Generated review sheet — rebuild with design/review-photos.py
+design/photo-placement.jpg
+
+# Design build outputs (regenerate with design/build.py)
+design/*.dc.html
+design/*.html
+design/preview/
+design/people-at-front.jpg

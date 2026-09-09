@@ -1,0 +1,285 @@
+---
+import DirectoryHead from '../../components/DirectoryHead.astro';
+
+/**
+ * "Put the directory on your phone" — where the printed QR code lands.
+ *
+ * PUBLIC, and holds no member data. Somebody scanning a card off the pew rack
+ * has not signed in yet and may never; this page has to be useful to them and
+ * give nothing away. The only member-specific thing it will ever show is the
+ * reader's OWN invite link, and only to a reader already holding that person's
+ * session.
+ *
+ * A note on iPhone, because it drove an earlier and much worse version of this
+ * page. Home-screen web apps used to get their own cookie jar, separate from
+ * Safari, which would have meant a member's sign-in did NOT survive installing
+ * the icon. the pastor checked it on his own phone on 2026-09-01: signed in through
+ * Safari, added the icon, opened it, still signed in. So there is nothing to
+ * work around, and the instructions below are just the two taps.
+ */
+const installUrl = new URL('/directory/install', Astro.url.origin).href;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Add the Directory · [Your Church Name]</title>
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="/favicon-48.png" />
+    <DirectoryHead />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+
+      /* The directory's tokens, matched to /directory rather than re-picked. */
+      :root { --ink:#1a1512; --ink-soft:#4a4038; --red:#b01818; --red-deep:#8e1313;
+              --cream:#f4efe7; --cream-deep:#eae2d6; --hair:rgba(26,21,18,.16);
+              --radius:3px;
+              --font-body:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+              --font-display:'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--cream-deep); color:var(--ink); line-height:1.55;
+             font-family:var(--font-body); }
+      .wrap { max-width:560px; margin-inline:auto; padding:40px clamp(20px,5vw,32px) 90px; }
+
+      .head { display:flex; gap:18px; align-items:center; margin-bottom:26px; }
+      /* The icon they are about to end up with, at the size they will see it.
+         "Look for this" beats any amount of describing it. */
+      .head img { width:76px; height:76px; border-radius:22.5%; flex:none;
+                  box-shadow:0 2px 10px rgba(26,21,18,.18); }
+      .eyebrow { font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+                 color:var(--ink-soft); margin:0 0 6px; }
+      h1 { font-family:var(--font-display); font-weight:400; letter-spacing:-.01em;
+           font-size:clamp(30px,6vw,42px); line-height:1.05; margin:0; }
+      .lede { color:var(--ink-soft); font-size:17px; margin:0 0 30px; }
+
+      .card { background:var(--cream); border:1px solid var(--hair); border-radius:var(--radius);
+              padding:24px clamp(18px,4vw,26px); }
+      .card + .card { margin-top:16px; }
+      h2 { font-family:var(--font-display); font-weight:400; font-size:23px; line-height:1.2;
+           margin:0 0 14px; }
+
+      /* Numbered, because these are steps done in order and getting them out
+         of order is the whole failure mode on iPhone. */
+      ol { margin:0; padding:0; list-style:none; counter-reset:step; }
+      ol li { counter-increment:step; position:relative; padding:0 0 20px 46px; }
+      ol li:last-child { padding-bottom:0; }
+      ol li::before { content:counter(step); position:absolute; left:0; top:-1px;
+                      width:30px; height:30px; border-radius:999px; background:var(--ink);
+                      color:var(--cream); font-size:14px; font-weight:700;
+                      display:flex; align-items:center; justify-content:center; }
+      ol li b { font-weight:700; }
+      ol li p { margin:6px 0 0; color:var(--ink-soft); font-size:15px; }
+
+      .glyph { display:inline-flex; align-items:center; justify-content:center;
+               width:26px; height:26px; vertical-align:-7px; margin:0 2px;
+               border:1px solid var(--hair); border-radius:5px; background:var(--cream-deep);
+               color:var(--ink); }
+
+      .btn { display:inline-block; padding:14px 26px; background:var(--ink); color:var(--cream);
+             border:0; border-radius:var(--radius); font:inherit; font-size:15px;
+             font-weight:700; text-decoration:none; cursor:pointer; }
+      .btn:hover { background:#000; }
+      .btn--wide { display:block; width:100%; text-align:center; }
+
+      .url { display:block; width:100%; font:inherit; font-size:14px; padding:12px 14px;
+             margin:12px 0; background:var(--cream-deep); border:1px solid var(--hair);
+             border-radius:var(--radius); color:var(--ink); word-break:break-all; }
+
+      .note { margin:16px 0 0; padding-top:16px; border-top:1px solid var(--hair);
+              color:var(--ink-soft); font-size:14px; line-height:1.7; }
+      .warn { border-left:3px solid var(--red); padding-left:16px; }
+      .foot { margin-top:30px; font-size:15px; }
+      .foot a { color:var(--ink-soft); }
+      .foot a:hover { color:var(--red-deep); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="head">
+        <img src="/icons/icon-192.png" width="76" height="76" alt="" />
+        <div>
+          <p class="eyebrow">Member Directory</p>
+          <h1>Keep it on your phone</h1>
+        </div>
+      </div>
+      <p class="lede">
+        Add the directory to your home screen and it opens like any other app —
+        one tap, no link to hunt for in your messages.
+      </p>
+
+      {/* One of these five is revealed by the script at the foot of the page.
+          All are hidden to start with: a page that flashes iPhone instructions
+          at an Android user before correcting itself reads as broken. */}
+
+      <section class="card" id="s-installed" hidden>
+        <h2>It's already on this phone</h2>
+        <p style="margin:0; color:var(--ink-soft);">
+          You're looking at the installed app right now. Nothing else to do.
+        </p>
+        <p class="note">
+          If it ever does ask you to sign in, open the link we texted you and it
+          will pick straight back up.
+        </p>
+        <p style="margin-top:18px;"><a class="btn" href="/directory">Open the directory</a></p>
+      </section>
+
+      <section class="card" id="s-inapp" hidden>
+        <h2 class="warn" style="border:0; padding:0;">Open this in your browser first</h2>
+        <div class="warn">
+          <p style="margin:0 0 12px; color:var(--ink-soft);">
+            You've opened this inside another app's browser — Facebook's, or
+            Instagram's. Those can't add anything to a home screen.
+          </p>
+          <p style="margin:0; color:var(--ink-soft);">
+            Tap the <b>&hellip;</b> or <b>&#8942;</b> menu in the corner and choose
+            <b>Open in Safari</b> or <b>Open in Chrome</b>, then come back here.
+          </p>
+        </div>
+        <p class="url" id="inapp-url">{installUrl}</p>
+        <button class="btn" type="button" data-copy="inapp-url">Copy this address</button>
+      </section>
+
+      <section class="card" id="s-ios" hidden>
+        <h2>Two steps on iPhone</h2>
+        <ol>
+          <li>
+            <b>Tap the Share button</b>
+            <span class="glyph" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 15V3" /><path d="M8.5 6.5 12 3l3.5 3.5" />
+                <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
+              </svg>
+            </span>
+            <p>
+              It's in the bar at the <b>bottom</b> of the screen — a square with
+              an arrow pointing up out of it.
+            </p>
+          </li>
+          <li>
+            <b>Choose "Add to Home Screen", then Add.</b>
+            <p>You may have to scroll down the grey list to find it.</p>
+          </li>
+        </ol>
+        <p class="note">
+          You stay signed in. The icon opens straight into the directory — no
+          link to find, nothing to type.
+        </p>
+      </section>
+
+      <section class="card" id="s-android" hidden>
+        <h2>Add it to your home screen</h2>
+        <p style="margin:0 0 18px; color:var(--ink-soft);">
+          Android keeps you signed in when it installs, so this is the only step.
+        </p>
+        <button class="btn btn--wide" id="install" type="button" hidden>Add to Home Screen</button>
+        <div id="android-manual">
+          <p style="margin:0; color:var(--ink-soft);">
+            Tap the <b>&#8942;</b> menu at the top right of Chrome and choose
+            <b>Add to Home screen</b> — or <b>Install app</b>, depending on your
+            version.
+          </p>
+        </div>
+        <p class="note" id="android-done" hidden>
+          Added. Look for the Directory icon on your home screen.
+        </p>
+      </section>
+
+      <section class="card" id="s-desktop" hidden>
+        <h2>This one's for your phone</h2>
+        <p style="margin:0 0 12px; color:var(--ink-soft);">
+          The directory works perfectly well here in a browser — the home screen
+          icon only means anything on a phone or tablet.
+        </p>
+        <p style="margin:0; color:var(--ink-soft);">
+          Point your phone's camera at the QR code on the card, or open this
+          address on it:
+        </p>
+        <p class="url" id="desk-url">{installUrl}</p>
+        <button class="btn" type="button" data-copy="desk-url">Copy address</button>
+      </section>
+
+      <p class="foot"><a href="/directory">Skip this — just open the directory</a></p>
+    </div>
+
+    <script is:inline>
+      (function () {
+        var ua = navigator.userAgent || '';
+
+        // Already installed? Then every instruction below is noise.
+        var standalone = window.matchMedia('(display-mode: standalone)').matches
+                      || window.navigator.standalone === true;
+        // iPadOS reports itself as a Mac and has done for years. The touch
+        // points are what give it away.
+        var ios = /iPad|iPhone|iPod/.test(ua)
+               || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        var android = /Android/.test(ua);
+        // Facebook, Instagram and Messenger open links in their own web view,
+        // which has no Add to Home Screen at all. Saying so beats letting
+        // somebody hunt for a Share button that does not exist.
+        var inApp = /FBAN|FBAV|FB_IAB|Instagram|Messenger|Line\//.test(ua)
+                 || /Twitter|TikTok|Snapchat|Pinterest|LinkedInApp/.test(ua);
+
+        var show = function (id) { var el = document.getElementById(id); if (el) el.hidden = false; };
+        if (standalone) show('s-installed');
+        else if (inApp) show('s-inapp');
+        else if (ios) show('s-ios');
+        else if (android) show('s-android');
+        else show('s-desktop');
+
+        // Copy buttons. The clipboard API needs a gesture and a secure context,
+        // and has both here; if it still refuses, select the text so the reader
+        // can copy it by hand rather than being left with a dead button.
+        document.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-copy]');
+          if (!b) return;
+          var el = document.getElementById(b.getAttribute('data-copy'));
+          if (!el) return;
+          var done = function () { var t = b.textContent; b.textContent = 'Copied';
+                                   setTimeout(function () { b.textContent = t; }, 1800); };
+          var manual = function () {
+            var r = document.createRange(); r.selectNodeContents(el);
+            var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+          };
+          if (navigator.clipboard) navigator.clipboard.writeText(el.textContent.trim()).then(done, manual);
+          else manual();
+        });
+
+        // Chrome hands over a real install dialog, but only through the event
+        // it fires first — and only after a tap of ours. The manual menu
+        // instructions stand until it arrives, and come back if the member
+        // dismisses the dialog.
+        var deferred = null;
+        var btn = document.getElementById('install');
+        var manual = document.getElementById('android-manual');
+        window.addEventListener('beforeinstallprompt', function (e) {
+          e.preventDefault();
+          deferred = e;
+          if (btn) btn.hidden = false;
+          if (manual) manual.hidden = true;
+        });
+        if (btn) btn.addEventListener('click', function () {
+          if (!deferred) return;
+          deferred.prompt();
+          deferred.userChoice.then(function () {
+            deferred = null;
+            btn.hidden = true;
+            if (manual) manual.hidden = false;
+          });
+        });
+        window.addEventListener('appinstalled', function () {
+          if (btn) btn.hidden = true;
+          if (manual) manual.hidden = true;
+          show('android-done');
+        });
+      })();
+    </script>
+  </body>
+</html>

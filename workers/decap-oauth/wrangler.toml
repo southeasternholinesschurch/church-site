@@ -1,0 +1,9 @@
+name = "decap-oauth"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# Secrets (set once, never committed):
+#   npx wrangler secret put GITHUB_CLIENT_ID
+#   npx wrangler secret put GITHUB_CLIENT_SECRET
+# See docs/README.md → "Editing content (Decap CMS)" for the full,
+# step-by-step setup (creating the GitHub OAuth App, etc).

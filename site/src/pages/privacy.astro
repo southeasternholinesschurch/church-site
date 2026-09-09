@@ -1,0 +1,36 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import SmsPolicy from '../components/SmsPolicy.astro';
+
+/**
+ * Discreet — deliberately not in the nav, like /bulletin and /directory.
+ * Reachable by URL because carrier and provider registration forms ask for
+ * one, and because anyone who receives a text should be able to find it.
+ *
+ * /privacy and /terms render the SAME document. A registration form may ask
+ * for either name, and a URL that redirects or 404s at the moment a reviewer
+ * checks it is the kind of small failure that costs a resubmission.
+ */
+---
+<BaseLayout
+  title="SMS Privacy Policy & Terms"
+  description="How [Your Church Name] uses text messaging, and how to stop receiving messages."
+  navTheme="light"
+>
+  <section class="wrap legal-wrap">
+    <header class="legal-head">
+      <p class="label legal-head__k">Text Messaging</p>
+      <h1 class="serif legal-head__h">SMS Privacy Policy &amp; Terms and Conditions</h1>
+    </header>
+    <SmsPolicy />
+  </section>
+</BaseLayout>
+
+<style>
+  .legal-wrap { padding-block: 128px clamp(70px, 8vw, 110px); }
+  .legal-head { max-width: 68ch; margin-bottom: 36px; }
+  .legal-head__k { color: var(--red); margin: 0 0 16px; }
+  .legal-head__h { margin: 0 0 8px; font-size: clamp(30px, 4.4vw, 46px);
+                   line-height: 1.08; letter-spacing: -.01em; }
+  @media (max-width: 860px) { .legal-wrap { padding-top: 104px; } }
+</style>

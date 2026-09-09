@@ -1,0 +1,68 @@
+name: Check app
+
+# Typecheck and tests for the staff app. It does NOT deploy.
+#
+# Deploying is Cloudflare's job: the app's Worker is connected to this repo
+# through Workers Builds, the same mechanism the public site uses, so a push to
+# main builds and deploys it with no API token and no GitHub secrets. An
+# earlier version of this file did the deploy from Actions instead; that needed
+# a Cloudflare API token pasted into GitHub, which is a credential to store,
+# rotate and eventually leak, for no gain over what Cloudflare already does.
+#
+# What Actions still earns its place doing is this: Workers Builds runs the
+# build and deploys whatever comes out. It does not run astro check and it does
+# not run the tests. This does, on every push and every pull request, so a
+# typecheck failure or a broken test is visible as a red X rather than quietly
+# shipping. It needs no secrets of any kind.
+#
+# It is deliberately NOT a required status check that blocks the deploy —
+# Workers Builds does not wait for it. Treat a red X here as "look before you
+# trust what just deployed", and revert if it matters.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/check-app.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+  workflow_dispatch:
+
+concurrency:
+  group: check-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 24 because the tests run .ts directly via --experimental-strip-types.
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx astro check
+
+      - name: Test
+        run: npm test
+
+      # Proves the thing Cloudflare is about to do actually works, so a build
+      # that only fails on Cloudflare's runner is caught here with readable logs.
+      - name: Build
+        run: npm run build

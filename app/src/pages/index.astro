@@ -1,0 +1,124 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { getDb, schema } from '../db';
+import { sql, eq, desc } from 'drizzle-orm';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+const [counts] = await db.select({
+  total: sql<number>`count(*)`,
+  adults: sql<number>`sum(case when adult_child = 'adult' then 1 else 0 end)`,
+  children: sql<number>`sum(case when adult_child = 'child' then 1 else 0 end)`,
+  unknown: sql<number>`sum(case when adult_child = 'unknown' then 1 else 0 end)`,
+  consented: sql<number>`sum(case when include_in_directory = 1 then 1 else 0 end)`,
+}).from(schema.people).where(eq(schema.people.archived, false));
+
+/*
+ * Directory rollout, counted the way access actually works.
+ *
+ * This card used to report how many adults had an EMAIL ADDRESS and said
+ * invitations were sent by email. That was true of the original plan and has
+ * never been true of what was built: invites go by TEXT, and the gate is a
+ * phone number plus texting consent. So it measured something irrelevant and
+ * announced a number of people who "cannot be invited yet" that had nothing to
+ * do with whether they could be invited.
+ */
+const [dir] = await db.select({
+  listed: sql<number>`sum(case when adult_child = 'adult' and include_in_directory = 1 then 1 else 0 end)`,
+  active: sql<number>`sum(case when directory_status = 'active' then 1 else 0 end)`,
+  invited: sql<number>`sum(case when directory_status = 'invited' then 1 else 0 end)`,
+  unreachable: sql<number>`sum(case when adult_child = 'adult' and include_in_directory = 1
+    and directory_status <> 'active'
+    and (phone_e164 is null or phone_e164 = '' or sms_consent <> 'opted_in') then 1 else 0 end)`,
+}).from(schema.people).where(eq(schema.people.archived, false));
+
+const recent = await db.select().from(schema.services)
+  .orderBy(desc(schema.services.date)).limit(5);
+
+const total = counts?.total ?? 0;
+const unknown = counts?.unknown ?? 0;
+const listed = dir?.listed ?? 0;
+const inDirectory = dir?.active ?? 0;
+const waitingToOpen = dir?.invited ?? 0;
+const unreachable = dir?.unreachable ?? 0;
+const pct = listed > 0 ? Math.round((inDirectory / listed) * 100) : 0;
+---
+<AppLayout title="Dashboard" user={user} backdrop>
+  <h1>Dashboard</h1>
+
+  {total === 0 ? (
+    <div class="card">
+      <h2>No people yet</h2>
+      <p class="muted">
+        The database is empty. Import the Breeze export to get started — see
+        <code>app/README.md</code> for the command. The export is never committed
+        to the repository; it is read from your machine and written straight to
+        the database.
+      </p>
+    </div>
+  ) : (
+    <>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:26px;">
+        <div class="card"><p class="label muted">People</p><p style="font-size:32px;margin:4px 0 0;">{total}</p></div>
+        <div class="card"><p class="label muted">Adults</p><p style="font-size:32px;margin:4px 0 0;">{counts?.adults ?? 0}</p></div>
+        <div class="card"><p class="label muted">Children</p><p style="font-size:32px;margin:4px 0 0;">{counts?.children ?? 0}</p></div>
+        <div class="card"><p class="label muted">Unconfirmed</p><p style="font-size:32px;margin:4px 0 0;">{unknown}</p></div>
+      </div>
+
+      {unknown > 0 && (
+        <p class="notice">
+          <strong>{unknown} {unknown === 1 ? 'person is' : 'people are'} not marked as adult or child.</strong>
+          The Breeze export had no age, birthday or family role for them. Until that is
+          set they are treated as children — kept out of the directory and counted as
+          children in attendance. <a href="/people?filter=unknown">Review them</a>.
+        </p>
+      )}
+
+      <div class="card" style="margin-bottom:22px;">
+        <h2>Directory access</h2>
+        <p style="margin:0 0 12px; font-size:19px;">
+          <strong>{inDirectory}</strong> of {listed} listed adults have opened their
+          link{listed > 0 && <> — {pct}%</>}.
+        </p>
+        <div class="bar" aria-hidden="true"><div class="bar__fill" style={`width:${pct}%`}></div></div>
+        <dl class="dtally">
+          <div><dt>Texted, waiting for them to open it</dt><dd>{waitingToOpen}</dd></div>
+          <div><dt>No number, or not opted in to texts</dt><dd>{unreachable}</dd></div>
+        </dl>
+        <p class="muted" style="margin:10px 0 0; font-size:14px;">
+          Invitations go by text, not email. Anyone without a textable number needs
+          their link handed over another way — it is on their own page.
+          {' '}<a href="/invites">Send invitations</a>.
+        </p>
+      </div>
+    </>
+  )}
+
+  <div class="card">
+    <h2>Recent services</h2>
+    {recent.length === 0 ? (
+      <p class="muted" style="margin:0;">No attendance has been recorded yet.</p>
+    ) : (
+      <table>
+        <thead><tr><th>Date</th><th>Service</th></tr></thead>
+        <tbody>
+          {recent.map((s) => (
+            <tr><td>{s.date}</td><td>{s.label ?? s.kind}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+</AppLayout>
+
+<style>
+  .bar { height: 8px; border-radius: 999px; background: var(--cream-deep); overflow: hidden; margin-bottom: 14px; }
+  .bar__fill { height: 100%; background: var(--ink); }
+  .dtally { margin: 0; display: grid; gap: 2px; }
+  .dtally div { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0;
+                border-bottom: 1px solid var(--hair); }
+  .dtally div:last-child { border-bottom: 0; }
+  .dtally dt { margin: 0; color: var(--ink-soft); font-size: 15px; }
+  .dtally dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+</style>

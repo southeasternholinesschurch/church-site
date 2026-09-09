@@ -1,0 +1,158 @@
+/*
+ * [Kids Ministry].
+ *
+ * Deliberately NOT the staff chrome. The staff app is cream and warm ink; this
+ * is navy and bright. That is not decoration — a volunteer and an admin use the
+ * same app on the same phone, and the colour is how you know at a glance which
+ * one you are looking at without reading a word.
+ *
+ * The palette is sampled from the pastor's own printed [Kids Ministry] material (the door
+ * hanger and the invite card), not invented: the navy is the brush banner
+ * behind "CALL THIS NUMBER", the orange is the crown in the logo ring, and the
+ * cyan/periwinkle/pink are the three stops of the [Kids Ministry] logo gradient.
+ */
+:root {
+  --k-navy:      #0d1b45;   /* the ground */
+  --k-navy-deep: #081334;   /* the bar, and anything that should sit under */
+  --k-navy-soft: #16265a;   /* raised panels ON the navy */
+  --k-line:      rgba(255, 255, 255, 0.16);
+  --k-text:      #ffffff;
+  --k-muted:     #9ebae8;
+  --k-orange:    #fa6601;   /* the crown. Actions, and present-ness. */
+  --k-cyan:      #5ed0e0;
+  --k-peri:      #c0c2fe;
+  --k-pink:      #e8bddb;
+  --k-card:      #ffffff;
+  --k-ink:       #0d1b45;   /* type ON a card */
+  --k-ink-soft:  #59668c;   /* secondary type on a card */
+}
+
+/*
+ * The kids section loads THIS stylesheet and not app.css, so it does not
+ * inherit the global reset there — which is how form fields inside a card ended
+ * up wider than the card: width:100% plus padding plus a border, measured from
+ * the content box.
+ */
+*, *::before, *::after { box-sizing: border-box; }
+
+/*
+ * `hidden` must actually hide.
+ *
+ * The browser's own rule is `[hidden] { display: none }`, at the lowest
+ * possible specificity — so ANY class that sets a display wins, and the
+ * element stays on screen with its hidden attribute set and no visible reason.
+ * The children's list hit exactly this: rows are `display:flex`, so filtering
+ * the list set .hidden on every non-matching row and changed nothing.
+ */
+[hidden] { display: none !important; }
+
+body.kids {
+  margin: 0;
+  background: var(--k-navy);
+  color: var(--k-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+body.kids a { color: var(--k-cyan); }
+body.kids h1, body.kids h2, body.kids h3 { line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.01em; }
+body.kids h1 { font-size: clamp(28px, 5vw, 38px); }
+body.kids h2 { font-size: 21px; }
+
+.k-wrap { max-width: 1100px; margin-inline: auto; padding-inline: clamp(20px, 4vw, 34px); }
+.k-label { font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+.k-muted { color: var(--k-muted); }
+
+/* ---- the bar ---- */
+.k-bar { position: relative; z-index: 2; background: var(--k-navy-deep); }
+.k-bar__in { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+             padding: 12px clamp(20px, 4vw, 34px); max-width: 1100px; margin-inline: auto; }
+/*
+ * The [Kids Ministry] wordmark — the real artwork, in white.
+ *
+ * The source is the church's own horizontal logo, a pink-to-periwinkle-to-cyan
+ * gradient that all but vanishes against this navy. So it is flattened to white
+ * with the ALPHA CHANNEL KEPT, which is what holds the crown's points smooth at
+ * header size; a threshold-and-fill would have left them ragged.
+ *
+ * Sized by height, with width auto, so the aspect ratio comes from the file and
+ * nobody has to keep two numbers in step.
+ */
+.k-bar .k-bar__brand { display: inline-flex; align-items: center; text-decoration: none; }
+.k-bar .k-bar__brand img { height: 30px; width: auto; display: block; }
+@media (max-width: 700px) { .k-bar .k-bar__brand img { height: 26px; } }
+.k-bar__nav { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.k-bar__nav a { color: rgba(255,255,255,.78); text-decoration: none; font-size: 15px; }
+.k-bar__nav a:hover, .k-bar__nav a[aria-current="page"] { color: var(--k-text); }
+.k-bar__who { color: var(--k-muted); font-size: 15px; }
+/* Only staff ever see this: the way back up to the rest of the app. A
+   volunteer has no such link because there is nowhere for it to go. */
+.k-bar__up { color: var(--k-cyan) !important; font-size: 14px; }
+@media (max-width: 700px) {
+  .k-bar__in { gap: 10px 14px; padding: 8px clamp(20px, 4vw, 34px); }
+  .k-bar__nav { gap: 12px 18px; width: 100%; margin-left: 0; }
+  .k-bar__who { display: none; }
+}
+
+/* ---- the backdrop ----
+ * Same construction as the staff dashboard's church photo, for the same
+ * reasons: fixed rather than absolute so it does not scroll away on a short
+ * page, pinned to the BOTTOM because that is where the picture's subject sits,
+ * and disabled under reduced-motion where a fixed layer reads as parallax.
+ *
+ * The duotone is BAKED INTO THE JPEG, not applied with CSS filters and blend
+ * modes. Two reasons: a real duotone needs the two tonal ends mapped
+ * separately, which CSS cannot express in one layer, and baking means the
+ * result is identical in every browser instead of degrading to a flat tint
+ * wherever mix-blend-mode is unsupported. */
+.k-backdrop {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: url('/kids-backdrop-sm.jpg');
+  background-size: cover; background-position: center bottom; background-repeat: no-repeat;
+}
+@media (min-width: 900px) { .k-backdrop { background-image: url('/kids-backdrop.jpg'); } }
+/* The navy still owns the top third, so the bar and the page heading never sit
+   directly on photography. */
+.k-backdrop::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, var(--k-navy) 0%, rgba(13,27,69,.94) 15%,
+                                      rgba(13,27,69,.68) 40%, rgba(13,27,69,.42) 62%,
+                                      rgba(13,27,69,.10) 84%, rgba(13,27,69,0) 100%);
+}
+@media (prefers-reduced-motion: reduce) { .k-backdrop { position: absolute; } }
+
+.k-main { position: relative; z-index: 1; padding-block: 28px 60px; }
+
+/* ---- cards ----
+ * White on navy, not a tinted panel. A register is read at arm's length in a
+ * bright hallway by someone holding a child's hand; maximum contrast wins over
+ * a prettier tone-on-tone. */
+.k-card { background: var(--k-card); color: var(--k-ink);
+          border-radius: 14px; padding: 20px 22px; box-shadow: 0 2px 18px rgba(0,0,0,.22); }
+.k-card h2 { color: var(--k-ink); }
+.k-card .k-muted { color: var(--k-ink-soft); }
+
+/* A panel that stays ON the navy — for things that are context, not content. */
+.k-panel { background: var(--k-navy-soft); border: 1px solid var(--k-line);
+           border-radius: 14px; padding: 18px 20px; }
+
+.k-tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+/* Semi-opaque, not solid: the photograph should read THROUGH the tiles rather
+ * than stopping at them. But it needs a floor — over a bright patch of the
+ * picture, 14px type at .58 opacity stops being readable. */
+.k-tile { border-radius: 14px; padding: 18px 20px; background: rgba(22,38,90,.82);
+          backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+          border: 1px solid var(--k-line); text-decoration: none; color: var(--k-text); display: block; }
+.k-tile:hover { border-color: var(--k-cyan); }
+.k-tile__name { font-weight: 700; font-size: 17px; margin-bottom: 4px; }
+.k-tile__note { color: var(--k-muted); font-size: 14px; }
+/* Not built yet. Says so plainly rather than looking broken. Dimmed on the
+ * TEXT rather than the whole tile, so the panel keeps covering the photo. */
+.k-tile--soon .k-tile__name, .k-tile--soon .k-tile__note { opacity: .62; }
+.k-tile--soon:hover { border-color: var(--k-line); }
+
+.k-chip { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .12em;
+          text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+          background: var(--k-orange); color: #fff; }
+.k-chip--quiet { background: transparent; color: var(--k-muted); border: 1px solid var(--k-line); }

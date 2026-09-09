@@ -1,0 +1,80 @@
+---
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  settings: CollectionEntry<'settings'>['data'];
+}
+const { settings } = Astro.props;
+const year = new Date().getFullYear();
+---
+<footer class="foot">
+  <div class="foot__grid">
+    <div>
+      <h2 class="serif foot__wordmark">Come home.</h2>
+      <p class="foot__addr">
+        <a href={settings.mapsUrl} target="_blank" rel="noreferrer">
+          {settings.address}
+        </a>
+      </p>
+    </div>
+
+    <div>
+      <p class="label foot__h">Visit</p>
+      <p class="foot__list">
+        {settings.serviceTimes.map((s) => <>{s.label} — {s.day}s<br /></>)}
+      </p>
+    </div>
+
+    <div>
+      <p class="label foot__h">Connect</p>
+      <p class="foot__list">
+        {settings.socials.facebook && <><a href={settings.socials.facebook} target="_blank" rel="noreferrer">Facebook</a><br /></>}
+        {settings.socials.instagram && <><a href={settings.socials.instagram} target="_blank" rel="noreferrer">Instagram</a><br /></>}
+        <a href={settings.socials.youtubeUrl} target="_blank" rel="noreferrer">YouTube</a>
+        {settings.phone && <><br /><a href={`tel:${settings.phone.replace(/[^\d+]/g, '')}`}>{settings.phone}</a></>}
+      </p>
+    </div>
+
+    <div>
+      <p class="label foot__h">More</p>
+      <p class="foot__list">
+        <a href="/contact">Contact</a><br />
+        <a href="/give">Give</a><br />
+        <a href="/bulletin">Bulletin</a><br />
+        <a href="/directory">Directory</a>
+      </p>
+    </div>
+  </div>
+
+  <div class="foot__base">
+    <span>© {year} {settings.churchName}</span>
+    <span>Indianapolis, Indiana</span>
+  </div>
+</footer>
+
+<style>
+  .foot { background: var(--ink); color: var(--cream); padding: 96px var(--pad) 52px; }
+  .foot__grid {
+    display: grid; grid-template-columns: minmax(0,1.4fr) repeat(3, minmax(0,1fr)); gap: 48px;
+  }
+  .foot__wordmark { margin: 0 0 20px; font-size: clamp(42px, 5vw, 60px); line-height: 1; }
+  .foot__addr { margin: 0; font-size: 15px; line-height: 1.7; }
+  .foot__addr a { color: rgba(244,239,231,.7); }
+  .foot__addr a:hover { color: var(--cream); }
+  .foot__h { color: rgba(244,239,231,.58); margin: 0 0 16px; }
+  .foot__list { margin: 0; font-size: 15px; line-height: 2; color: rgba(244,239,231,.76); }
+  .foot__list a { color: rgba(244,239,231,.76); }
+  .foot__list a:hover { color: var(--cream); }
+  .foot__base {
+    border-top: 1px solid var(--hair-inv); margin-top: 60px; padding-top: 26px;
+    display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+    font-size: 12px; color: rgba(244,239,231,.52);
+  }
+  @media (max-width: 860px) {
+    .foot { padding-top: 62px; }
+    .foot__grid { grid-template-columns: 1fr 1fr; gap: 34px; }
+  }
+  @media (max-width: 520px) {
+    .foot__grid { grid-template-columns: 1fr; }
+  }
+</style>

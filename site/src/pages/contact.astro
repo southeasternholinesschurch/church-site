@@ -1,0 +1,324 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import { clockText } from '../lib/format';
+import bandImg from '../assets/photos/hymnal.jpg';
+
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+
+// Form submissions relay through Web3Forms (free tier) straight to the church
+// inbox — no custom server code, and no DNS/SPF/DKIM changes, which is the
+// whole reason for using it (see docs/README.md → "Forms").
+//
+// This key is NOT a secret. Web3Forms access keys are designed to sit in
+// client-side HTML — it is in the page source of every visitor's browser
+// either way, so committing it changes nothing. All it can do is deliver mail
+// to the address it was registered with
+// (hello@example.org); it grants no account access.
+// A submit-only PUBLIC key — it belongs in the source, not in a secret.
+// Get one free at https://web3forms.com, registered to the address in
+// site.yaml. Until it is set, both forms show a clear notice instead of
+// silently failing. SETUP.md step 5.
+const WEB3FORMS_ACCESS_KEY = '';
+const formsLive = !WEB3FORMS_ACCESS_KEY.startsWith('REPLACE_');
+const redirectUrl = `${Astro.site}contact/thank-you/`;
+
+// E.164 for the tap-to-text link. The displayed number carries no country
+// code, and stripping to digits alone produced sms:3172189622 — which some
+// handsets will not dial.
+//
+// No ?body=START prefill: iOS wants &body= and Android wants ?body=, so there
+// is no form that works everywhere, and a malformed one puts junk in the
+// message. Typing the word themselves is a cleaner consent record anyway.
+const smsDigits = (settingsEntry.data.smsNumber ?? '').replace(/\D/g, '');
+const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
+---
+<BaseLayout
+  title="Contact"
+  description="Get in touch with [Your Church Name], send a prayer request, or find us in person."
+>
+  <!-- ============ HEADER ============ -->
+  <section class="phead">
+    <div class="phead__body">
+      <p class="label load d1 phead__eyebrow">Say Hello</p>
+      <h1 class="serif load d2">Get in touch</h1>
+      <p class="phead__lede load d3">
+        A question, a prayer request, or just wanting to know what a Sunday is like —
+        all of it reaches the same inbox, and someone reads it.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ DETAILS ============ -->
+  <section class="wrap facts-wrap">
+    <div class="facts reveal">
+      <div class="fact">
+        <p class="label fact__l">Address</p>
+        <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="fact__v fact__v--link">
+          [123 Example Street]<br />[City, ST 00000]
+        </a>
+      </div>
+      <div class="fact">
+        <p class="label fact__l">Email</p>
+        <a href={`mailto:${settings.email}`} class="fact__v fact__v--link">{settings.email}</a>
+      </div>
+      {settings.phone && (
+        <div class="fact">
+          <p class="label fact__l">Phone</p>
+          <a href={`tel:${settings.phone.replace(/[^\d+]/g, '')}`} class="fact__v fact__v--link">{settings.phone}</a>
+        </div>
+      )}
+      <div class="fact">
+        <p class="label fact__l">Service Times</p>
+        <ul class="fact__times">
+          {settings.serviceTimes.map((s) => (
+            <li><span>{s.day}</span> {clockText(s.time)}</li>
+          ))}
+        </ul>
+      </div>
+      <div class="fact">
+        <p class="label fact__l">Find Us</p>
+        <div class="fact__socials">
+          <a href={settings.socials.facebook} target="_blank" rel="noreferrer">Facebook ↗</a>
+          <a href={settings.socials.instagram} target="_blank" rel="noreferrer">Instagram ↗</a>
+          <a href={settings.socials.youtubeUrl} target="_blank" rel="noreferrer">YouTube ↗</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FORMS ============ -->
+  <section class="wrap forms-wrap">
+    <!-- The notice below is conditional and currently does NOT render: the key
+         is set, so the forms deliver. It reappears by itself if the key is ever
+         cleared or replaced with a placeholder, so the page can never silently
+         accept messages that go nowhere. Keep its copy visitor-facing — no repo
+         paths, no variable names. -->
+    {!formsLive && (
+      <p class="notice reveal">
+        <strong>These forms aren't connected yet.</strong> Until they are, please email
+        us directly at <a href={`mailto:${settings.email}`}>{settings.email}</a> — it
+        reaches the same people.
+      </p>
+    )}
+
+    <div class="forms">
+      <form class="fm reveal" action="https://api.web3forms.com/submit" method="POST">
+        <p class="label fm__kicker">General</p>
+        <h2 class="serif fm__h">Send us a message</h2>
+        <p class="fm__p">Questions about the church, the schedule, or anything else.</p>
+
+        <input type="hidden" name="access_key" value={WEB3FORMS_ACCESS_KEY} />
+        <input type="hidden" name="subject" value="New message from example.org contact form" />
+        <input type="hidden" name="redirect" value={redirectUrl} />
+        <input type="checkbox" name="botcheck" class="visually-hidden" tabindex="-1" autocomplete="off" />
+
+        <label class="f"><span class="f__l">Name</span><input type="text" name="name" required /></label>
+        <label class="f"><span class="f__l">Email</span><input type="email" name="email" required /></label>
+        <label class="f"><span class="f__l">Message</span><textarea name="message" rows="5" required></textarea></label>
+        <button type="submit" class="btn btn--ink fm__btn">Send message</button>
+      </form>
+
+      {/* Someone sent here from the directory's locked page arrives with
+          ?about=directory. Marking the subject is what stops these landing in
+          the inbox as an unexplained "I need the link" — the office needs to
+          know which list to check. Done client-side because the site is static
+          and the query string does not exist at build time; if the script
+          never runs, the form is still a perfectly good contact form. */}
+      <script is:inline>
+        if (new URLSearchParams(location.search).get('about') === 'directory') {
+          const form = document.querySelector('form.fm');
+          if (form) {
+            form.querySelector('input[name="subject"]').value =
+              'Directory access request from example.org';
+            const kicker = form.querySelector('.fm__kicker');
+            const head = form.querySelector('.fm__h');
+            const lede = form.querySelector('.fm__p');
+            if (kicker) kicker.textContent = 'Directory';
+            if (head) head.textContent = 'Ask for a directory link';
+            if (lede) lede.textContent =
+              'Tell us your name and we will text you a personal link. '
+              + 'The directory is for adults in the church family who have said yes to being listed.';
+            const msg = form.querySelector('textarea[name="message"]');
+            if (msg && !msg.value) {
+              msg.value = "I'd like a link to the church directory. My mobile number is ";
+              msg.setAttribute('rows', '4');
+            }
+            form.scrollIntoView({ block: 'center' });
+          }
+        }
+      </script>
+
+      <form class="fm fm--prayer reveal" action="https://api.web3forms.com/submit" method="POST">
+        <p class="label fm__kicker">Prayer</p>
+        <h2 class="serif fm__h">Ask us to pray</h2>
+        <p class="fm__p">
+          It goes to the same inbox and is read by the pastors. Leave the email blank
+          if you'd rather not be contacted back.
+        </p>
+
+        <input type="hidden" name="access_key" value={WEB3FORMS_ACCESS_KEY} />
+        <input type="hidden" name="subject" value="New prayer request from example.org" />
+        <input type="hidden" name="redirect" value={redirectUrl} />
+        <input type="checkbox" name="botcheck" class="visually-hidden" tabindex="-1" autocomplete="off" />
+
+        <label class="f"><span class="f__l">Name</span><input type="text" name="name" required /></label>
+        <label class="f"><span class="f__l">Email <em>optional</em></span><input type="email" name="email" /></label>
+        <label class="f"><span class="f__l">Your request</span><textarea name="message" rows="5" required></textarea></label>
+        <button type="submit" class="btn btn--ink fm__btn">Send prayer request</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ TEXT OPT-IN ============ -->
+  <!-- Text-to-join, not a form. The person sends the first message, so the
+       consent is theirs and arrives already timestamped through the webhook —
+       a better record than anything typed into a box here, and nothing to
+       re-key by hand. A carrier reviewing the 10DLC campaign follows a link
+       to this page to see the mechanism exists and that the disclosures sit
+       beside it. Every line below is load-bearing for that review.
+
+       Renders only once the number is set in site settings: an opt-in with no
+       number to text would fail the review it exists to pass. -->
+  {settings.smsNumber && (
+    <section class="wrap optin-wrap">
+      <div class="optin reveal">
+        <div class="optin__body">
+          <p class="label optin__k">Church Texts</p>
+          <h2 class="serif optin__h">Get church news by text</h2>
+          <p class="optin__p">
+            Service changes, weather cancellations, ministry reminders and the
+            occasional prayer request — sent to your phone, only when there is
+            something worth telling you.
+          </p>
+        </div>
+
+        <div class="optin__act">
+          <p class="optin__cta">
+            Text <strong>START</strong> to
+            <a href={`sms:${smsHref}`} class="optin__num">{settings.smsNumber}</a>
+          </p>
+          <p class="optin__fine">
+            By texting START you agree to receive recurring text messages from
+            [Your Church Name]. <strong>Message frequency varies.
+            Message and data rates may apply.</strong> Reply STOP at any time to
+            opt out, or HELP for help. Consent is not a condition of attending
+            church, taking part in church activities, or giving. See our
+            <a href="/privacy">SMS Privacy Policy &amp; Terms</a>.
+          </p>
+        </div>
+      </div>
+    </section>
+  )}
+
+  <!-- ============ VISIT BAND ============ -->
+  <section class="band" data-par-frame>
+    <div class="band__img duo par" data-par="70" style="--drift-scale: 1.34;">
+      <Image src={bandImg} alt="Sharing a hymnal during congregational singing"
+             widths={[900, 1400, 2000, 2400]} sizes="140vw" />
+    </div>
+    <div class="band__scrim" aria-hidden="true"></div>
+    <div class="band__body par-fg" data-par="-32">
+      <p class="label band__eyebrow">Or Just Come</p>
+      <h2 class="serif band__title">You can also skip all of this and turn up.</h2>
+      <p class="band__p">
+        Sunday at 10. No form to fill in, nobody expecting you, nothing you need to bring.
+      </p>
+      <a href="/about" class="btn btn--solid band__btn">What to expect</a>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .phead { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .phead__body { position: relative; z-index: 3; padding: 150px var(--pad) 86px; }
+  .phead__eyebrow { color: rgba(244,239,231,.6); margin: 0 0 20px; }
+  .phead h1 { margin: 0; font-size: clamp(46px,6vw,88px); line-height: 1; letter-spacing: -.02em; }
+  .phead__lede { margin: 22px 0 0; max-width: 52ch; font-size: 18px; line-height: 1.68; color: rgba(244,239,231,.78); }
+
+  .facts-wrap { padding-block: clamp(56px,6vw,84px) 0; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px,1fr)); gap: 34px;
+           border-top: 2px solid var(--ink); padding-top: 24px; }
+  .fact__l { color: var(--red); margin: 0 0 10px; }
+  .fact__v { display: block; font-size: 17px; line-height: 1.6; }
+  .fact__v--link { color: var(--ink); text-decoration: underline; text-underline-offset: 3px;
+                   text-decoration-color: var(--hair); }
+  .fact__v--link:hover { text-decoration-color: var(--red); color: var(--red); }
+  .fact__times { list-style: none; margin: 0; padding: 0; font-size: 16px; line-height: 1.85; }
+  .fact__times span { display: inline-block; min-width: 92px; color: var(--ink-soft); }
+  .fact__socials { display: flex; flex-direction: column; gap: 5px; font-size: 16px; }
+  .fact__socials a { color: var(--ink); }
+  .fact__socials a:hover { color: var(--red); }
+
+  .forms-wrap { padding-block: clamp(56px,6vw,84px) clamp(70px,8vw,110px); }
+  .notice { margin: 0 0 40px; max-width: 68ch; font-size: 15px; line-height: 1.7;
+            color: var(--red-deep); background: #f7e9e9; border-left: 3px solid var(--red);
+            padding: 16px 20px; border-radius: 0 var(--radius) var(--radius) 0; }
+  .notice code { background: rgba(176,24,24,.1); padding: 1px 5px; border-radius: 3px; font-size: .93em; }
+  .notice a { color: var(--red-deep); text-decoration: underline; }
+
+  .forms { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 34px; }
+  .fm { border: 1px solid var(--hair); border-radius: var(--radius-lg); padding: clamp(28px,3.4vw,42px);
+        background: var(--cream); }
+  .fm--prayer { background: var(--cream-deep); border-color: transparent; }
+  .fm__kicker { color: var(--red); margin: 0 0 12px; }
+  .fm__h { margin: 0 0 10px; font-size: clamp(26px,3vw,34px); line-height: 1.12; }
+  .fm__p { margin: 0 0 28px; font-size: 16px; line-height: 1.7; color: var(--ink-soft); max-width: 44ch; }
+
+  .f { display: block; margin-bottom: 20px; }
+  .f__l { display: block; font-size: 11px; font-weight: 700; letter-spacing: .16em;
+          text-transform: uppercase; color: var(--ink-soft); margin-bottom: 8px; }
+  .f__l em { font-style: normal; letter-spacing: .1em; color: rgba(74,64,56,.6); }
+  .f input, .f textarea {
+    width: 100%; font: inherit; font-size: 17px; color: var(--ink);
+    background: transparent; border: 0; border-bottom: 1px solid var(--hair);
+    padding: 9px 0; border-radius: 0;
+  }
+  .f textarea { resize: vertical; line-height: 1.6; }
+  .f input:focus, .f textarea:focus { outline: none; border-bottom-color: var(--red); }
+  .f input:focus-visible, .f textarea:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
+  .fm__btn { margin-top: 12px; }
+
+  /* NOTE: .band__img declares no transform — a scoped one would outrank .par */
+  .optin-wrap { padding-block: 0 clamp(56px,6vw,84px); }
+  .optin { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: clamp(24px,4vw,56px);
+           background: var(--cream-deep); border-radius: var(--radius-lg);
+           padding: clamp(28px,3.6vw,46px); align-items: center; }
+  .optin__k { color: var(--red); margin: 0 0 14px; }
+  .optin__h { margin: 0 0 14px; font-size: clamp(26px,3.2vw,38px); line-height: 1.1; }
+  .optin__p { margin: 0; font-size: 17px; line-height: 1.72; color: var(--ink-soft); max-width: 42ch; }
+  .optin__cta { margin: 0 0 14px; font-size: clamp(20px,2.4vw,26px); line-height: 1.35; }
+  .optin__cta strong { font-weight: 700; }
+  .optin__num { display: inline-block; color: var(--red); text-decoration: underline;
+                text-underline-offset: 4px; white-space: nowrap; }
+  .optin__fine { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-soft); }
+  .optin__fine strong { color: var(--ink); }
+  .optin__fine a { color: var(--red); text-decoration: underline; text-underline-offset: 2px; }
+  @media (max-width: 860px) { .optin { grid-template-columns: 1fr; } }
+
+  .band { position: relative; overflow: clip; background: var(--ink); color: var(--cream);
+          min-height: 62vh; display: flex; align-items: center; }
+  .band__img { position: absolute; inset: 0; z-index: 0; }
+  .band__img :global(img) { width: 100%; height: 100%; object-fit: cover; }
+  .band__scrim { position: absolute; inset: 0; z-index: 1;
+                 background: linear-gradient(90deg, rgba(26,21,18,.9) 0%, rgba(26,21,18,.72) 55%, rgba(26,21,18,.5) 100%); }
+  .band__body { position: relative; z-index: 3; padding: clamp(70px,8vw,110px) var(--pad); max-width: 720px; }
+  .band__eyebrow { color: var(--red-tint); margin: 0 0 18px; }
+  .band__title { margin: 0; font-size: clamp(30px,4.4vw,54px); line-height: 1.1; letter-spacing: -.01em; }
+  .band__p { margin: 18px 0 0; font-size: 17px; line-height: 1.72; color: rgba(244,239,231,.78); max-width: 46ch; }
+  .band__btn { margin-top: 30px; }
+
+  @media (max-width: 980px) {
+    .facts { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 30px; }
+    .forms { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 860px) {
+    .phead__body { padding: 110px var(--pad) 52px; }
+    .band__scrim { background: linear-gradient(180deg, rgba(26,21,18,.72) 0%, rgba(26,21,18,.9) 100%); }
+  }
+  @media (max-width: 560px) {
+    .facts { grid-template-columns: 1fr; gap: 26px; }
+  }
+</style>

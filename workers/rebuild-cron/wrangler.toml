@@ -1,0 +1,15 @@
+name = "rebuild-cron"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# Fires once daily to pick up calendar edits (build brief §5). Time is UTC —
+# 09:00 UTC is ~4-5am America/Indiana/Indianapolis depending on DST, i.e.
+# well before anyone's morning, so the site is fresh by the time people
+# check it. Adjust if the pastor wants a different time.
+[triggers]
+crons = ["0 9 * * *"]
+
+# Secret (set once, never committed):
+#   npx wrangler secret put DEPLOY_HOOK_URL
+# Get this URL from the site's Cloudflare project → Settings → Deploy hooks.
+# See docs/README.md → "Rebuild plumbing".

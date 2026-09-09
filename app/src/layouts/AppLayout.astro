@@ -1,0 +1,153 @@
+---
+import '../styles/app.css';
+import { canAccess, homeFor, type Role } from '../lib/permissions';
+interface Props {
+  title: string;
+  user?: { email: string; name: string | null; role: Role };
+  /** The dashboard alone gets the church backdrop — see the styles below. */
+  backdrop?: boolean;
+}
+const { title, user, backdrop = false } = Astro.props;
+const path = Astro.url.pathname;
+
+/**
+ * The staff chrome. [Kids Ministry] volunteers never see this layout at all — they get
+ * KidsLayout, and the middleware never lets them reach a page that renders
+ * this one.
+ */
+const NAV: [string, string][] = [
+  ['/', 'Dashboard'],
+  ['/people', 'People'],
+  ['/attendance', 'Attendance'],
+  ['/attendance/trends', 'Trends'],
+  ['/messaging', 'Messaging'],
+  ['/messaging/scheduled', 'Scheduled'],
+  ['/messaging/numbers', 'Numbers'],
+  ['/messaging/inbox', 'Replies'],
+  ['/groups', 'Groups'],
+  ['/bulletin', 'Bulletin'],
+  ['/website', 'Website'],
+  ['/kids', '[Kids Ministry]'],
+  ['/staff', 'Access'],
+];
+
+/*
+ * Filtered through the SAME function the middleware uses, not a second list.
+ *
+ * This is presentation only — hiding a link is not access control, and the
+ * gate has already refused the request by the time anyone could click a stale
+ * one. The point is that the nav cannot drift away from the rule: an editor
+ * has always been shown an "Access" tab that bounced them straight back, and
+ * deriving the list means that stops happening without anybody maintaining it.
+ */
+const nav = user ? NAV.filter(([href]) => canAccess(user.role, href)) : [];
+
+/* The brand link is not part of NAV, so it is not filtered by the line above —
+ * and pointing everyone at "/" sends a volunteer to a page the gate then
+ * bounces them back from. A link that goes nowhere teaches people the app is
+ * broken rather than that it is guarded. */
+const home = user ? homeFor(user.role) : '/';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · SHC Staff</title>
+    <!-- A staff tool holding member contact details has no business in a
+         search index, whatever the login gate does. -->
+    <meta name="robots" content="noindex, nofollow" />
+    {/* The staff mark. Favicon sizes get a single S rather than the SHC
+        lockup: three letters at 16px in a browser tab is four grey smears,
+        and a tab is where this tool spends its life. See design/staff-icon.
+        No manifest here on purpose — that would have Chrome offering
+        volunteers an install prompt for the dashboard. */}
+    <link rel="icon" type="image/png" sizes="32x32" href="/staff-icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/staff-icons/favicon-48.png" />
+    <link rel="apple-touch-icon" href="/staff-icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#1a1512" />
+    {/* Installable, so check-in runs full screen.
+        Safari's address bar and toolbar cost roughly as much height as the app
+        bar did before it was cut down — and as the note in app.css puts it,
+        every pixel of chrome is a name the volunteer cannot see.
+
+        No service worker. One is not required to install, and the only thing a
+        worker could usefully cache here is furniture; these pages are people's
+        contact details and attendance, which must always come from the network.
+
+        Scope is "/" because the staff pages have no common prefix — they are
+        the whole app except /directory. That does mean this scope overlaps the
+        directory's; on a phone with BOTH installed (the pastor's, most likely) a
+        link may open in whichever was installed last. Harmless, but it is why
+        the two manifests carry distinct ids. */}
+    <link rel="manifest" href="/staff.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SHC Staff" />
+  </head>
+  <body class:list={[backdrop && "has-backdrop"]}>
+    {user && (
+      <header class="bar">
+        <div class="bar__in">
+          <a href={home} class="bar__brand">SHC Staff</a>
+          <nav class="bar__nav">
+            {nav.map(([href, label]) => (
+              <a href={href} aria-current={path === href || (href !== '/' && path.startsWith(href)) ? 'page' : undefined}>{label}</a>
+            ))}
+            <span class="bar__who">{user.name ?? user.email}</span>
+            <form method="POST" action="/auth/logout" style="margin:0">
+              <button class="bar__nav" style="background:none;border:0;color:rgba(244,239,231,.82);font:inherit;font-size:15px;cursor:pointer;padding:0">Sign out</button>
+            </form>
+          </nav>
+        </div>
+      </header>
+    )}
+    {backdrop && <div class="backdrop" aria-hidden="true"></div>}
+    <main class="wrap" style="padding-block: 28px 60px; position: relative; z-index: 1;">
+      <slot />
+    </main>
+
+    <style>
+      /* The church building, behind the dashboard only.
+       *
+       * the pastor supplied it already faded, so it needs no scrim of its own — a
+       * second wash on top would grey it into mud. It is pinned to the BOTTOM
+       * of the viewport rather than tiled or covered: the building and the sign
+       * sit along the lower third of the frame, and anchoring there keeps them
+       * visible instead of scrolling the interesting part off-screen.
+       *
+       * `fixed` deliberately, not `absolute`: the dashboard is short, and a
+       * backdrop that scrolls away after 200px is worse than none. Disabled
+       * under reduced-motion, where a fixed layer reads as parallax.
+       */
+      .backdrop {
+        position: fixed; inset: 0; z-index: 0; pointer-events: none;
+        background-image: url('/backdrop-sm.jpg');
+        background-size: cover;
+        background-position: center bottom;
+        background-repeat: no-repeat;
+      }
+      @media (min-width: 900px) {
+        .backdrop { background-image: url('/backdrop.jpg'); }
+      }
+      /* The cream ground still shows through at the top, so the app bar and the
+       * page never sit directly on photography. */
+      .backdrop::after {
+        content: ""; position: absolute; inset: 0;
+        /* Only a soft landing under the app bar, then out of the way. the pastor
+           faded this image himself before handing it over; stacking a heavy
+           scrim on top of that washes the building out to nothing, which is
+           what the first attempt did. */
+        background: linear-gradient(180deg, var(--cream) 0%, rgba(244,239,231,.55) 12%,
+                                            rgba(244,239,231,.12) 34%, rgba(244,239,231,0) 60%);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .backdrop { position: absolute; }
+      }
+      /* Cards sit ON the photograph, so they stop being translucent here —
+       * otherwise the numbers are read against a moving picture. */
+      .has-backdrop .card { background: rgba(255,255,255,.94); backdrop-filter: blur(2px); }
+    </style>
+  </body>
+</html>

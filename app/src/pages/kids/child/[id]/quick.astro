@@ -1,0 +1,294 @@
+---
+import KidsLayout from '../../../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../../../db';
+import { and, desc, eq, inArray } from 'drizzle-orm';
+import { readForm } from '../../../../lib/form';
+import { balanceOf, parseAmount, REASON_LABEL, MAX_AMOUNT } from '../../../../lib/bucks';
+import { churchToday, KIDS_KIND_IDS } from '../../../../lib/services';
+import { ageOn } from '../../../../lib/kids';
+
+/**
+ * WHAT A CARD TAP OPENS. One child, in a classroom, on a teacher's phone.
+ *
+ * The profile page is where a child is set up — class, route, guardians,
+ * photo, cards. This is where they are USED: a teacher standing in a room with
+ * fourteen children needs a balance, two rows of big buttons, and their
+ * allergies. Everything else is a link away.
+ *
+ * So the buttons are preset amounts rather than a number field. Nobody types on
+ * a phone while holding a prize box, and "+5" as a thumb-sized target is the
+ * difference between this being used and being abandoned for a paper chart.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/kids/children', 302);
+
+const back = (m: string) => Astro.redirect(`/kids/child/${id}/quick?saved=${m}`, 303);
+let error: string | null = null;
+
+/** Fetch sends this so one handler answers both a script and a form post. */
+const wantsJson = Astro.request.headers.get('x-kids-quick') === 'json';
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? '');
+  const [enrolled] = await db.select({ personId: schema.kidProfiles.personId })
+    .from(schema.kidProfiles).where(eq(schema.kidProfiles.personId, id)).limit(1);
+
+  if (!enrolled) error = 'That child is not in [Kids Ministry].';
+  else if (act === 'award' || act === 'spend') {
+    const amount = parseAmount(String(form.get('amount') ?? ''));
+    if (amount === null) error = `Enter a whole number, 1 to ${MAX_AMOUNT}.`;
+    else {
+      // The sign comes from the BUTTON, never from what was typed — the same
+      // rule as the profile page, for the same reason.
+      await db.insert(schema.kidLedger).values({
+        personId: id,
+        delta: act === 'award' ? amount : -amount,
+        reason: act,
+        note: String(form.get('note') ?? '').trim() || null,
+        staffId: user.id > 0 ? user.id : null,
+        createdAt: nowIso(),
+      });
+      if (!wantsJson) return back(act === 'award' ? 'awarded' : 'spent');
+    }
+  } else if (act === 'present') {
+    /*
+     * Marking them here writes the SAME attendance row the register and the
+     * kiosk use — upserted, class left alone if something already claimed it.
+     * A teacher with a card in their hand has better evidence the child is
+     * present than anything else in the app.
+     */
+    const serviceId = Number(form.get('serviceId') ?? 0);
+    if (serviceId) {
+      await db.insert(schema.attendance)
+        .values({ serviceId, personId: id, classId: null, createdAt: nowIso() })
+        .onConflictDoNothing();
+      const [{ perVisit } = { perVisit: 0 }] = [{ perVisit: Number(form.get('perVisit') ?? 0) }];
+      if (perVisit > 0) {
+        await db.insert(schema.kidLedger).values({
+          personId: id, delta: perVisit, reason: 'attendance', serviceId,
+          staffId: user.id > 0 ? user.id : null, createdAt: nowIso(),
+        }).onConflictDoNothing();
+      }
+    }
+    if (!wantsJson) return back('present');
+  }
+
+  if (wantsJson) {
+    const rows = await db.select({ delta: schema.kidLedger.delta })
+      .from(schema.kidLedger).where(eq(schema.kidLedger.personId, id));
+    return new Response(JSON.stringify({ ok: !error, error, balance: balanceOf(rows) }),
+      { status: error ? 400 : 200, headers: { 'content-type': 'application/json' } });
+  }
+}
+
+// ---- reads ------------------------------------------------------------------
+const [child] = await db.select({
+  id: schema.people.id,
+  firstName: schema.people.firstName,
+  lastName: schema.people.lastName,
+  birthday: schema.people.birthday,
+  archived: schema.people.archived,
+  allergies: schema.kidProfiles.allergies,
+  className: schema.kidClasses.name,
+  routeName: schema.kidRoutes.name,
+}).from(schema.people)
+  .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
+  .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kidProfiles.classId))
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
+  .where(eq(schema.people.id, id)).limit(1);
+
+if (!child) return Astro.redirect('/kids/children', 302);
+
+const ledger = await db.select().from(schema.kidLedger)
+  .where(eq(schema.kidLedger.personId, id))
+  .orderBy(desc(schema.kidLedger.id));
+const balance = balanceOf(ledger);
+const recent = ledger.slice(0, 3);
+
+/* Today's [Kids Ministry] meeting, if there is one, and whether they are already down
+ * as here. Only offered when a meeting exists — no inventing a Tuesday. */
+const today = churchToday();
+const [service] = await db.select({ id: schema.services.id })
+  .from(schema.services)
+  .where(and(eq(schema.services.date, today), inArray(schema.services.kind, KIDS_KIND_IDS)))
+  .limit(1);
+const [here] = service
+  ? await db.select({ id: schema.attendance.id }).from(schema.attendance)
+      .where(and(eq(schema.attendance.serviceId, service.id),
+                 eq(schema.attendance.personId, id))).limit(1)
+  : [];
+
+const age = ageOn(child.birthday, today);
+const saved = Astro.url.searchParams.get('saved');
+const SAVED: Record<string, string> = {
+  awarded: 'Added.', spent: 'Taken off.', present: 'Marked here.',
+};
+const AWARD = [1, 2, 5];
+const SPEND = [1, 2, 5];
+---
+<KidsLayout title={child.firstName} user={user}>
+  <p style="margin:0 0 10px;">
+    <a href="/kids/children" style="font-size:15px;">← All children</a>
+  </p>
+
+  {child.archived && (
+    <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:14px;">
+      <strong>This child has left [Kids Ministry].</strong>
+    </div>
+  )}
+
+  <h1 class="q-name">{child.firstName} <span class="q-last">{child.lastName}</span></h1>
+  <p class="k-muted" style="margin:-6px 0 16px;">
+    {[child.className, child.routeName, age !== null ? `${age} years old` : null]
+      .filter(Boolean).join('  ·  ')}
+  </p>
+
+  {/* Above the balance, in red, before anything a teacher might tap. */}
+  {child.allergies && (
+    <div class="q-allergy">
+      <span class="k-label">Allergies</span>
+      <p>{child.allergies}</p>
+    </div>
+  )}
+
+  {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:14px;"><strong>{error}</strong></div>}
+  {saved && SAVED[saved] && <p id="flash" class="q-flash">{SAVED[saved]}</p>}
+
+  <div class="q-balance">
+    <span id="balance">{balance}</span>
+    <small>SE bucks</small>
+  </div>
+
+  <div class="q-grid">
+    {AWARD.map((n) => (
+      <form method="POST" class="q-form">
+        <input type="hidden" name="action" value="award" />
+        <input type="hidden" name="amount" value={n} />
+        <button class="q-btn q-btn--give" type="submit">+{n}</button>
+      </form>
+    ))}
+    {SPEND.map((n) => (
+      <form method="POST" class="q-form">
+        <input type="hidden" name="action" value="spend" />
+        <input type="hidden" name="amount" value={n} />
+        <button class="q-btn q-btn--take" type="submit">−{n}</button>
+      </form>
+    ))}
+  </div>
+
+  {service && !here && (
+    <form method="POST" style="margin:0 0 14px;">
+      <input type="hidden" name="action" value="present" />
+      <input type="hidden" name="serviceId" value={service.id} />
+      <button class="q-present" type="submit">Mark {child.firstName} here today</button>
+    </form>
+  )}
+  {service && here && (
+    <p class="k-muted" style="margin:0 0 14px; font-size:15px;">✓ Already marked here today.</p>
+  )}
+
+  <details class="k-card" style="margin-bottom:14px;">
+    <summary style="cursor:pointer; font-weight:600;">A different amount</summary>
+    <form method="POST" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+      <input type="hidden" name="action" value="award" />
+      <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="10" required
+             aria-label="How many" style="width:90px;" class="q-input" />
+      <input name="note" placeholder="What for?" autocomplete="off" class="q-input" style="flex:1; min-width:130px;" />
+      <button class="k-btn" type="submit">Give</button>
+    </form>
+    <form method="POST" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+      <input type="hidden" name="action" value="spend" />
+      <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="10" required
+             aria-label="How many" style="width:90px;" class="q-input" />
+      <input name="note" placeholder="On what?" autocomplete="off" class="q-input" style="flex:1; min-width:130px;" />
+      <button class="k-btn k-btn--quiet" type="submit">Take off</button>
+    </form>
+  </details>
+
+  {recent.length > 0 && (
+    <p class="k-muted" style="margin:0 0 18px; font-size:14px;">
+      {recent.map((e, i) => (
+        <span>{i > 0 ? '  ·  ' : ''}{e.delta > 0 ? `+${e.delta}` : e.delta} {REASON_LABEL[e.reason] ?? e.reason}</span>
+      ))}
+    </p>
+  )}
+
+  <a href={`/kids/child/${child.id}`} class="q-full">Everything about {child.firstName} →</a>
+</KidsLayout>
+
+<style>
+  .q-name { font-size: clamp(32px, 9vw, 52px); margin: 0 0 2px; line-height: 1.05; }
+  .q-last { font-weight: 400; opacity: .72; }
+  .q-allergy { background: #b01818; color: #fff; border-radius: 14px;
+               padding: 14px 18px; margin: 0 0 16px; }
+  .q-allergy .k-label { opacity: .85; }
+  .q-allergy p { margin: 4px 0 0; font-size: 19px; font-weight: 700; }
+  .q-flash { margin: 0 0 12px; font-weight: 700; color: var(--k-cyan); }
+
+  .q-balance { background: #fff; color: var(--k-ink); border-radius: 16px;
+               padding: 18px 20px; margin: 0 0 14px; text-align: center; }
+  .q-balance span { font-size: clamp(46px, 13vw, 68px); font-weight: 800; line-height: 1; display: block; }
+  .q-balance small { font-size: 14px; font-weight: 700; letter-spacing: .12em;
+                     text-transform: uppercase; color: var(--k-ink-soft); }
+
+  /* Six thumb-sized targets. A phone held one-handed in a classroom is the
+     whole design constraint — 44px is the floor and these are well past it. */
+  .q-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 14px; }
+  .q-form { margin: 0; }
+  .q-btn { width: 100%; font: inherit; font-size: 26px; font-weight: 800; padding: 20px 0;
+           border: 0; border-radius: 14px; cursor: pointer; color: #fff; }
+  .q-btn--give { background: var(--k-orange); }
+  .q-btn--take { background: rgba(255,255,255,.14); border: 1px solid var(--k-line); }
+  .q-btn:active { transform: scale(.97); }
+
+  .q-present { width: 100%; font: inherit; font-size: 17px; font-weight: 700; padding: 16px;
+               border: 1px solid var(--k-cyan); border-radius: 14px; cursor: pointer;
+               background: transparent; color: var(--k-cyan); }
+  .q-input { padding: 12px; font: inherit; font-size: 16px; color: var(--k-ink);
+             border: 1px solid rgba(13,27,69,.22); border-radius: 9px; background: #fff; }
+  .k-btn { font: inherit; font-size: 15px; font-weight: 700; padding: 11px 18px; border: 0;
+           border-radius: 9px; background: var(--k-orange); color: #fff; cursor: pointer; }
+  .k-btn--quiet { background: transparent; color: var(--k-ink-soft);
+                  border: 1px solid rgba(13,27,69,.22); }
+  .q-full { display: block; text-align: center; padding: 14px; font-size: 15px; }
+</style>
+
+<script is:inline>
+  /*
+   * Progressive enhancement, same shape as the register: every button is a real
+   * form that works without JavaScript, and with it the same POST goes by fetch
+   * so a teacher awarding four children in a row does not sit through four page
+   * loads. The balance is updated from the SERVER's answer, never optimistically.
+   */
+  (function () {
+    var balance = document.getElementById('balance');
+    var flash = document.getElementById('flash');
+    document.querySelectorAll('.q-form').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = form.querySelector('button');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        fetch(location.pathname, {
+          method: 'POST',
+          headers: { 'x-kids-quick': 'json',
+                     'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(form)).toString(),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.ok) { form.submit(); return; }
+            balance.textContent = d.balance;
+            balance.animate(
+              [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }],
+              { duration: 320, easing: 'ease-out' });
+          })
+          .catch(function () { form.submit(); })
+          .then(function () { btn.disabled = false; });
+      });
+    });
+  })();
+</script>

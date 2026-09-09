@@ -1,0 +1,221 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema } from '../../db';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { churchToday } from '../../lib/services';
+import { ageOn, classMismatch, type AgeClass } from '../../lib/kids';
+
+/**
+ * Every child, grouped by class.
+ *
+ * All [Kids Ministry] volunteers see all children — the pastor's decision, and reasonable at
+ * seventy children and ten volunteers. There is no per-class or per-route
+ * filtering of what anyone may look at.
+ *
+ * Children who are in `people` but have NO kid_profile are listed too, in their
+ * own group at the bottom. They are the church's children who have not been
+ * enrolled, and leaving them off the page would make them invisible to the one
+ * person who could enrol them.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const today = churchToday();
+
+const classRows = await db.select().from(schema.kidClasses)
+  .where(eq(schema.kidClasses.active, true))
+  .orderBy(asc(schema.kidClasses.sort));
+
+const children = await db.select({
+  id: schema.people.id,
+  firstName: schema.people.firstName,
+  lastName: schema.people.lastName,
+  birthday: schema.people.birthday,
+  photoKey: schema.people.photoKey,
+  classId: schema.kidProfiles.classId,
+  allergies: schema.kidProfiles.allergies,
+  routeId: schema.kidProfiles.routeId,
+  routeName: schema.kidRoutes.name,
+  enrolled: schema.kidProfiles.personId,
+  /* Summed per child in the one query rather than a stored column. At seventy
+   * children this costs nothing, and it is the same number the profile shows
+   * because it is computed the same way — a cached balance is how a list and a
+   * page start disagreeing. */
+  bucks: sql<number>`(select coalesce(sum(delta), 0) from kid_ledger l where l.person_id = people.id)`,
+}).from(schema.people)
+  .leftJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
+  .where(and(eq(schema.people.adultChild, 'child'), eq(schema.people.archived, false)))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+
+const ageClasses: AgeClass[] = classRows.map((c) => ({
+  id: c.id, name: c.name, minAge: c.minAge, maxAge: c.maxAge,
+}));
+
+const rows = children.map((c) => {
+  const age = ageOn(c.birthday, today);
+  return { ...c, age, outgrown: classMismatch(age, c.classId, ageClasses) === true };
+});
+
+/*
+ * Grouped in JS rather than with a query per class: seventy children is one
+ * cheap read, and five reads to render one page would be five chances for the
+ * list to disagree with itself.
+ */
+const classGroups = classRows.map((c) => ({
+  key: `c${c.id}`, name: c.name, note: c.description,
+  kids: rows.filter((r) => r.classId === c.id),
+}));
+
+/*
+ * The catch-all is "enrolled and not shown above", NOT "class_id is null".
+ *
+ * Those are the same thing right up until a class is made inactive, at which
+ * point its children have a class_id that matches no visible group and drop off
+ * this page entirely — present in the database, invisible to everyone, and
+ * nobody looking for them because nothing said they had gone. Deriving the
+ * group by subtraction means every enrolled child appears exactly once whatever
+ * happens to the class list.
+ */
+const shown = new Set(classGroups.flatMap((g) => g.kids.map((k) => k.id)));
+const groups = [
+  ...classGroups,
+  { key: 'unplaced', name: 'Not yet in a class',
+    note: 'Enrolled in [Kids Ministry], but not in a class that is running.',
+    kids: rows.filter((r) => r.enrolled !== null && !shown.has(r.id)) },
+  { key: 'unenrolled', name: 'Not in [Kids Ministry]', note: 'Children in the church records who have not been added.',
+    kids: rows.filter((r) => r.enrolled === null) },
+].filter((g) => g.kids.length > 0);
+
+/* Children who have left. Kept findable — archiving is reversible and the only
+ * page that can undo it is the child's own, so there has to be a way back to
+ * them. Deliberately a short list at the bottom rather than mixed in. */
+const gone = await db.select({
+  id: schema.people.id,
+  firstName: schema.people.firstName,
+  lastName: schema.people.lastName,
+}).from(schema.people)
+  .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
+  .where(and(eq(schema.people.adultChild, 'child'), eq(schema.people.archived, true)))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+
+const enrolled = rows.filter((r) => r.enrolled !== null).length;
+const onRoute = rows.filter((r) => r.routeId !== null).length;
+const withAllergies = rows.filter((r) => r.allergies).length;
+---
+<KidsLayout title="Children" user={user}>
+  {Astro.url.searchParams.get('saved') === 'archived' && (
+    <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">
+      That child has left [Kids Ministry]. Nothing was deleted — you can find them at the
+      bottom of this page and bring them back.
+    </div>
+  )}
+
+  <div style="display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:240px;">
+      <h1>Children</h1>
+      <p class="k-muted" style="margin:-4px 0 22px;">
+        {enrolled} in [Kids Ministry] · {onRoute} on a bus route · {withAllergies} with allergies noted
+      </p>
+    </div>
+    <a href="/kids/child/new" class="k-add">+ Add a child</a>
+  </div>
+
+  {/* Client-side, because seventy children all fit on the page already and a
+      round trip per keystroke would be slower than the list is long. */}
+  <input id="q" type="search" placeholder="Find a child by name" autocomplete="off"
+         style="width:100%; max-width:420px; padding:11px 14px; font-size:16px; margin-bottom:24px;
+                border-radius:10px; border:1px solid var(--k-line); background:var(--k-navy-soft);
+                color:var(--k-text);" />
+
+  {groups.map((g) => (
+    <section class="k-group" data-group>
+      <div class="k-label" style="color:var(--k-muted); margin:22px 0 10px;">
+        {g.name} <span style="opacity:.7; font-weight:600;">· {g.kids.length}</span>
+      </div>
+      <div class="k-card" style="padding:6px 8px;">
+        {g.kids.map((k) => (
+          <a class="k-row" href={`/kids/child/${k.id}`}
+             data-name={`${k.firstName} ${k.lastName}`.toLowerCase()}>
+            <span class="k-row__name">
+              {k.firstName} {k.lastName}
+              {k.age !== null && <span class="k-row__age">{k.age}</span>}
+            </span>
+            <span class="k-row__tags">
+              {/* Allergies first and in red. The brief is explicit that this
+                  must be prominent — it is the one thing on the page somebody
+                  needs to find in four seconds. */}
+              {k.allergies && <span class="k-tag k-tag--allergy">allergy</span>}
+              {k.bucks > 0 && <span class="k-tag k-tag--bucks">{k.bucks} SE</span>}
+              {k.routeName && <span class="k-tag">{k.routeName.split('—')[0].trim()}</span>}
+              {k.outgrown && <span class="k-tag k-tag--warn">check class</span>}
+            </span>
+          </a>
+        ))}
+      </div>
+    </section>
+  ))}
+
+  <p id="none" class="k-muted" hidden style="margin-top:24px;">No child by that name.</p>
+
+  {gone.length > 0 && (
+    <details style="margin-top:28px;">
+      <summary class="k-muted" style="cursor:pointer; font-size:15px;">
+        {gone.length} {gone.length === 1 ? 'child has' : 'children have'} left [Kids Ministry]
+      </summary>
+      <div class="k-card" style="padding:6px 8px; margin-top:10px;">
+        {gone.map((g) => (
+          <a class="k-row" href={`/kids/child/${g.id}`}>
+            <span class="k-row__name" style="opacity:.7;">{g.firstName} {g.lastName}</span>
+            <span class="k-row__tags"><span class="k-tag">left</span></span>
+          </a>
+        ))}
+      </div>
+      <p class="k-muted" style="margin:10px 0 0; font-size:14px;">
+        Nothing has been deleted. Open one to bring them back.
+      </p>
+    </details>
+  )}
+</KidsLayout>
+
+<style>
+  .k-row { display:flex; align-items:center; gap:12px; justify-content:space-between;
+           padding:11px 14px; border-radius:10px; text-decoration:none; color:var(--k-ink); }
+  .k-row + .k-row { border-top:1px solid rgba(13,27,69,.08); }
+  .k-row:hover { background:rgba(13,27,69,.05); }
+  .k-row__name { font-weight:600; font-size:16px; }
+  .k-row__age { font-weight:400; color:var(--k-ink-soft); margin-left:8px; font-size:14px; }
+  .k-row__tags { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .k-tag { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+           padding:3px 8px; border-radius:999px; background:rgba(13,27,69,.08); color:var(--k-ink-soft); }
+  .k-tag--allergy { background:#b01818; color:#fff; }
+  .k-tag--warn { background:var(--k-orange); color:#fff; }
+  .k-tag--bucks { background:rgba(31,107,58,.12); color:#1f6b3a; }
+  .k-add { background:var(--k-orange); color:#fff; text-decoration:none; font-weight:700;
+           font-size:15px; padding:11px 18px; border-radius:9px; white-space:nowrap; }
+</style>
+
+<script is:inline>
+  // Plain DOM, no framework: the list is already rendered and this only hides
+  // rows. Written so a child whose row is hidden also hides an empty group
+  // heading, which is otherwise a page of headings with nothing under them.
+  (function () {
+    var q = document.getElementById('q');
+    var none = document.getElementById('none');
+    if (!q) return;
+    q.addEventListener('input', function () {
+      var t = q.value.trim().toLowerCase();
+      var shown = 0;
+      document.querySelectorAll('[data-group]').forEach(function (g) {
+        var any = 0;
+        g.querySelectorAll('[data-name]').forEach(function (row) {
+          var hit = !t || row.getAttribute('data-name').indexOf(t) !== -1;
+          row.hidden = !hit;
+          if (hit) any++;
+        });
+        g.hidden = any === 0;
+        shown += any;
+      });
+      if (none) none.hidden = shown !== 0;
+    });
+  })();
+</script>

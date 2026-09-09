@@ -1,0 +1,503 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { and, eq, gt, inArray } from 'drizzle-orm';
+import { photosEnabled, putPhoto, deletePhoto, sniffImage, MAX_UPLOAD_BYTES } from '../../lib/photos';
+import { createInvite, revokeAccess, getInviteTemplate, renderInvite } from '../../lib/directory';
+import { sendOne, smsConfigured, countSegments, toE164 } from '../../lib/sms';
+import { CHURCH_TZ } from '../../lib/services';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const isNew = Astro.params.id === 'new';
+
+let person: typeof schema.people.$inferSelect | null = null;
+let error: string | null = null;
+const saved = Astro.url.searchParams.get('saved');
+
+if (!isNew) {
+  const id = Number(Astro.params.id);
+  if (!Number.isInteger(id)) return Astro.redirect('/people', 302);
+  const rows = await db.select().from(schema.people).where(eq(schema.people.id, id)).limit(1);
+  person = rows[0] ?? null;
+  if (!person) return new Response('Not found', { status: 404 });
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+
+  // Restoring is its own action so it cannot happen as a side effect of an
+  // ordinary save — the archive confirm promises this is reversible, and until
+  // now there was no way to actually do it.
+  const act = String(form.get('action') ?? '');
+
+  if ((act === 'photo' || act === 'photo-remove') && person) {
+    const env = Astro.locals.runtime.env;
+    const back = (r: string) => Astro.redirect(`/people/${person.id}?saved=${r}`, 303);
+    if (!photosEnabled(env)) return back('photos-off');
+
+    if (act === 'photo-remove') {
+      await deletePhoto(env, person.photoKey);
+      await db.update(schema.people).set({ photoKey: null, updatedAt: nowIso() })
+        .where(eq(schema.people.id, person.id));
+      return back('photo-removed');
+    }
+
+    const file = form.get('photo');
+    if (!(file instanceof File) || file.size === 0) return back('photo-none');
+    if (file.size > MAX_UPLOAD_BYTES) return back('photo-big');
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Judged on the bytes, not on the browser's Content-Type, which anyone
+    // can set to anything. These files get served back to browsers.
+    const mime = sniffImage(bytes);
+    if (!mime) return back('photo-type');
+
+    const key = await putPhoto(env, person.id, bytes, mime);
+    // Written to the row BEFORE the old object is dropped: if the delete
+    // fails we are left with a stray file, which costs nothing. The other
+    // order risks a row pointing at an object that is already gone.
+    await db.update(schema.people).set({ photoKey: key, updatedAt: nowIso() })
+      .where(eq(schema.people.id, person.id));
+    await deletePhoto(env, person.photoKey);
+    return back('photo-saved');
+  }
+
+  if (act === 'invite' && person) {
+    const env = Astro.locals.runtime.env;
+    // Every gate re-checked HERE, not trusted from the page that drew the
+    // button. A form can be replayed; the rule has to hold at the write.
+    if (person.archived || person.adultChild !== 'adult' || !person.includeInDirectory) {
+      return Astro.redirect(`/people/${person.id}?saved=not-eligible`, 303);
+    }
+    if (!person.phoneE164) return Astro.redirect(`/people/${person.id}?saved=no-number`, 303);
+    if (!smsConfigured(env)) return Astro.redirect(`/people/${person.id}?saved=sms-off`, 303);
+
+    const token = await createInvite(env, person.id, user.email);
+    // The wording staff have set on /invites, so both send paths say the same thing.
+    const body = renderInvite(await getInviteTemplate(env), Astro.url.origin, token);
+    const result = await sendOne(env, person.phoneE164, body);
+    await db.insert(schema.messageLog).values({
+      personId: person.id, phoneE164: person.phoneE164, body,
+      direction: 'out', twilioSid: result.sid ?? null,
+      status: result.ok ? (result.status ?? 'queued') : 'failed',
+      errorCode: result.errorCode ?? null,
+      segments: countSegments(body).segments, createdAt: nowIso(),
+    });
+    if (result.ok) {
+      // Same stamp the batch sender uses, so a manual send also takes them out
+      // of the batch queue and they are not texted twice from two directions.
+      await db.update(schema.directoryInvites).set({ sentAt: nowIso() })
+        .where(and(eq(schema.directoryInvites.personId, person.id),
+                   eq(schema.directoryInvites.token, token)));
+    }
+    return Astro.redirect(`/people/${person.id}?saved=${result.ok ? 'invited' : 'invite-failed'}`, 303);
+  }
+
+  if (act === 'revoke' && person) {
+    await revokeAccess(Astro.locals.runtime.env, person.id);
+    return Astro.redirect(`/people/${person.id}?saved=revoked`, 303);
+  }
+
+  if (act === 'restore' && person) {
+    await db.update(schema.people)
+      .set({ archived: false, updatedAt: nowIso() })
+      .where(eq(schema.people.id, person.id));
+    return Astro.redirect(`/people/${person.id}?saved=restored`, 303);
+  }
+  const str = (k: string) => { const val = form.get(k); return typeof val === 'string' && val.trim() ? val.trim() : null; };
+  const firstName = str('firstName');
+  const lastName = str('lastName');
+
+  if (!firstName || !lastName) {
+    error = 'A first and last name are both required.';
+  } else {
+    const adultChild = (form.get('adultChild') as 'adult' | 'child' | 'unknown') ?? 'unknown';
+    const typedPhone = str('phone');
+    const values = {
+      firstName, lastName,
+      phone: typedPhone,
+      /*
+       * The textable form of the number, derived HERE because this is where a
+       * number enters the system.
+       *
+       * It was missing entirely: the form saved the display phone and never
+       * computed this, so every person added or edited through the dashboard
+       * had a number on their page and no way to be reached — invisible to the
+       * invite sender and to every broadcast, with nothing on screen saying
+       * why. Harold Beckwith hit it on 2026-09-01.
+       *
+       * Null when the number cannot be read as a real one, so an unusable
+       * number is stored as unusable rather than half-working.
+       */
+      phoneE164: toE164(typedPhone),
+      email: str('email')?.toLowerCase() ?? null,
+      addressStreet: str('addressStreet'), addressCity: str('addressCity'),
+      addressState: str('addressState'), addressZip: str('addressZip'),
+      birthday: str('birthday'), anniversary: str('anniversary'), notes: str('notes'),
+      adultChild,
+      // Guarded, not merely defaulted. A child appearing in the directory is
+      // the failure this whole design exists to prevent, so the rule lives at
+      // the WRITE — where a stray checkbox or a future form cannot skip it.
+      includeInDirectory: adultChild === 'adult' && form.get('includeInDirectory') === 'on',
+      updatedAt: nowIso(),
+      // Naming them is what completes the record. Checked against the stub we
+      // generate rather than merely "not empty", so saving without touching
+      // the name does not silently mark it done.
+      needsProfile: person?.needsProfile
+        ? (firstName.toLowerCase() === 'new' && lastName.toLowerCase().startsWith('contact '))
+        : (person?.needsProfile ?? false),
+    };
+
+    // Texting consent is only touched when it actually CHANGES, so that saving
+    // an unrelated edit cannot quietly restamp a real opt-in with today's date
+    // and 'staff-set', destroying the evidence of when someone truly agreed.
+    // On a NEW person there is no previous value to differ from, so the
+    // `person &&` guard below skipped consent entirely and everyone added
+    // through the form was created as 'unknown' — listed in the directory,
+    // present at check-in, and silently unreachable by text or invitation.
+    const chosen = String(form.get('smsConsent') ?? '');
+    if (isNew && chosen) {
+      Object.assign(values, {
+        smsConsent: chosen as 'unknown' | 'opted_in' | 'opted_out',
+        // Only stamped when it is an actual answer. Recording 'not asked' as a
+        // dated staff decision would put a consent trail behind a non-event.
+        ...(chosen === 'unknown' ? {} : { smsConsentSource: 'staff-set', smsConsentAt: nowIso() }),
+      });
+    } else if (person && chosen && chosen !== person.smsConsent) {
+      Object.assign(values, {
+        smsConsent: chosen as 'unknown' | 'opted_in' | 'opted_out',
+        smsConsentSource: 'staff-set',
+        smsConsentAt: nowIso(),
+      });
+    }
+
+    if (isNew) {
+      const created = await db.insert(schema.people)
+        .values({ ...values, createdAt: nowIso() }).returning({ id: schema.people.id });
+      return Astro.redirect(`/people/${created[0]!.id}?saved=1`, 303);
+    }
+    await db.update(schema.people).set(values).where(eq(schema.people.id, person!.id));
+
+    // Group membership: replace the set rather than diffing it. At this size
+    // that is simpler to reason about and cannot drift out of step with the
+    // boxes actually ticked.
+    const wanted = form.getAll('group').map((g) => Number(g)).filter(Boolean);
+    await db.delete(schema.peopleGroups).where(eq(schema.peopleGroups.personId, person!.id));
+    if (wanted.length) {
+      await db.insert(schema.peopleGroups)
+        .values(wanted.map((groupId) => ({ personId: person!.id, groupId })))
+        .onConflictDoNothing();
+    }
+    return Astro.redirect(`/people/${person!.id}?saved=1`, 303);
+  }
+}
+
+/**
+ * This person's live invite link.
+ *
+ * Shown to staff so the link can be delivered some other way — read out over
+ * the phone, written on a card, sent however suits. Without this the link only
+ * exists inside a text message, so a wrong number or a texting outage means the
+ * invite is created and then unreachable by anybody.
+ */
+const liveInvite = person
+  ? (await db.select({ token: schema.directoryInvites.token,
+                       expiresAt: schema.directoryInvites.expiresAt })
+      .from(schema.directoryInvites)
+      .where(and(eq(schema.directoryInvites.personId, person.id),
+                 // Not filtered on unused: the link keeps working until it
+                 // expires, so an already-opened one is still the live link
+                 // and still the thing to read out to somebody.
+                 gt(schema.directoryInvites.expiresAt, Date.now())))
+      .limit(1))[0]
+  : undefined;
+
+const allGroups = await db.select().from(schema.groups).orderBy(schema.groups.name);
+const memberOf = person
+  ? new Set((await db.select({ groupId: schema.peopleGroups.groupId })
+      .from(schema.peopleGroups).where(eq(schema.peopleGroups.personId, person.id)))
+      .map((r) => r.groupId))
+  : new Set<number>();
+
+const v = person;
+const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
+---
+<AppLayout title={title} user={user}>
+  <p style="margin:0 0 6px;"><a href="/people">← All people</a></p>
+  <h1>{title}</h1>
+
+  {saved === '1' && <p class="notice notice--ok">Saved.</p>}
+  {saved === 'restored' && <p class="notice notice--ok">Restored — they are back on the check-in list.</p>}
+  {saved === 'invited' && <p class="notice notice--ok">Invite texted. The link keeps working for 30 days, however many times they open it.</p>}
+  {saved === 'photo-saved' && <p class="notice notice--ok">Photo saved.</p>}
+  {saved === 'photo-removed' && <p class="notice notice--ok">Photo removed.</p>}
+  {saved === 'photo-none' && <p class="notice">No file was chosen, so nothing changed.</p>}
+  {saved === 'photo-big' && <p class="notice">That photo is bigger than 8&nbsp;MB. Please choose a smaller one.</p>}
+  {saved === 'photo-type' && <p class="notice">That file is not a JPEG, PNG or WebP image.</p>}
+  {saved === 'photos-off' && <p class="notice">Photo storage is not switched on yet.</p>}
+  {saved === 'invite-failed' && (
+    <p class="notice">
+      <strong>The invite was created but could not be texted.</strong> That is
+      expected while the Twilio campaign is still pending. The link is below —
+      give it to them another way, or send it again once texting works.
+    </p>
+  )}
+  {saved === 'revoked' && <p class="notice notice--ok">Access revoked. Any device they were signed in on is signed out now.</p>}
+  {saved === 'no-number' && <p class="notice">They have no usable phone number, so an invite cannot be sent.</p>}
+  {saved === 'not-eligible' && <p class="notice">Only adults who are marked for the directory can be invited.</p>}
+  {saved === 'sms-off' && <p class="notice">Texting is not connected yet, so invites cannot be sent.</p>}
+  {v?.archived && (
+    <div class="notice" style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+      <span><strong>This person is archived.</strong> They are off the check-in
+      list and out of the directory. Past attendance is unchanged.</span>
+      <form method="POST" style="margin:0;">
+        <input type="hidden" name="action" value="restore" />
+        <button class="btn" type="submit" style="min-height:38px; padding:8px 16px;">Restore them</button>
+      </form>
+    </div>
+  )}
+  {v?.needsProfile && (
+    <p class="notice">
+      <strong>This person signed themselves up by text.</strong> They are already
+      opted in and will receive messages — only the name and details are missing.
+      Filling in a real first and last name clears this notice.
+    </p>
+  )}
+  {error && <p class="notice">{error}</p>}
+
+  {!isNew && v && (
+    /* Its own form with its own encoding. The main form stays urlencoded —
+       adding a file input to it would switch the whole record edit over to
+       multipart, which is a lot of risk for one field. */
+    <form method="POST" enctype="multipart/form-data" class="card photo-card" style="max-width:640px;">
+      <input type="hidden" name="action" value="photo" />
+      <div class="photo-av">
+        {v.photoKey
+          ? <img src={`/directory/photo/${v.id}?v=${encodeURIComponent(v.photoKey.slice(-8))}`} alt="" width="160" height="160" />
+          : <span>{`${v.firstName[0] ?? ''}${v.lastName[0] ?? ''}`.toUpperCase()}</span>}
+      </div>
+      <div class="photo-body">
+        <p class="photo-h">Directory photo</p>
+        <p class="photo-note">
+          Shown as a round portrait in the directory, so a head-and-shoulders
+          shot works best. JPEG, PNG or WebP, up to 8&nbsp;MB.
+        </p>
+        <div class="photo-acts">
+          <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required />
+          <button type="submit">Upload</button>
+        </div>
+      </div>
+    </form>
+  )}
+  {!isNew && v?.photoKey && (
+    <form method="POST" style="max-width:640px; margin:-6px 0 20px;"
+          onsubmit="return confirm('Remove this photo?')">
+      <input type="hidden" name="action" value="photo-remove" />
+      <button type="submit" class="linkbtn">Remove photo</button>
+    </form>
+  )}
+
+  <form method="POST" class="card" style="max-width:640px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+      <label class="field"><span>First name</span><input name="firstName" value={v?.firstName ?? ''} required /></label>
+      <label class="field"><span>Last name</span><input name="lastName" value={v?.lastName ?? ''} required /></label>
+    </div>
+    <label class="field"><span>Phone</span><input name="phone" type="tel" value={v?.phone ?? ''} /></label>
+    <label class="field"><span>Email</span><input name="email" type="email" value={v?.email ?? ''} /></label>
+
+    <label class="field"><span>Street</span><input name="addressStreet" value={v?.addressStreet ?? ''} /></label>
+    <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:0 16px;">
+      <label class="field"><span>City</span><input name="addressCity" value={v?.addressCity ?? ''} /></label>
+      <label class="field"><span>State</span><input name="addressState" value={v?.addressState ?? ''} /></label>
+      <label class="field"><span>ZIP</span><input name="addressZip" value={v?.addressZip ?? ''} /></label>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 16px;">
+      <label class="field"><span>Birthday</span><input name="birthday" type="date" value={v?.birthday ?? ''} /></label>
+      <label class="field"><span>Anniversary</span><input name="anniversary" type="date" value={v?.anniversary ?? ''} /></label>
+    </div>
+
+    <label class="field">
+      <span>Adult or child</span>
+      <select name="adultChild">
+        <option value="adult" selected={v?.adultChild === 'adult'}>Adult</option>
+        <option value="child" selected={v?.adultChild === 'child'}>Child</option>
+        <option value="unknown" selected={!v || v.adultChild === 'unknown'}>Not confirmed yet</option>
+      </select>
+    </label>
+    {(!v || v.adultChild === 'unknown') && (
+      <p class="muted" style="font-size:14px; margin:-8px 0 16px;">
+        Anyone not confirmed as an adult is kept out of the member directory and
+        counted as a child in attendance.
+      </p>
+    )}
+
+    <label style="display:flex; gap:10px; align-items:flex-start; margin-bottom:16px;">
+      <input type="checkbox" name="includeInDirectory" checked={v?.includeInDirectory ?? false}
+             style="width:20px;height:20px;margin-top:2px;" />
+      <span>
+        <strong>Include in the member directory</strong><br />
+        <span class="muted" style="font-size:14px;">
+          Only for adults who have given consent in person. Children are never listed.
+        </span>
+      </span>
+    </label>
+
+    {/* Shown when ADDING someone too, not only when editing. It used to be
+        hidden on the add form, so a new person was created as "not asked" with
+        no way to say otherwise — listed in the directory, present at check-in,
+        and silently unreachable by text or invitation. The default stays "not
+        asked": consent is something a person gives, not something a form
+        assumes. */}
+    <div class="sms">
+      <p class="label sms__l">Text messages</p>
+      <label class="field" style="margin-bottom:8px;">
+        <span class="visually-hidden">Texting consent</span>
+        <select name="smsConsent">
+          <option value="opted_in" selected={v?.smsConsent === 'opted_in'}>Opted in — will receive texts</option>
+          <option value="unknown" selected={!v || v.smsConsent === 'unknown'}>Not asked — will not receive texts</option>
+          <option value="opted_out" selected={v?.smsConsent === 'opted_out'}>Opted out — will not receive texts</option>
+        </select>
+      </label>
+      {isNew && (
+        <p class="sms__prov">
+          Only choose “opted in” if they have actually agreed to receive church
+          texts. Left as “not asked” they are added without texts, which you can
+          change at any time.
+        </p>
+      )}
+    </div>
+
+    {v && (
+      <div class="sms">
+        <p class="sms__prov">
+          {v.smsConsentSource === 'sms-start' && <>They texted START themselves</>}
+          {v.smsConsentSource === 'sms-stop' && <>They replied STOP</>}
+          {v.smsConsentSource === 'breeze-import' && <>Carried over from Breeze — nobody recorded asking</>}
+          {v.smsConsentSource === 'staff-set' && <>Set by hand in this dashboard</>}
+          {!v.smsConsentSource && <>No record of where this came from</>}
+          {v.smsConsentAt
+            ? <> · {new Date(v.smsConsentAt).toLocaleString('en-US', {
+                  dateStyle: 'medium', timeStyle: 'short',
+                  // The Worker runs in UTC. Without pinning this, a text sent at
+                  // 8pm Indianapolis time is reported as 12:10 AM the NEXT DAY —
+                  // wrong, and wrong in a way that undermines the record's whole
+                  // purpose as evidence of when consent was given.
+                  timeZone: CHURCH_TZ,
+                })} (Indianapolis)</>
+            : <> · no date on record</>}
+        </p>
+        {v.smsConsentSource === 'sms-stop' && (
+          <p class="sms__warn">
+            This person asked to stop by text. Only change this if they have since
+            asked you to start again.
+          </p>
+        )}
+        {!v.phoneE164 && (
+          <p class="sms__warn">No usable phone number, so they cannot be texted whatever this says.</p>
+        )}
+      </div>
+    )}
+
+    {allGroups.length > 0 && (
+      <div class="sms" style="border-top:1px solid var(--hair); padding-top:18px; margin-bottom:18px;">
+        <p class="label sms__l">Groups</p>
+        <div style="display:flex; flex-wrap:wrap; gap:10px 22px;">
+          {allGroups.map((g) => (
+            <label style="display:flex; gap:8px; align-items:center; font-size:16px;">
+              <input type="checkbox" name="group" value={g.id} checked={memberOf.has(g.id)}
+                     style="width:20px;height:20px;" />
+              {g.name}
+            </label>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {v && (
+      <div class="sms">
+        <p class="label sms__l">Member directory</p>
+        {v.adultChild !== 'adult' || !v.includeInDirectory || v.archived ? (
+          <p class="sms__prov">
+            Not listed. Only adults marked for the directory appear in it, and
+            only they can be given access.
+          </p>
+        ) : (
+          <>
+            <p class="sms__prov">
+              {v.directoryStatus === 'active' && <>They have access to the directory.</>}
+              {v.directoryStatus === 'invited' && <>Invited — waiting for them to tap the link.</>}
+              {v.directoryStatus === 'revoked' && <>Access was revoked.</>}
+              {v.directoryStatus === 'none' && <>Listed in the directory, but has no access to view it.</>}
+              {!v.phoneE164 && <> No phone number, so an invite cannot be texted.</>}
+            </p>
+            {liveInvite && (
+              <div class="invite">
+                <p class="invite__l">Their link — reusable until
+                  {' '}{new Date(liveInvite.expiresAt).toLocaleString('en-US',
+                        { dateStyle: 'medium', timeStyle: 'short', timeZone: CHURCH_TZ })}</p>
+                <input class="invite__url" readonly value={`${Astro.url.origin}/directory/join/${liveInvite.token}`}
+                       onclick="this.select()" />
+                <p class="invite__note">
+                  Give this to them however suits — it is the same link the text
+                  contains. Anyone who opens it gets in, so do not post it anywhere.
+                </p>
+              </div>
+            )}
+            {v.phoneE164 && (
+              <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+                <button class="btn btn--ghost" type="submit" name="action"
+                        value="invite" formnovalidate style="min-height:38px; padding:8px 16px;">
+                  {v.directoryStatus === 'active' ? 'Send a new link' : 'Text them an invite'}
+                </button>
+                {(v.directoryStatus === 'active' || v.directoryStatus === 'invited') && (
+                  <button class="btn btn--danger" type="submit" name="action" value="revoke"
+                          formnovalidate style="min-height:38px; padding:8px 16px;"
+                          onclick="return confirm('Revoke directory access? They will be signed out everywhere immediately.')">
+                    Revoke access
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )}
+
+    <label class="field"><span>Notes</span><textarea name="notes" rows="4">{v?.notes ?? ''}</textarea></label>
+
+    <button class="btn" type="submit">{isNew ? 'Add person' : 'Save changes'}</button>
+  </form>
+</AppLayout>
+
+<style>
+  .sms { border-top: 1px solid var(--hair); padding-top: 18px; margin-bottom: 18px; }
+  .sms__l { color: var(--red); margin: 0 0 8px; }
+  .sms__prov { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .invite { margin-top: 14px; padding: 14px; background: var(--cream-deep); border-radius: 8px; }
+  .invite__l { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+               text-transform: uppercase; color: var(--ink-soft); }
+  .invite__url { width: 100%; font: inherit; font-size: 14px; padding: 9px 11px;
+                 border: 1px solid var(--hair); border-radius: 6px; background: #fff; }
+  .invite__note { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); }
+  .photo-card { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+  .photo-av { flex: none; width: 96px; height: 96px; border-radius: 999px; overflow: hidden;
+              background: var(--cream-deep); border: 1px solid var(--hair);
+              display: flex; align-items: center; justify-content: center;
+              font-weight: 700; font-size: 30px; color: var(--ink-soft); }
+  .photo-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo-body { flex: 1 1 260px; min-width: 0; }
+  .photo-h { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+             text-transform: uppercase; color: var(--ink-soft); }
+  .photo-note { margin: 0 0 12px; font-size: 14px; color: var(--ink-soft); line-height: 1.5; }
+  .photo-acts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .photo-acts input[type=file] { font: inherit; font-size: 14px; min-width: 0; max-width: 100%; }
+  .linkbtn { font: inherit; font-size: 14px; background: none; border: 0; padding: 0;
+             color: var(--red); text-decoration: underline; cursor: pointer; }
+
+  .sms__warn { margin: 8px 0 0; font-size: 14px; color: var(--red-deep);
+               background: #f7e9e9; border-left: 3px solid var(--red);
+               padding: 8px 12px; border-radius: 0 6px 6px 0; }
+</style>

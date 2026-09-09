@@ -1,0 +1,122 @@
+---
+import KidsLayout from '../../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../../db';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { readForm } from '../../../lib/form';
+import { churchToday, formatDate, kindLabel, likelyKidsKind, kindHasClasses, KIDS_KIND_IDS } from '../../../lib/services';
+
+/**
+ * Choosing which register to take.
+ *
+ * Mirrors /attendance's own index deliberately — pick a date and a meeting,
+ * then go — so that a volunteer who has ever taken the door check-in already
+ * knows how this works.
+ *
+ * The SERVICE IS CREATED HERE, on purpose, and not by the register page.
+ * services carries unique(date, kind), so re-opening the same day finds the
+ * existing row rather than failing; but creating it only when somebody says
+ * they are taking a register keeps the table free of empty Sundays nobody met on.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+let error: string | null = null;
+
+const today = churchToday();
+const dateParam = Astro.url.searchParams.get('date');
+const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : today;
+const kindParam = Astro.url.searchParams.get('kind');
+const kind = kindParam && KIDS_KIND_IDS.includes(kindParam as any)
+  ? kindParam
+  : (likelyKidsKind(date) ?? 'kids-sunday');
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const d = String(form.get('date') ?? '').trim();
+  const k = String(form.get('kind') ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) error = 'Pick a date.';
+  // [Kids Ministry] kinds only. The congregation's own services are taken on
+  // /attendance, and offering them here would let a volunteer open the
+  // sanctuary register in the children's chrome.
+  else if (!KIDS_KIND_IDS.includes(k as any)) error = 'Pick a meeting.';
+  else {
+    const [existing] = await db.select({ id: schema.services.id }).from(schema.services)
+      .where(and(eq(schema.services.date, d), eq(schema.services.kind, k as any))).limit(1);
+    // Re-opening rather than refusing: somebody coming back to finish should
+    // land in the register they started, not an error.
+    const id = existing?.id ?? (await db.insert(schema.services)
+      .values({ date: d, kind: k as any, createdAt: nowIso() })
+      .returning({ id: schema.services.id }))[0]!.id;
+    // The club has no breakout classes, so there is one register and no
+    // reason to make somebody choose from a list of one.
+    return Astro.redirect(kindHasClasses(k) ? `/kids/register/${id}` : `/kids/register/${id}/all`, 303);
+  }
+}
+
+/** Registers already started, most recent first. The way back into last
+ *  Sunday's, which is when a correction actually gets made. */
+const recent = await db.select({
+  id: schema.services.id, date: schema.services.date, kind: schema.services.kind,
+  present: sql<number>`(select count(*) from attendance a where a.service_id = services.id)`,
+  inClass: sql<number>`(select count(*) from attendance a where a.service_id = services.id and a.class_id is not null)`,
+}).from(schema.services)
+  .where(sql`kind in (${sql.join(KIDS_KIND_IDS.map((k) => sql`${k}`), sql`, `)})`)
+  .orderBy(sql`date desc`, sql`id desc`).limit(8);
+
+const KINDS = KIDS_KIND_IDS.map((id) => ({ id, label: kindLabel(id) }));
+---
+<KidsLayout title="Registers" user={user}>
+  <h1>Registers</h1>
+  <p class="k-muted" style="margin:-4px 0 22px;">Mark who is here, class by class.</p>
+
+  {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
+
+  <div class="k-card" style="max-width:560px; margin-bottom:28px;">
+    <h2 style="margin-top:0;">Take a register</h2>
+    <form method="POST">
+      <div class="k-grid">
+        <label class="k-field"><span>Date</span>
+          <input type="date" name="date" value={date} required /></label>
+        <label class="k-field"><span>Meeting</span>
+          <select name="kind">
+            {KINDS.map((k) => <option value={k.id} selected={k.id === kind}>{k.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <button class="k-btn" type="submit">Open</button>
+    </form>
+  </div>
+
+  {recent.length > 0 && (
+    <>
+      <div class="k-label k-muted" style="margin-bottom:10px;">Recent</div>
+      <div class="k-card" style="padding:6px 8px;">
+        {recent.map((s) => (
+          <a class="k-row" href={kindHasClasses(s.kind) ? `/kids/register/${s.id}` : `/kids/register/${s.id}/all`}>
+            <span>
+              <strong>{kindLabel(s.kind)}</strong>
+              <span class="k-muted" style="margin-left:8px; font-size:14px;">{formatDate(s.date)}</span>
+            </span>
+            <span class="k-muted" style="font-size:14px;">
+              {s.present} here{s.inClass !== s.present ? ` · ${s.inClass} in a class` : ''}
+            </span>
+          </a>
+        ))}
+      </div>
+    </>
+  )}
+</KidsLayout>
+
+<style>
+  .k-grid { display:grid; gap:0 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .k-field { display:block; margin-bottom:14px; }
+  .k-field > span { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--k-ink-soft); margin-bottom:5px; }
+  .k-field input, .k-field select { width:100%; padding:10px 12px; font:inherit; font-size:16px;
+    color:var(--k-ink); border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-row { display:flex; align-items:center; gap:12px; justify-content:space-between;
+           padding:12px 14px; border-radius:10px; text-decoration:none; color:var(--k-ink); }
+  .k-row + .k-row { border-top:1px solid rgba(13,27,69,.08); }
+  .k-row:hover { background:rgba(13,27,69,.05); }
+</style>

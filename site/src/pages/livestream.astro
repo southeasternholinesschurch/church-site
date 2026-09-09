@@ -1,0 +1,315 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import { getNextService } from '../lib/time';
+import { clockText } from '../lib/format';
+import sanctuary from '../assets/photos/sanctuary.jpg';
+
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+const [overrideEntry] = await getCollection('livestreamOverride');
+const override = overrideEntry.data;
+
+const nextService = getNextService(settings.serviceTimes);
+---
+<BaseLayout
+  title="Watch Live"
+  description="Watch [Your Church Name] live on Sunday morning, Sunday evening and Wednesday night."
+  installAs="livestream"
+>
+  <!-- ============ STAGE ============ -->
+  <section class="stage" data-par-frame>
+    <div class="stage__bg duo par" data-par="60" style="--drift-scale: 1.26;" aria-hidden="true">
+      <Image src={sanctuary} alt="" widths={[900, 1400, 2000, 2400]} sizes="140vw" />
+    </div>
+    <div class="stage__scrim" aria-hidden="true"></div>
+
+    <div class="stage__body">
+      <p class="label load d1 stage__eyebrow">Wherever You Are</p>
+      <h1 class="serif load d2">Watch Live</h1>
+
+      <!-- Behaviour is unchanged from the working implementation: manual
+           override wins, then auto-detect, then countdown. Only the markup
+           and styling moved into the new design system. -->
+      <div
+        id="livestream-app"
+        class="load d3"
+        data-override-active={String(override.active)}
+        data-override-url={override.youtubeUrl ?? ''}
+        data-next-service-iso={nextService?.date.toISOString() ?? ''}
+        data-next-service-label={nextService?.label ?? ''}
+        data-channel-url={settings.socials.youtubeUrl}
+      >
+        <p class="ls__loading">Checking stream status…</p>
+      </div>
+
+      <template id="tpl-live">
+        <div class="ls__player">
+          <p class="ls__badge ls__badge--live"><span class="ls__dot"></span>We're live now</p>
+          <div class="ls__embed">
+            <iframe
+              src=""
+              title="Live stream"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
+        </div>
+      </template>
+
+      <template id="tpl-countdown">
+        <div class="ls__countdown">
+          <p class="ls__badge">Not live right now</p>
+          <p class="ls__next"></p>
+          <div class="ls__timer" role="timer" aria-live="polite">
+            <div class="ls__unit"><span class="d"></span><small>days</small></div>
+            <div class="ls__unit"><span class="h"></span><small>hrs</small></div>
+            <div class="ls__unit"><span class="m"></span><small>min</small></div>
+            <div class="ls__unit"><span class="s"></span><small>sec</small></div>
+          </div>
+          <a class="btn btn--ghost channel-link" href="" target="_blank" rel="noreferrer">
+            Visit our YouTube channel ↗
+          </a>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- ============ SCHEDULE ============ -->
+  <section class="wrap when-wrap">
+    <div class="when reveal">
+      <div>
+        <p class="label when__h">When We Stream</p>
+        <h2 class="serif when__title">Every service, live.</h2>
+        <p class="when__p">
+          Our services go out live on YouTube. If you miss one it stays on the
+          channel — and the recent archive is here on the site.
+        </p>
+        <a href="/sermons" class="when__link">Browse past messages →</a>
+      </div>
+      <ul class="when__list">
+        {settings.serviceTimes.map((s) => (
+          <li class="when__row">
+            <span class="when__day">{s.day}</span>
+            <span class="when__label">{s.label}</span>
+            <span class="when__time">{clockText(s.time)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+</BaseLayout>
+
+<script>
+  import { checkLiveStatus, parseYoutubeId } from '../lib/youtube';
+
+  const app = document.getElementById('livestream-app')!;
+  const overrideActive = app.dataset.overrideActive === 'true';
+  const overrideUrl = app.dataset.overrideUrl || '';
+  const nextServiceIso = app.dataset.nextServiceIso || '';
+  const nextServiceLabel = app.dataset.nextServiceLabel || '';
+  const channelUrl = app.dataset.channelUrl || '';
+
+  // --- Testability hooks (build brief §4: "build this to be easily and
+  // extensively testable"). Append to the URL to force each state without
+  // touching real config:
+  //   ?test=live       → force the "we're live" view with a sample video
+  //   ?test=offline    → force the countdown/fallback view
+  //   ?test=override   → force the manual-override view with a sample video
+  // See docs/README.md → "Testing the livestream page" for the full
+  // procedure, including how to test this for real.
+  const testParam = new URLSearchParams(location.search).get('test');
+  const SAMPLE_VIDEO_ID = 'jNQXAC9IVRw';
+
+  /** Held so the countdown's ticker can be stopped when we go live. */
+  let countdownTimer = 0;
+  let livePoll = 0;
+
+  /**
+   * What is on screen right now: a video id, or null for the countdown.
+   *
+   * Both renderers are called from a poll that repeats for as long as the page
+   * is open, so both have to be no-ops when nothing has changed. Without this,
+   * every poll rebuilt the DOM it had just built: the countdown restarted its
+   * ticker each minute, and — worse — a live viewer's iframe was replaced with
+   * a fresh one 60 seconds in, which tears the player down and restarts it,
+   * muted, mid-service.
+   */
+  let shown: string | null | undefined;
+
+  function renderLive(videoId: string) {
+    if (shown === videoId) return;
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = 0; }
+    shown = videoId;
+    const tpl = document.getElementById('tpl-live') as HTMLTemplateElement;
+    const node = tpl.content.cloneNode(true) as DocumentFragment;
+    const iframe = node.querySelector('iframe')!;
+    iframe.src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=1`;
+    app.replaceChildren(node);
+  }
+
+  function renderCountdown() {
+    if (shown === null) return;
+    shown = null;
+    const tpl = document.getElementById('tpl-countdown') as HTMLTemplateElement;
+    const node = tpl.content.cloneNode(true) as DocumentFragment;
+    node.querySelector('.ls__next')!.textContent = nextServiceLabel
+      ? `Next up: ${nextServiceLabel}`
+      : 'Check back for our next service.';
+    (node.querySelector('.channel-link') as HTMLAnchorElement).href = channelUrl;
+    app.replaceChildren(node);
+
+    if (!nextServiceIso) return;
+    const target = new Date(nextServiceIso).getTime();
+    const dEl = app.querySelector('.d')!, hEl = app.querySelector('.h')!, mEl = app.querySelector('.m')!, sEl = app.querySelector('.s')!;
+    const tick = () => {
+      const diff = Math.max(0, target - Date.now());
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+      const secs = Math.floor((diff % 60000) / 1000);
+      dEl.textContent = String(days);
+      hEl.textContent = String(hours).padStart(2, '0');
+      mEl.textContent = String(mins).padStart(2, '0');
+      sEl.textContent = String(secs).padStart(2, '0');
+    };
+    tick();
+    countdownTimer = window.setInterval(tick, 1000);
+  }
+
+  async function init() {
+    if (testParam === 'override' || testParam === 'live') {
+      renderLive(SAMPLE_VIDEO_ID);
+      return;
+    }
+    if (testParam === 'offline') {
+      renderCountdown();
+      return;
+    }
+
+    // Manual override always wins over auto-detection (brief §4).
+    if (overrideActive && overrideUrl) {
+      const videoId = parseYoutubeId(overrideUrl);
+      if (videoId) {
+        renderLive(videoId);
+        return;
+      }
+    }
+
+    // Draw the countdown BEFORE asking YouTube anything. The check crosses a
+    // third party and can take seconds on a cold connection; awaiting it first
+    // left the stage blank for exactly as long. Now the page is complete
+    // immediately and upgrades itself if we turn out to be live.
+    renderCountdown();
+
+    /**
+     * Keep polling for as long as the page is open — including while live.
+     *
+     * This used to stop the moment it found a stream, which broke the case
+     * that actually happens: restarting a broadcast mints a NEW video id, so a
+     * page latched onto the old one sat on a dead player with nothing left
+     * running to notice. Now a new id swaps the player over on the next poll.
+     *
+     * Going the other way needs a guard. A single `live: false` is not proof
+     * the service ended — a broadcast takes a minute or two to surface in the
+     * uploads playlist the Worker reads, and the edge answer can be 90s stale,
+     * so a genuine live stream reads false intermittently. Dropping the player
+     * on the first one would yank the service off the screen mid-sermon.
+     * Three in a row (~3 minutes) is a stream that really has ended.
+     */
+    let misses = 0;
+    const check = async () => {
+      const status = await checkLiveStatus();
+      if (status.live && status.videoId) {
+        misses = 0;
+        renderLive(status.videoId);
+      } else if (shown !== null && ++misses >= 3) {
+        misses = 0;
+        renderCountdown();
+      }
+    };
+
+    await check();
+
+    // Someone who opens the page a few minutes early should see the service
+    // appear without reloading — without polling, live-detection only worked
+    // if you happened to arrive after the stream had already started.
+    //
+    // 60s against a 90s edge cache: most polls are a cached hit costing no
+    // quota at all, and the ones that miss cost 2 units. Paused while the tab
+    // is in the background, which is where a forgotten tab spends its life.
+    livePoll = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void check();
+    }, 60000);
+  }
+
+  init();
+</script>
+
+<style>
+  /* NOTE: .stage__bg declares no transform — a scoped one would outrank .par */
+  .stage { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .stage__bg { position: absolute; inset: 0; z-index: 0; }
+  .stage__bg :global(img) { width: 100%; height: 100%; object-fit: cover; }
+  /* Weighted where the text sits, open where it doesn't — the same shape the
+     ministry heroes use. It used to run .88 to .94 to solid ink, which is
+     nearly opaque the whole way down: the sanctuary photo was behind it doing
+     no work at all. The top band stays lighter so the room is visible, and it
+     deepens through the middle where the heading and the player sit. */
+  .stage__scrim { position: absolute; inset: 0; z-index: 1;
+                  background: linear-gradient(180deg,
+                    rgba(26,21,18,.26) 0%,
+                    rgba(26,21,18,.40) 38%,
+                    rgba(26,21,18,.70) 74%,
+                    var(--ink) 100%); }
+  .stage__body { position: relative; z-index: 3; padding: 148px var(--pad) clamp(70px,8vw,110px);
+                 max-width: 1000px; margin-inline: auto; text-align: center; }
+  .stage__eyebrow { color: var(--red-tint); margin: 0 0 20px; }
+  .stage h1 { margin: 0 0 44px; font-size: clamp(44px,6.4vw,92px); line-height: 1; letter-spacing: -.02em; }
+
+  .ls__loading { margin: 0; font-size: 16px; color: rgba(244,239,231,.6); }
+
+  .ls__badge { display: inline-flex; align-items: center; gap: 9px; margin: 0 0 26px;
+               font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+               padding: 9px 18px; border-radius: 999px;
+               border: 1px solid var(--hair-inv); color: rgba(244,239,231,.7); }
+  .ls__badge--live { border-color: transparent; background: var(--red); color: var(--cream); }
+  .ls__dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor;
+             animation: lsPulse 1.6s ease-in-out infinite; }
+  @keyframes lsPulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .ls__dot { animation: none; } }
+
+  .ls__embed { aspect-ratio: 16/9; border-radius: var(--radius-lg); overflow: hidden;
+               background: #000; box-shadow: 0 34px 80px rgba(0,0,0,.5); }
+  .ls__embed iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+  .ls__next { margin: 0 0 30px; font-family: var(--font-display); font-size: clamp(24px,3vw,34px); line-height: 1.2; }
+  .ls__timer { display: flex; justify-content: center; gap: clamp(18px,4vw,44px); margin-bottom: 38px; }
+  .ls__unit { display: flex; flex-direction: column; align-items: center; min-width: 62px; }
+  .ls__unit span { font-family: var(--font-display); font-size: clamp(38px,6vw,64px); line-height: 1;
+                   font-variant-numeric: tabular-nums; }
+  .ls__unit small { margin-top: 8px; font-size: 11px; font-weight: 700; letter-spacing: .2em;
+                    text-transform: uppercase; color: rgba(244,239,231,.55); }
+
+  .when-wrap { padding-block: clamp(66px,8vw,110px); }
+  .when { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr); gap: 66px; align-items: start; }
+  .when__h { color: var(--red); margin: 0 0 16px; }
+  .when__title { margin: 0 0 16px; font-size: clamp(30px,3.8vw,46px); line-height: 1.08; letter-spacing: -.01em; }
+  .when__p { margin: 0; font-size: 17px; line-height: 1.78; color: var(--ink-soft); max-width: 42ch; }
+  .when__link { display: inline-block; margin-top: 22px; font-size: 15px; font-weight: 700; color: var(--red); }
+  .when__list { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--ink); }
+  .when__row { display: grid; grid-template-columns: 120px minmax(0,1fr) auto; gap: 20px;
+               align-items: baseline; padding: 20px 0; border-bottom: 1px solid var(--hair); }
+  .when__day { font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--red); }
+  .when__label { font-family: var(--font-display); font-size: clamp(20px,2.2vw,26px); line-height: 1.2; }
+  .when__time { font-size: 17px; color: var(--ink-soft); white-space: nowrap; }
+
+  @media (max-width: 860px) {
+    .stage__body { padding: 110px var(--pad) 56px; }
+    .stage h1 { margin-bottom: 32px; }
+    .when { grid-template-columns: 1fr; gap: 34px; }
+    .when__row { grid-template-columns: 1fr auto; gap: 6px 16px; }
+    .when__day { grid-column: 1 / -1; }
+  }
+</style>

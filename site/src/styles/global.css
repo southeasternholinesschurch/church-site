@@ -1,0 +1,156 @@
+@import './tokens.css';
+
+/* ============================================================
+   FONTS
+   Texta is the pastor's own licensed face, self-hosted so the PWA
+   works offline and there's no third-party request.
+   LICENSING: these came from a desktop licence, which typically
+   does NOT cover web embedding — confirm with Yellow Design
+   Studio before launch (docs/README.md).
+   Instrument Serif is Google Fonts, OFL, loaded in BaseLayout.
+   ============================================================ */
+@font-face {
+  font-family: 'Texta'; font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/texta-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Texta'; font-weight: 400; font-style: italic; font-display: swap;
+  src: url('/fonts/texta-regular-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Texta'; font-weight: 700; font-style: normal; font-display: swap;
+  src: url('/fonts/texta-bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Texta'; font-weight: 900; font-style: normal; font-display: swap;
+  src: url('/fonts/texta-black.woff2') format('woff2');
+}
+
+/* ---------- reset ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: light; }
+body {
+  margin: 0;
+  /* clip, not hidden: stops a transformed element causing a horizontal
+     scrollbar, without creating a scroll container (which would break
+     position: sticky) */
+  overflow-x: clip;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+img, picture, video { max-width: 100%; display: block; }
+a { color: var(--red); text-decoration: none; }
+a:hover { color: var(--red-deep); }
+
+.serif { font-family: var(--font-display); font-weight: 400; }
+h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 400; line-height: 1.14; margin: 0 0 .5em; }
+p { margin: 0 0 1em; }
+
+.label {
+  font-size: 11px; font-weight: 700; letter-spacing: .3em;
+  text-transform: uppercase; font-family: var(--font-body);
+}
+.wrap { padding-inline: var(--pad); }
+.container { width: 100%; max-width: 1440px; margin-inline: auto; padding-inline: var(--pad); }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  font-size: 13px; font-weight: 700; letter-spacing: .1em;
+  padding: 16px 30px; min-height: 48px;      /* touch target */
+  border-radius: var(--radius); border: 1px solid transparent;
+  transition: background-color .3s var(--ease), color .3s var(--ease), border-color .3s var(--ease);
+}
+.btn--solid { background: var(--cream); color: var(--ink); }
+.btn--solid:hover { background: #fff; color: var(--ink); }
+.btn--ghost { border-color: rgba(244,239,231,.44); color: var(--cream); }
+.btn--ghost:hover { border-color: var(--cream); color: var(--cream); }
+.btn--ink { background: var(--ink); color: var(--cream); }
+.btn--ink:hover { background: #2a231e; color: var(--cream); }
+/* Secondary action on a LIGHT ground. The set had --ghost for dark grounds and
+   --ink for a primary on light, but nothing quiet to sit beside --ink. */
+.btn--line { border-color: var(--hair); color: var(--ink); }
+.btn--line:hover { border-color: var(--ink); color: var(--ink); }
+.btn--red { background: var(--red); color: #fff; }
+.btn--red:hover { background: var(--red-deep); color: #fff; }
+
+/* ---------- photo treatment ---------- */
+/* Film grain: inline SVG turbulence, no request, stops photography reading
+   flat and digital.
+   Two things here are load-bearing. feTurbulence emits COLOURED noise, so
+   it needs feColorMatrix saturate=0 to become neutral grain — without it
+   the colour cast shifts the image. And the blend must be soft-light, not
+   overlay: overlay against this noise crushed a bright hero photo to near
+   black. Keep the opacity low; grain you can consciously see is too much. */
+.grain::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: .16; mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* True duotone for archive thumbnails. Two ends of the tonal range are
+   mapped separately — a single tint layer would apply one hue to every
+   tone, and light red is pink. The ceiling is a dark desaturated grey so
+   the tile recedes and the title leads; see /design/README.md. */
+.duo { position: relative; isolation: isolate; overflow: clip; background: var(--ink); }
+.duo img { filter: grayscale(1) contrast(.92) brightness(.94); }
+.duo::before, .duo::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+.duo::before { background: #686361; mix-blend-mode: multiply; }
+.duo::after  { background: #1a1211; mix-blend-mode: screen; }
+
+/* ============================================================
+   MOTION
+
+   Driven by a small JS controller (see BaseLayout), not by CSS
+   scroll-driven animations. That was the first approach — it is
+   prettier, runs on the compositor and needs no JS — but it is
+   unsupported in Firefox, and in testing the timelines reported
+   as supported while never actually advancing. An effect you
+   cannot verify is not an effect you can ship.
+
+   The controller only ever ADDS motion. Every rule below leaves
+   the element in its FINAL state by default, so with JS off, or
+   reduced-motion on, the page renders complete and static —
+   nothing hidden, nothing broken.
+   ============================================================ */
+
+/* Parallax composition. JS sets only --py; CSS owns the rest, so an
+   image keeps its cover-scale and the transform can't be clobbered. */
+.par    { transform: scale(var(--drift-scale, 1.16)) translateY(var(--py, 0px)); will-change: transform; }
+.par-fg { transform: translateY(var(--py, 0px)); will-change: transform; }
+/* parallax tracks the scroll position exactly — never transition it */
+.par, .par-fg { transition-property: opacity; }
+
+/* Reveals. Hidden only once JS has confirmed it can animate them —
+   the .motion class is set by the controller, so no-JS never hides
+   anything. */
+/* Each reveal transitions ONLY the properties it actually animates.
+   A blanket `transition: opacity, transform` here was quietly breaking
+   parallax: any element that was both a reveal and a parallax layer had
+   its scroll-driven translate transitioned over .85s, so it lagged the
+   scroll instead of tracking it. Parallax must be instant. */
+.motion .reveal { opacity: 0; transform: translateY(30px);
+                  transition: opacity .85s var(--ease), transform .85s var(--ease); }
+.motion .fade   { opacity: 0; transition: opacity .85s var(--ease); }
+.motion .growx  { transform: scaleX(0); transform-origin: left;
+                  transition: transform .85s var(--ease); }
+.motion .reveal.is-in { opacity: 1; transform: none; }
+.motion .fade.is-in   { opacity: 1; }
+.motion .growx.is-in  { transform: scaleX(1); }
+
+/* staggered entrance for above-the-fold content */
+@keyframes riseIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+.motion .load { animation: riseIn var(--dur) var(--ease) both; }
+.d1 { animation-delay: .08s; } .d2 { animation-delay: .22s; }
+.d3 { animation-delay: .36s; } .d4 { animation-delay: .5s; } .d5 { animation-delay: .64s; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; }
+}

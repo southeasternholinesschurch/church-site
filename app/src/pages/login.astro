@@ -1,0 +1,54 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { authConfigured } from '../lib/auth';
+
+const env = Astro.locals.runtime.env;
+const configured = authConfigured(env);
+const error = Astro.url.searchParams.get('error');
+const signedOut = Astro.url.searchParams.get('signed-out');
+const next = Astro.url.searchParams.get('next');
+
+/**
+ * "not-allowed" says the account is not on the list WITHOUT confirming
+ * anything about the address that was tried. Whether a given person is on the
+ * church's staff list is not something a stranger gets to probe for by
+ * watching how the wording changes.
+ */
+const MESSAGES: Record<string, string> = {
+  unconfigured: 'Sign-in is not finished being set up yet. The Google credentials are missing.',
+  cancelled: 'Sign-in was cancelled.',
+  expired: 'That sign-in attempt timed out. Please try again.',
+  'not-allowed': 'That account does not have access. Ask an administrator to add you.',
+};
+const message = error ? (MESSAGES[error] ?? 'Sign-in failed. Please try again.') : null;
+const startHref = next ? `/auth/google?next=${encodeURIComponent(next)}` : '/auth/google';
+---
+<AppLayout title="Sign in">
+  <div style="max-width: 460px; margin: 8vh auto 0;">
+    <p class="label" style="color: var(--red); margin: 0 0 10px;">[Your Church Name]</p>
+    <h1>Staff sign-in</h1>
+    <p class="muted" style="margin-bottom: 26px;">
+      This is the church's private staff area — people, attendance, and the weekly bulletin.
+    </p>
+
+    {signedOut && <p class="notice notice--ok">You have been signed out.</p>}
+    {message && <p class="notice">{message}</p>}
+
+    <div class="card">
+      {configured ? (
+        <>
+          <a class="btn" href={startHref} style="width: 100%;">Sign in with Google</a>
+          <p class="muted" style="font-size: 14px; margin: 16px 0 0;">
+            Use the Google account an administrator has added. Signing in with Google
+            does not give the church access to your email.
+          </p>
+        </>
+      ) : (
+        <p style="margin: 0;">
+          Sign-in is not configured yet. Whoever set this up needs to add the Google
+          credentials before anyone can get in.
+        </p>
+      )}
+    </div>
+  </div>
+</AppLayout>

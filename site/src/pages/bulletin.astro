@@ -1,0 +1,436 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
+import { getUpcomingEvents } from '../lib/ical';
+import { clockText, eventWhen } from '../lib/format';
+import { isVisibleSermon } from '../lib/content';
+
+/**
+ * Discreet — deliberately not in the main nav (brief §7).
+ *
+ * The bulletin is read in a pew, on a phone, often one-handed and in low
+ * light. So: larger body type than the rest of the site, one column at every
+ * width, and no photography — it should feel like a well-set order of
+ * service, not a web page. It's also the page most likely to be opened
+ * offline from the installed app (Phase 2).
+ *
+ * The weekly content (order of service, announcements) comes from the staff
+ * dashboard in Phase 4. Until then the structure is here with bracketed
+ * placeholders, so the shape is agreed before the editor is built. What CAN
+ * be real already is real: "This Week" is pulled live from the church
+ * calendar and the service times from settings, so nobody retypes them.
+ */
+// The most recent service, for "Missed Last Week?" — the page carried
+// bracketed placeholders there, which is fine in a design mockup and not fine
+// on a page a visitor is holding.
+const sermons = (await getCollection('sermons'))
+  .filter((x) => isVisibleSermon(x.data))
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+const lastSermon = sermons[0];
+
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+
+let weekEvents: Awaited<ReturnType<typeof getUpcomingEvents>> = [];
+let comingUp: Awaited<ReturnType<typeof getUpcomingEvents>> = [];
+try {
+  if (settings.calendarFeedUrl) {
+    // One fetch, two horizons. "This Week" is what is happening now; "Coming
+    // Up" is the next three months so somebody in a pew can plan around the
+    // revival or the singing weekend without going home to look it up.
+    const horizon = await getUpcomingEvents(settings.calendarFeedUrl, 92);
+    const weekEnd = Date.now() + 7 * 86400_000;
+    weekEvents = horizon.filter((e) => e.start.getTime() <= weekEnd);
+    // Anything already listed above is not repeated below.
+    comingUp = horizon.filter((e) => e.start.getTime() > weekEnd).slice(0, 12);
+  }
+} catch {
+  // A calendar hiccup must never blank the bulletin — the rest still prints.
+  weekEvents = [];
+  comingUp = [];
+}
+
+/**
+ * The week's bulletin comes from the staff app, read HERE AT BUILD TIME rather
+ * than in the visitor's browser. That is the whole point of the arrangement:
+ * staff edit in one place, and what gets served is still a static file that
+ * works in a pew with no signal.
+ *
+ * Only PUBLISHED bulletins are returned, so a draft cannot reach this page
+ * however often the site rebuilds.
+ *
+ * A failure here must never break the build. If the app is unreachable the
+ * page falls back to the placeholder shape it had before, and says plainly
+ * that this week's is not up yet.
+ */
+interface Celebration { day: number; name: string }
+interface SingSlot { label: string; names: string[]; note: string | null }
+
+interface BulletinData {
+  serviceDate: string; title: string;
+  announcements: { when: string; heading: string; detail: string }[];
+  /** Plain lines, already carried forward by the app. Absent on a feed older
+   *  than this feature, hence the guard below. */
+  prayerRequests?: string[];
+  preacher: string | null;
+  scripture: string | null; scriptureRef: string | null; isCurrent: boolean;
+  /** The month's birthdays and anniversaries, worked out by the app from this
+   *  bulletin's own service date. Null when the feed is older than that
+   *  feature, so the section simply does not render. */
+  celebrations: { month: string; birthdays: Celebration[]; anniversaries: Celebration[] } | null;
+  /** Who is singing, from the published singing schedule. Null when the sheet
+   *  has nothing for this Sunday or could not be read — the section is then
+   *  simply absent, never half-rendered. Also null on a feed older than this
+   *  feature, which is why every use below is guarded. */
+  singing: {
+    slots: SingSlot[];
+    next: { sunday: string; slots: SingSlot[] } | null;
+  } | null;
+}
+let bulletin: BulletinData | null = null;
+try {
+  const res = await fetch('https://app.example.org/api/bulletin/current', {
+    signal: AbortSignal.timeout(8000),
+  });
+  if (res.ok) bulletin = ((await res.json()) as { bulletin: BulletinData | null }).bulletin;
+} catch {
+  bulletin = null;   // build carries on with placeholders
+}
+
+const announcements = bulletin?.announcements ?? [];
+const prayers = bulletin?.prayerRequests ?? [];
+// Generated in the app from the bulletin's own service date, so an October
+// bulletin still lists October when the site rebuilds in November. Two source
+// rules, both in lib/celebrations: adults must be directory-listed, so leaving
+// the directory leaves this list at the same moment; children are included by
+// age, since they are never in the directory at all.
+//
+// This page is noindex — see the BaseLayout prop below. That is deliberate and
+// load-bearing: it carries members' and children's names beside their dates.
+/*
+ * Null unless there is actually something to show, so the template can guard
+ * on this one value and TypeScript can narrow it.
+ *
+ * It was a separate boolean flag, which reads fine and narrows nothing: every
+ * `celebrations.month` inside the guard was an unchecked access on a possibly
+ * null value. The page happened to work because the flag and the value always
+ * agreed, which is exactly the kind of agreement that stops holding later.
+ */
+const raw = bulletin?.celebrations ?? null;
+const celebrations =
+  raw && (raw.birthdays.length || raw.anniversaries.length) ? raw : null;
+/* Same guard style as the celebrations above: derive ONE value and test that,
+ * rather than checking a flag and reading a different object. A Sunday whose
+ * slots are all empty prints nothing. */
+const singingRaw = bulletin?.singing ?? null;
+const singing = singingRaw && singingRaw.slots.length > 0 ? singingRaw : null;
+const singingNext =
+  singingRaw?.next && singingRaw.next.slots.length > 0 ? singingRaw.next : null;
+const slotText = (s: SingSlot) => s.note ?? s.names.join(', ');
+const nextSundayLabel = singingNext
+  ? new Date(`${singingNext.sunday}T12:00:00Z`).toLocaleDateString('en-US',
+      { month: 'long', day: 'numeric', timeZone: 'UTC' })
+  : null;
+
+const serviceLabel = bulletin?.title ?? 'Morning Worship';
+const dateLabel = bulletin
+  ? new Date(`${bulletin.serviceDate}T12:00:00Z`).toLocaleDateString('en-US',
+      { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  : null;
+---
+<BaseLayout
+  title="This Week's Bulletin"
+  description="Everything for this Sunday at [Your Church Name], in one place."
+  navTheme="light"
+  noindex
+  installAs="bulletin"
+>
+  <section class="wrap bull-wrap">
+    <div class="bull">
+      <!-- ============ MASTHEAD ============ -->
+      <header class="bull__head">
+        <p class="bull__kicker load d1">This Week</p>
+        <h1 class="serif load d2">Bulletin</h1>
+        <p class="bull__lede load d3">
+          Everything for this Sunday, in one place. Add it to your home screen and it
+          works without signal.
+        </p>
+      </header>
+
+      {!bulletin && (
+        <p class="draft">
+          <strong>This week's bulletin isn't published yet.</strong> The order of service
+          below is an example. "This Week" and the service times are live from the church
+          calendar.
+        </p>
+      )}
+      {bulletin && !bulletin.isCurrent && (
+        <p class="draft">
+          <strong>This is last week's bulletin.</strong> This Sunday's hasn't been published yet.
+        </p>
+      )}
+
+      <div class="bull__rule"></div>
+
+      <p class="bull__date">{dateLabel ?? 'Sunday · [Month] [Day], [Year]'}</p>
+      <h2 class="serif bull__service">{serviceLabel}</h2>
+
+      <div class="bull__rule"></div>
+
+      <!-- ============ TEXT ============ -->
+      <section class="sec reveal">
+        <div class="sec__h"><h3>Today's Text</h3><div></div></div>
+        <blockquote class="text">
+          <p class="serif">
+            “{bulletin?.scripture ?? '[The passage the message is drawn from.]'}”
+          </p>
+          <cite class="text__ref">{bulletin?.scriptureRef ?? '[Scripture reference]'}</cite>
+          {bulletin?.preacher && <p class="text__by">Preaching · {bulletin.preacher}</p>}
+        </blockquote>
+      </section>
+
+      <!-- ============ ANNOUNCEMENTS ============ -->
+      <section class="sec reveal">
+        <div class="sec__h"><h3>Announcements</h3><div></div></div>
+        {announcements.length === 0 ? (
+          <div class="ann">
+            <span class="ann__when">Ongoing</span>
+            <h4 class="serif">[Announcement heading]</h4>
+            <p>[The detail — what it is, where it is, and who to speak to.]</p>
+          </div>
+        ) : announcements.map((a) => (
+          <div class="ann">
+            {a.when && <span class="ann__when">{a.when}</span>}
+            <h4 class="serif">{a.heading}</h4>
+            {a.detail && <p>{a.detail}</p>}
+          </div>
+        ))}
+      </section>
+
+      <!-- ============ PRAYER ============ -->
+      {prayers.length > 0 && (
+        <section class="sec reveal">
+          <div class="sec__h"><h3>Prayer</h3><div></div></div>
+          <ul class="pray">
+            {prayers.map((p) => <li>{p}</li>)}
+          </ul>
+        </section>
+      )}
+
+      <!-- ============ SINGING (from the singing schedule) ============ -->
+      {(singing || singingNext) && (
+        <section class="sec reveal">
+          <div class="sec__h"><h3>Singing</h3><div></div></div>
+          {singing && (
+            <ul class="sing__list">
+              {singing.slots.map((s) => (
+                <li class="sing__row">
+                  <span class="sing__k">{s.label}</span>
+                  <span class="sing__n">{slotText(s)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {singingNext && (
+            <p class="sing__next">
+              <strong>Next Sunday, {nextSundayLabel}:</strong>{' '}
+              {singingNext.slots.map((s) => `${s.label} — ${slotText(s)}`).join(' · ')}
+            </p>
+          )}
+        </section>
+      )}
+
+      <!-- ============ CELEBRATIONS (from the directory) ============ -->
+      {celebrations && (
+        <section class="sec reveal">
+          <div class="sec__h"><h3>{celebrations.month} Celebrations</h3><div></div></div>
+          <div class="cel">
+            {celebrations.birthdays.length > 0 && (
+              <div class="cel__col">
+                <p class="cel__k">Birthdays</p>
+                <ul class="cel__list">
+                  {celebrations.birthdays.map((c) => (
+                    <li><span class="cel__d">{c.day}</span><span class="cel__n">{c.name}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {celebrations.anniversaries.length > 0 && (
+              <div class="cel__col">
+                <p class="cel__k">Anniversaries</p>
+                <ul class="cel__list">
+                  {celebrations.anniversaries.map((c) => (
+                    <li><span class="cel__d">{c.day}</span><span class="cel__n">{c.name}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      <!-- ============ THIS WEEK (live) ============ -->
+      <section class="sec reveal">
+        <div class="sec__h"><h3>This Week</h3><div></div></div>
+        <dl class="order">
+          {settings.serviceTimes.map((s) => (
+            <>
+              <dt>{s.label}</dt>
+              <dd>{s.day} · {clockText(s.time)}</dd>
+            </>
+          ))}
+          {weekEvents.map((e) => (
+            <>
+              <dt>{e.title}</dt>
+              <dd>{eventWhen(e, { withDate: true })}</dd>
+            </>
+          ))}
+        </dl>
+      </section>
+
+      <!-- ============ COMING UP ============ -->
+      {comingUp.length > 0 && (
+        <section class="sec reveal">
+          <div class="sec__h"><h3>Coming Up</h3><div></div></div>
+          <p class="sec__note">Dates to keep in mind over the next few months.</p>
+          <dl class="order">
+            {comingUp.map((e) => (
+              <>
+                <dt>{e.title}</dt>
+                <dd>{eventWhen(e, { withDate: true })}</dd>
+              </>
+            ))}
+          </dl>
+        </section>
+      )}
+
+      <!-- ============ MISSED LAST WEEK ============ -->
+      <section class="sec reveal">
+        <div class="sec__h"><h3>Missed Last Week?</h3><div></div></div>
+        <div class="missed">
+          <div>
+            <p class="missed__t serif">{lastSermon?.data.title ?? lastSermon?.data.service ?? 'Recent services'}</p>
+            <p class="missed__m">
+              {lastSermon?.data.speaker ? `${lastSermon.data.speaker} · ` : ''}
+              {lastSermon
+                ? lastSermon.data.date.toLocaleDateString('en-US',
+                    { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+                : 'Every service is on our YouTube channel'}
+            </p>
+          </div>
+          <a href={lastSermon ? `/sermons/${lastSermon.slug}` : '/sermons'} class="btn btn--ink">Watch</a>
+        </div>
+      </section>
+
+      <div class="bull__foot">
+        <p>
+          [Your Church Name]<br />
+          [123 Example Street], [City]
+        </p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .bull-wrap { padding-block: 128px clamp(70px,8vw,110px); }
+  .bull { max-width: 760px; margin-inline: auto; }
+  .bull__kicker { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .3em;
+                  text-transform: uppercase; color: var(--red); }
+  .bull h1 { margin: 14px 0 0; font-size: clamp(40px,5.6vw,64px); line-height: 1.02; letter-spacing: -.02em; }
+  .bull__lede { margin: 18px 0 0; font-size: 17px; line-height: 1.72; color: var(--ink-soft); max-width: 48ch; }
+  .bull__rule { height: 1px; background: var(--hair); margin: 42px 0; }
+  .bull__date { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .3em;
+                text-transform: uppercase; color: var(--red); }
+  .bull__service { margin: 12px 0 0; font-size: clamp(30px,4vw,44px); line-height: 1.06; letter-spacing: -.01em; }
+
+  .draft { margin: 34px 0 0; font-size: 15px; line-height: 1.7; color: var(--red-deep);
+           background: #f7e9e9; border-left: 3px solid var(--red); padding: 16px 20px;
+           border-radius: 0 var(--radius) var(--radius) 0; }
+
+  .sec { margin-bottom: 52px; }
+  .sec__h { display: flex; align-items: baseline; gap: 16px; margin-bottom: 22px; }
+  .sec__h h3 { margin: 0; font-family: var(--font-body); font-size: 13px; font-weight: 700;
+               letter-spacing: .28em; text-transform: uppercase; color: var(--red); white-space: nowrap; }
+  .sec__h div { height: 1px; background: var(--hair); flex: 1; }
+  .sec__note { margin: -8px 0 20px; font-size: 15px; line-height: 1.7; color: var(--ink-soft); }
+
+  /* the item reads first, the person's name sits quietly after it */
+  .order { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 0 24px; margin: 0; }
+  .order dt { font-size: 19px; line-height: 1.62; padding: 9px 0; border-bottom: 1px solid rgba(26,21,18,.08); }
+  .order dd { margin: 0; font-size: 15px; line-height: 1.62; padding: 11px 0; color: var(--ink-soft);
+              text-align: right; border-bottom: 1px solid rgba(26,21,18,.08); white-space: nowrap; }
+
+  .text { margin: 0; background: var(--cream-deep); border-radius: var(--radius-lg);
+          padding: clamp(28px,3.4vw,36px); text-align: center; }
+  .text p { margin: 0; font-family: var(--font-display); font-size: clamp(21px,2.6vw,27px); line-height: 1.4; }
+  .text__by { margin: 14px 0 0; font-size: 13px; letter-spacing: .04em;
+              color: var(--ink-soft); }
+  .text__ref { display: block; margin-top: 16px; font-style: normal; font-size: 11px;
+               font-weight: 700; letter-spacing: .28em; text-transform: uppercase; color: var(--red); }
+
+  .cel { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
+  .cel__k { margin: 0 0 12px; font-size: 12px; font-weight: 700; letter-spacing: .14em;
+            text-transform: uppercase; color: var(--red); }
+  .cel__list { margin: 0; padding: 0; list-style: none; }
+  .cel__list li { display: flex; gap: 12px; align-items: baseline;
+                  padding: 7px 0; border-bottom: 1px solid rgba(26,21,18,.08); }
+  .cel__list li:last-child { border-bottom: 0; }
+  /* Fixed width so the names line up in a column rather than stepping in and
+     out as the day goes from one digit to two. */
+  .cel__d { flex: none; width: 26px; text-align: right; font-size: 14px; font-weight: 700;
+            color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .cel__n { font-size: 18px; line-height: 1.5; }
+  @media (max-width: 620px) { .cel { grid-template-columns: 1fr; gap: 26px; } }
+
+  /* Prayer. Plain list, generous line height — this is the section most
+     likely to be read slowly, and often out loud. */
+  .pray { margin:0; padding:0; list-style:none; }
+  .pray li { padding:7px 0; font-size:18px; line-height:1.6;
+             border-bottom:1px solid rgba(26,21,18,.08); }
+  .pray li:last-child { border-bottom:0; }
+
+  /* Singing. Same rhythm as the celebrations list above, but a two-column row
+     rather than a grid: there are only ever two or three services, and the
+     label is the thing the eye looks for. */
+  .sing__list { margin: 0; padding: 0; list-style: none; }
+  .sing__row { display: flex; gap: 14px; align-items: baseline;
+               padding: 7px 0; border-bottom: 1px solid rgba(26,21,18,.08); }
+  .sing__row:last-child { border-bottom: 0; }
+  /* Fixed width for the same reason the dates are fixed: "Morning" and
+     "Evening" differ in length and the names would otherwise step in and out. */
+  .sing__k { flex: none; width: 82px; font-size: 12px; font-weight: 700;
+             letter-spacing: .14em; text-transform: uppercase; color: var(--red); }
+  .sing__n { font-size: 18px; line-height: 1.5; }
+  /* Deliberately quieter than the list above it — next week is a reminder, not
+     the thing you are reading the bulletin for. */
+  .sing__next { margin: 14px 0 0; font-size: 15px; line-height: 1.6; color: var(--ink-soft); }
+  .sing__next strong { color: var(--ink); }
+  @media (max-width: 620px) {
+    .sing__row { flex-direction: column; gap: 2px; }
+    .sing__k { width: auto; }
+  }
+
+  .ann { padding: 22px 0; border-bottom: 1px solid rgba(26,21,18,.1); }
+  .ann:first-of-type { padding-top: 0; }
+  .ann h4 { margin: 0 0 7px; font-size: 24px; line-height: 1.24; }
+  .ann p { margin: 0; font-size: 17px; line-height: 1.72; color: var(--ink-soft); }
+  .ann__when { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .14em;
+               text-transform: uppercase; color: var(--red); margin-bottom: 8px; }
+
+  .missed { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .missed__t { margin: 0 0 5px; font-size: 24px; line-height: 1.24; }
+  .missed__m { margin: 0; font-size: 15px; color: var(--ink-soft); }
+
+  .bull__foot { margin-top: 66px; padding-top: 26px; border-top: 1px solid var(--hair); }
+  .bull__foot p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--ink-soft); }
+
+  @media (max-width: 760px) {
+    .bull-wrap { padding-top: 104px; }
+    .order { grid-template-columns: 1fr; gap: 0; }
+    .order dt { padding-bottom: 2px; border-bottom: 0; }
+    .order dd { text-align: left; padding: 0 0 12px; }
+    .bull__rule { margin: 30px 0; }
+    .missed .btn { width: 100%; text-align: center; }
+  }
+</style>

@@ -1,0 +1,224 @@
+---
+import '../styles/global.css';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Dark page headers let the nav sit light-on-dark; a light page inverts it. */
+  navTheme?: 'dark' | 'light';
+  /**
+   * Keep the page out of search results. Not security — anyone with the URL
+   * still reads it — but it is the difference between a page you can find and
+   * a page you have to be given. Used by the bulletin, which carries members'
+   * birthdays.
+   */
+  noindex?: boolean;
+  /**
+   * Which app this page installs as.
+   *
+   * Nearly every page is the church site. The bulletin and the livestream
+   * install as their OWN things — somebody can keep this Sunday's order of
+   * service, or the stream, on their home screen without the whole website
+   * behind it, which is the same reason the directory is separate over in the
+   * app. A page can only carry one manifest, so this picks which.
+   */
+  installAs?: 'site' | 'bulletin' | 'livestream';
+}
+
+const INSTALL = {
+  site: {
+    manifest: '/manifest.webmanifest',
+    icon: '/icons/apple-touch-icon.png',
+    title: 'SE Holiness',
+  },
+  bulletin: {
+    manifest: '/bulletin.webmanifest',
+    icon: '/bulletin-icons/apple-touch-icon.png',
+    title: 'Bulletin',
+  },
+  livestream: {
+    manifest: '/livestream.webmanifest',
+    icon: '/livestream-icons/apple-touch-icon.png',
+    title: 'SElive',
+  },
+} as const;
+
+const {
+  title,
+  description = '[Your Church Name] — a family in Indianapolis. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
+  navTheme = 'dark',
+  noindex = false,
+  installAs = 'site',
+} = Astro.props;
+const app = INSTALL[installAs];
+
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · {settings.churchName}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow, noarchive" />}
+    {/* Built from `site` in astro.config.mjs, so it always names the apex no
+        matter which hostname served the page. www is attached to the Worker
+        as well, and static assets are matched before the Worker runs — so a
+        redirect in the Worker can never see a page request. This is what
+        keeps the two hostnames from reading as two copies of the site. */}
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />
+    <link rel="icon" href="/favicon-48.png" type="image/png" />
+    <link rel="manifest" href={app.manifest} />
+    <meta name="theme-color" content="#1a1512" />
+    {/* Opaque PNGs, not the transparent ones this used to point at. iOS does
+        not support transparency in a home-screen icon — it fills the gap with
+        black, so the mark was arriving in a black box. See design/site-icon. */}
+    <link rel="apple-touch-icon" href={app.icon} />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    {/* The name printed under the icon. Without it iOS uses <title>, which on
+        the bulletin reads "This Week's Bulletin · [Your Church Name]
+        Church" and truncates to something like "This Week…". */}
+    <meta name="apple-mobile-web-app-title" content={app.title} />
+
+    <!-- Instrument Serif: preconnect so the display face isn't the thing
+         holding up first paint. Texta is self-hosted from /fonts. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    {/* Fonts come from the ACTIVE THEME (src/styles/themes/*.css), which
+        imports whatever it needs. Hardcoding a family here would mean two
+        places to change when the theme changes, and one of them would be
+        forgotten. */}
+
+    {/* Cloudflare Web Analytics. Cookieless, so no consent banner is needed
+        and nothing about a visitor is stored on their device. Rendered only
+        when a token is set in site settings, so an empty setting costs a
+        visitor nothing — not even the request.
+
+        Deliberately NOT on app.example.org: that side holds the
+        directory and attendance, and traffic data there would describe
+        members' private behaviour rather than anything worth knowing. */}
+    {settings.webAnalyticsToken && (
+      <script defer src="https://static.cloudflareinsights.com/beacon.min.js"
+              data-cf-beacon={`{"token": "${settings.webAnalyticsToken}"}`}></script>
+    )}
+  </head>
+  <body>
+    <a class="visually-hidden" href="#main">Skip to content</a>
+    <Nav settings={settings} theme={navTheme} />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer settings={settings} />
+
+    <script>
+      /* Motion controller.
+       *
+       * Adds the `motion` class before anything paints, which is what
+       * arms the reveal styles — so if this script never runs, or the
+       * visitor prefers reduced motion, the page simply renders complete
+       * and static. Nothing is hidden by CSS alone.
+       */
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+      function start() {
+        if (reduced.matches) return;
+        document.documentElement.classList.add('motion');
+
+        // ---- reveals: one observer, unobserve after firing ----
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add('is-in');
+                io.unobserve(e.target);
+              }
+            }
+          },
+          { threshold: 0.1, rootMargin: '0px 0px -6% 0px' }
+        );
+        document.querySelectorAll('.reveal, .fade, .growx').forEach((el) => io.observe(el));
+
+        // ---- parallax ----
+        // Each element declares its travel in px via data-par. Positive
+        // values drift with the scroll (background, feels further away),
+        // negative values move against it (foreground). We only track
+        // elements currently on screen, and only write during rAF, so
+        // scrolling never triggers layout work.
+        const items = [...document.querySelectorAll<HTMLElement>('[data-par]')].map((el) => ({
+          el,
+          amount: parseFloat(el.dataset.par || '0') || 0,
+          // the section that frames it, since that's what crosses the viewport
+          frame: el.closest('[data-par-frame]') || el.parentElement,
+          visible: false,
+        }));
+
+        if (items.length) {
+          const vis = new IntersectionObserver(
+            (entries) => {
+              for (const e of entries) {
+                // every item sharing this frame, not just the first —
+                // a frame holds both the drifting photo AND the copy
+                // moving against it
+                for (const it of items) {
+                  if (it.frame === e.target) it.visible = e.isIntersecting;
+                }
+              }
+              schedule();
+            },
+            { rootMargin: '20% 0px 20% 0px' }
+          );
+          new Set(items.map((i) => i.frame)).forEach((f) => f && vis.observe(f));
+
+          let queued = false;
+          function schedule() {
+            if (queued) return;
+            queued = true;
+            requestAnimationFrame(apply);
+          }
+          function apply() {
+            queued = false;
+            const vh = window.innerHeight;
+            for (const it of items) {
+              if (!it.visible || !it.frame) continue;
+              const r = it.frame.getBoundingClientRect();
+              // 0 as the frame enters from the bottom, 1 as it leaves the top
+              const p = (vh - r.top) / (vh + r.height);
+              const clamped = p < 0 ? 0 : p > 1 ? 1 : p;
+              it.el.style.setProperty('--py', ((clamped - 0.5) * 2 * it.amount).toFixed(2) + 'px');
+            }
+          }
+          window.addEventListener('scroll', schedule, { passive: true });
+          window.addEventListener('resize', schedule, { passive: true });
+          // rAF does not fire while the page is hidden — correct, but it
+          // means a page loaded in a background tab would show unpositioned
+          // parallax on first reveal. Re-apply when it becomes visible.
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') apply();
+          });
+          apply();
+        }
+      }
+
+      start();
+      // if someone turns reduced-motion on mid-visit, stop adding motion
+      reduced.addEventListener?.('change', () => {
+        if (reduced.matches) document.documentElement.classList.remove('motion');
+      });
+
+      // nav shrinks once you're past the top of the hero
+      const header = document.querySelector('[data-site-header]');
+      if (header) {
+        const onScroll = () => header.classList.toggle('is-scrolled', window.scrollY > 40);
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+      }
+    </script>
+  </body>
+</html>

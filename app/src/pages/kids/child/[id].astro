@@ -1,0 +1,918 @@
+---
+import KidsLayout from '../../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../../db';
+import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm';
+import { readForm } from '../../../lib/form';
+import { churchToday } from '../../../lib/services';
+import { ageOn, suggestClass, classMismatch, type AgeClass } from '../../../lib/kids';
+import { photosEnabled, putPhoto, deletePhoto, sniffImage, MAX_UPLOAD_BYTES } from '../../../lib/photos';
+/* The app's ONE phone-normalisation rule, already used by the sender and the
+ * backfill script. A second copy here had quietly dropped the already-E.164
+ * passthrough, which is how two functions with the same name start
+ * disagreeing about the same number. */
+import { toE164 } from '../../../lib/sms';
+import { balanceOf, parseAmount, REASON_LABEL, MAX_AMOUNT } from '../../../lib/bucks';
+import { randomToken } from '../../../lib/auth';
+import { isKidsRole, canIssueCards, canLinkChurchRecords } from '../../../lib/permissions';
+
+/**
+ * One child.
+ *
+ * Teachers and bus workers may edit this, not only the director (the pastor,
+ * 2026-09-08) — a volunteer who spots a wrong phone number or a new allergy
+ * should be able to fix it rather than find somebody who can.
+ *
+ * A child can be here WITHOUT a kid_profile: they are one of the church's
+ * children who has never been enrolled in [Kids Ministry]. The page is the enrolment
+ * path as well as the edit path, which is why almost everything below tolerates
+ * `profile` being null.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/kids/children', 302);
+
+const back = (m: string) => Astro.redirect(`/kids/child/${id}?saved=${m}`, 303);
+let error: string | null = null;
+
+// ---- writes -----------------------------------------------------------------
+if (Astro.request.method === 'POST') {
+  // readForm, never request.formData() directly: a malformed or empty body
+  // rejects, and an unhandled rejection in frontmatter is a 500. Scanners POST
+  // empty bodies at every URL they find.
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? '');
+
+  const [child] = await db.select({ id: schema.people.id, photoKey: schema.people.photoKey })
+    .from(schema.people)
+    .where(and(eq(schema.people.id, id), eq(schema.people.adultChild, 'child'))).limit(1);
+  if (!child) return Astro.redirect('/kids/children', 302);
+
+  const num = (v: FormDataEntryValue | null) => {
+    const n = Number(String(v ?? ''));
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
+  const str = (v: FormDataEntryValue | null) => {
+    const s = String(v ?? '').trim();
+    return s === '' ? null : s;
+  };
+
+  if (act === 'save-profile') {
+    const classId = num(form.get('classId'));
+    const routeId = num(form.get('routeId'));
+    const allergies = str(form.get('allergies'));
+    const medicalNotes = str(form.get('medicalNotes'));
+    const at = nowIso();
+    // Enrolling and editing are the same write. A child with no profile who is
+    // given a class has just joined [Kids Ministry]; making that a separate button would
+    // mean two ways to reach one state and a way to get it half done.
+    await db.insert(schema.kidProfiles)
+      .values({ personId: id, classId, routeId, allergies, medicalNotes, createdAt: at, updatedAt: at })
+      .onConflictDoUpdate({
+        target: schema.kidProfiles.personId,
+        set: { classId, routeId, allergies, medicalNotes, updatedAt: at },
+      });
+    return back('profile');
+  }
+
+  if (act === 'add-guardian') {
+    const name = str(form.get('name'));
+    if (!name) { error = 'A guardian needs a name.'; }
+    else {
+      const phone = str(form.get('phone'));
+      const at = nowIso();
+      await db.insert(schema.kidGuardians).values({
+        personId: id, name, relationship: str(form.get('relationship')),
+        phone, phoneE164: toE164(phone), email: str(form.get('email')),
+        isPrimary: false,
+        // A guardian added by hand starts as 'unknown', never opted in. Consent
+        // is something a family gives, not something a form defaults to.
+        smsConsent: 'unknown',
+        createdAt: at, updatedAt: at,
+      });
+      return back('guardian-added');
+    }
+  }
+
+  if (act === 'save-guardian') {
+    const gid = num(form.get('guardianId'));
+    const name = str(form.get('name'));
+    if (!gid || !name) { error = 'A guardian needs a name.'; }
+    else {
+      const phone = str(form.get('phone'));
+      const consent = String(form.get('smsConsent') ?? 'unknown');
+      const valid = ['unknown', 'opted_in', 'opted_out'].includes(consent)
+        ? consent as 'unknown' | 'opted_in' | 'opted_out' : 'unknown';
+      const [existing] = await db.select({ smsConsent: schema.kidGuardians.smsConsent })
+        .from(schema.kidGuardians)
+        .where(and(eq(schema.kidGuardians.id, gid), eq(schema.kidGuardians.personId, id))).limit(1);
+      if (!existing) { error = 'That guardian is not on this child.'; }
+      else {
+        const at = nowIso();
+        // Only stamp the consent source and date when the ANSWER changed.
+        // Re-saving a phone number should not rewrite the evidence of when a
+        // family agreed, which is the whole point of keeping the date.
+        const changed = existing.smsConsent !== valid;
+        await db.update(schema.kidGuardians).set({
+          name, relationship: str(form.get('relationship')),
+          phone, phoneE164: toE164(phone), email: str(form.get('email')),
+          smsConsent: valid,
+          ...(changed ? { smsConsentSource: 'recorded-by-staff', smsConsentAt: at } : {}),
+          updatedAt: at,
+        }).where(and(eq(schema.kidGuardians.id, gid), eq(schema.kidGuardians.personId, id)));
+        return back('guardian');
+      }
+    }
+  }
+
+  if (act === 'remove-guardian') {
+    const gid = num(form.get('guardianId'));
+    // Scoped to THIS child as well as the id, so a guardian id from another
+    // child's page cannot be deleted by editing a form value.
+    if (gid) await db.delete(schema.kidGuardians)
+      .where(and(eq(schema.kidGuardians.id, gid), eq(schema.kidGuardians.personId, id)));
+    return back('guardian-removed');
+  }
+
+  if (act === 'award' || act === 'spend') {
+    const amount = parseAmount(String(form.get('amount') ?? ''));
+    if (amount === null) {
+      error = `Enter a whole number of bucks, 1 to ${MAX_AMOUNT}.`;
+    } else {
+      /*
+       * The SIGN comes from the button, never from what was typed. parseAmount
+       * refuses a minus, so "-5" in the spend box cannot quietly become a
+       * five-buck award — which is the sort of thing nobody would notice for
+       * weeks, and then only because a child said so.
+       */
+      await db.insert(schema.kidLedger).values({
+        personId: id,
+        delta: act === 'award' ? amount : -amount,
+        reason: act,
+        note: str(form.get('note')),
+        staffId: user.id > 0 ? user.id : null,
+        createdAt: nowIso(),
+      });
+      return back(act === 'award' ? 'awarded' : 'spent');
+    }
+  }
+
+  if (act === 'undo-entry') {
+    const entryId = num(form.get('entryId'));
+    if (entryId) {
+      const [entry] = await db.select().from(schema.kidLedger)
+        .where(and(eq(schema.kidLedger.id, entryId), eq(schema.kidLedger.personId, id))).limit(1);
+      /*
+       * Undo is a NEW ROW of the opposite sign, not a delete.
+       *
+       * This is where append-only earns its keep: a child who asks why their
+       * balance changed can be shown both the mistake and the fix, which
+       * "we deleted it" cannot do.
+       *
+       * Attendance credits are excluded on purpose — they are undone by
+       * unticking the register, which removes the row so that re-ticking can
+       * credit again. A correction here would leave the original occupying the
+       * unique index and the child permanently down.
+       */
+      if (entry && entry.reason !== 'attendance') {
+        await db.insert(schema.kidLedger).values({
+          personId: id, delta: -entry.delta, reason: 'correction',
+          note: `Undid: ${REASON_LABEL[entry.reason] ?? entry.reason}`
+              + (entry.note ? ` — ${entry.note}` : ''),
+          staffId: user.id > 0 ? user.id : null,
+          createdAt: nowIso(),
+        });
+      }
+      return back('undone');
+    }
+  }
+
+  if (act === 'archive' || act === 'restore') {
+    /*
+     * ARCHIVED, NEVER DELETED — the same rule the rest of the app follows.
+     *
+     * Attendance rows and ledger entries point at this person. A hard delete
+     * would cascade and silently change historical totals: a term's attendance
+     * would quietly drop, and a child's [Kids Currency] history would vanish along
+     * with the record of what they earned it for.
+     *
+     * Archiving takes them out of every list, every register and every
+     * messaging audience — buildKidsAudience joins the child and filters on
+     * this flag, so their guardians stop being texted too — while leaving the
+     * history intact and the whole thing reversible.
+     *
+     * Director and above: removing a child from the section is structural, and
+     * a mis-tap on a phone should not empty somebody's class.
+     */
+    if (!canLinkChurchRecords(user.role)) return back('profile');
+    await db.update(schema.people)
+      .set({ archived: act === 'archive', updatedAt: nowIso() })
+      .where(eq(schema.people.id, id));
+    return act === 'archive'
+      ? Astro.redirect('/kids/children?saved=archived', 303)
+      : back('restored');
+  }
+
+  if (act === 'link-member') {
+    /*
+     * Link a child to an adult who is ALREADY in the church's records.
+     *
+     * The contact details are NOT copied. member_person_id is a link, and every
+     * reader — the profile, the audience builder, the replies tab — resolves a
+     * linked guardian's number and consent from their `people` row. That is the
+     * whole reason the column exists: fifty church families re-typed into
+     * kid_guardians would be fifty copies going stale the first time somebody
+     * changed their number in the directory.
+     */
+    if (!canLinkChurchRecords(user.role)) return back('profile');
+    const memberId = num(form.get('memberId'));
+    if (memberId) {
+      const [m] = await db.select({ id: schema.people.id, firstName: schema.people.firstName,
+                                    lastName: schema.people.lastName })
+        .from(schema.people)
+        .where(and(eq(schema.people.id, memberId), eq(schema.people.adultChild, 'adult'),
+                   eq(schema.people.archived, false))).limit(1);
+      if (!m) error = 'That person is not in the church records.';
+      else {
+        const [dup] = await db.select({ id: schema.kidGuardians.id }).from(schema.kidGuardians)
+          .where(and(eq(schema.kidGuardians.personId, id),
+                     eq(schema.kidGuardians.memberPersonId, memberId))).limit(1);
+        if (dup) error = `${m.firstName} is already down as a grown-up for this child.`;
+        else {
+          const at = nowIso();
+          await db.insert(schema.kidGuardians).values({
+            personId: id,
+            name: `${m.firstName} ${m.lastName}`,
+            relationship: str(form.get('relationship')),
+            /*
+             * phone, email and consent are left NULL on purpose. Filling them
+             * would be the copy this link exists to avoid — and a stale copy
+             * beside a live record is worse than no copy, because somebody
+             * would ring it.
+             */
+            memberPersonId: memberId,
+            isPrimary: false,
+            smsConsent: 'unknown',
+            createdAt: at, updatedAt: at,
+          });
+          return back('linked');
+        }
+      }
+    }
+  }
+
+  if (act === 'issue-card' || act === 'revoke-card') {
+    /*
+     * Director and above. Checked HERE rather than by path, because cards live
+     * on a page teachers need for everything else — but the rule itself lives
+     * in lib/permissions.ts with the others, so there is one file to read to
+     * know what a teacher cannot do.
+     *
+     * Refused silently back to the page rather than with an error: a teacher
+     * has no button to press, so arriving here at all means a stale form or a
+     * hand-made request, and neither deserves an explanation.
+     */
+    if (!canIssueCards(user.role)) return back('profile');
+
+    if (act === 'issue-card') {
+      /*
+       * Issuing REVOKES whatever came before, in the same breath.
+       *
+       * Two live cards for one child is two of everything the card can do —
+       * and from release two, two kiosk taps. The old token stays in the table
+       * rather than being overwritten, so a card found later can be identified
+       * as the revoked one instead of silently working.
+       */
+      const at = nowIso();
+      await db.update(schema.kidCards)
+        .set({ active: false, revokedAt: at })
+        .where(and(eq(schema.kidCards.personId, id), eq(schema.kidCards.active, true)));
+      await db.insert(schema.kidCards).values({
+        personId: id,
+        // 32 bytes of crypto randomness as hex. Opaque: nothing about the
+        // child is recoverable from it, and it is not guessable from another.
+        token: randomToken(32),
+        active: true, issuedAt: at, issuedBy: user.email,
+      });
+      return back('card-issued');
+    }
+
+    const cardId = num(form.get('cardId'));
+    // Scoped to this child as well as the id, so a card id from another
+    // child's page cannot be revoked by editing a form value.
+    if (cardId) await db.update(schema.kidCards)
+      .set({ active: false, revokedAt: nowIso() })
+      .where(and(eq(schema.kidCards.id, cardId), eq(schema.kidCards.personId, id)));
+    return back('card-revoked');
+  }
+
+  if (act === 'photo' && photosEnabled(env)) {
+    const file = form.get('photo');
+    if (file instanceof File && file.size > 0) {
+      if (file.size > MAX_UPLOAD_BYTES) error = 'That photo is too large.';
+      else {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        // The real leading bytes, not the browser's content-type header, which
+        // is attacker-controlled. These files are served back to browsers.
+        const mime = sniffImage(bytes);
+        if (!mime) error = 'That does not look like a JPEG, PNG or WebP.';
+        else {
+          const key = await putPhoto(env, id, bytes, mime);
+          await db.update(schema.people).set({ photoKey: key, updatedAt: nowIso() })
+            .where(eq(schema.people.id, id));
+          await deletePhoto(env, child.photoKey);
+          return back('photo');
+        }
+      }
+    } else error = 'Choose a photo first.';
+  }
+
+  if (act === 'photo-remove') {
+    await deletePhoto(env, child.photoKey);
+    await db.update(schema.people).set({ photoKey: null, updatedAt: nowIso() })
+      .where(eq(schema.people.id, id));
+    return back('photo-removed');
+  }
+}
+
+// ---- reads ------------------------------------------------------------------
+/* Archived children are still readable HERE — otherwise archiving somebody
+ * would bounce you off the only page that can bring them back. They are hidden
+ * from the lists, the registers and the audiences, which is the point. */
+const [child] = await db.select().from(schema.people)
+  .where(and(eq(schema.people.id, id), eq(schema.people.adultChild, 'child'))).limit(1);
+if (!child) return Astro.redirect('/kids/children', 302);
+
+const [profile] = await db.select().from(schema.kidProfiles)
+  .where(eq(schema.kidProfiles.personId, id)).limit(1);
+
+/*
+ * Active classes and routes, PLUS whichever this child is already in even if it
+ * has been stopped.
+ *
+ * Without the second half, a child in a class the director switched off would
+ * render with "— not in a class —" selected, and the next person to save
+ * anything on this page — a phone number, an allergy — would silently move them
+ * out of it. A form must not quietly discard a value just because the option
+ * list stopped offering it.
+ */
+const classRows = await db.select().from(schema.kidClasses)
+  .where(profile?.classId
+    ? or(eq(schema.kidClasses.active, true), eq(schema.kidClasses.id, profile.classId))
+    : eq(schema.kidClasses.active, true))
+  .orderBy(asc(schema.kidClasses.sort));
+const routeRows = await db.select().from(schema.kidRoutes)
+  .where(profile?.routeId
+    ? or(eq(schema.kidRoutes.active, true), eq(schema.kidRoutes.id, profile.routeId))
+    : eq(schema.kidRoutes.active, true))
+  .orderBy(asc(schema.kidRoutes.name));
+
+/*
+ * Guardians, with the MEMBER record joined where one is linked.
+ *
+ * When member_person_id is set, the member's row is the source of truth for
+ * contact details — that is the whole reason the link exists rather than a copy
+ * that goes stale. So those fields are shown from `people` and are not editable
+ * here; they are edited on the member's own page, once, for everybody.
+ *
+ * It is also the double-text guard: a parent who is a member must be texted
+ * through ONE of the two records, and this is where that is visible.
+ */
+const guardians = await db.select({
+  id: schema.kidGuardians.id,
+  name: schema.kidGuardians.name,
+  relationship: schema.kidGuardians.relationship,
+  phone: schema.kidGuardians.phone,
+  email: schema.kidGuardians.email,
+  smsConsent: schema.kidGuardians.smsConsent,
+  smsConsentSource: schema.kidGuardians.smsConsentSource,
+  smsConsentAt: schema.kidGuardians.smsConsentAt,
+  memberPersonId: schema.kidGuardians.memberPersonId,
+  memberFirst: schema.people.firstName,
+  memberLast: schema.people.lastName,
+  memberPhone: schema.people.phone,
+  memberConsent: schema.people.smsConsent,
+}).from(schema.kidGuardians)
+  .leftJoin(schema.people, eq(schema.people.id, schema.kidGuardians.memberPersonId))
+  .where(eq(schema.kidGuardians.personId, id))
+  .orderBy(asc(schema.kidGuardians.id));
+
+const ageClasses: AgeClass[] = classRows.map((c) => ({
+  id: c.id, name: c.name, minAge: c.minAge, maxAge: c.maxAge,
+}));
+const age = ageOn(child.birthday, churchToday());
+const suggested = suggestClass(age, ageClasses);
+const outgrown = classMismatch(age, profile?.classId ?? null, ageClasses) === true;
+
+/* The whole ledger for the balance, and the most recent slice to show. Seventy
+ * children with a handful of rows each makes this one cheap read; a stored
+ * balance column would be a race between two teachers awarding at once. */
+const ledger = await db.select().from(schema.kidLedger)
+  .where(eq(schema.kidLedger.personId, id))
+  .orderBy(desc(schema.kidLedger.id));
+const balance = balanceOf(ledger);
+const recent = ledger.slice(0, 8);
+
+const cards = await db.select().from(schema.kidCards)
+  .where(eq(schema.kidCards.personId, id))
+  .orderBy(desc(schema.kidCards.id));
+const liveCard = cards.find((c) => c.active) ?? null;
+
+/* The URL that goes on the tag. Built from the request's own origin so it is
+ * right in every environment without a variable to forget — the same reason
+ * the Twilio signature check trusts request.url. */
+const cardUrl = liveCard ? `${Astro.url.origin}/kids/card/${liveCard.token}` : null;
+
+/*
+ * Searching the congregation, from inside the children's section.
+ *
+ * Director and above only — see canLinkChurchRecords. Results carry a NAME and
+ * whether that person can be texted, and nothing else: enough to pick the right
+ * Hargrove, and no more of the directory than that requires.
+ */
+const find = (Astro.url.searchParams.get('find') ?? '').trim();
+const alreadyLinked = new Set(
+  (await db.select({ m: schema.kidGuardians.memberPersonId }).from(schema.kidGuardians)
+    .where(eq(schema.kidGuardians.personId, id))).map((r) => r.m).filter(Boolean) as number[],
+);
+const matches = (find.length >= 2 && canLinkChurchRecords(user.role))
+  ? (await db.select({
+      id: schema.people.id,
+      firstName: schema.people.firstName,
+      lastName: schema.people.lastName,
+      city: schema.people.addressCity,
+      textable: schema.people.phoneE164,
+      consent: schema.people.smsConsent,
+    }).from(schema.people)
+      .where(and(
+        eq(schema.people.adultChild, 'adult'),
+        eq(schema.people.archived, false),
+        sql`(lower(first_name) || ' ' || lower(last_name)) like ${'%' + find.toLowerCase() + '%'}`,
+      ))
+      .orderBy(asc(schema.people.lastName), asc(schema.people.firstName))
+      .limit(8))
+    .filter((m) => !alreadyLinked.has(m.id))
+  : [];
+
+const saved = Astro.url.searchParams.get('saved');
+const SAVED: Record<string, string> = {
+  profile: 'Saved.', photo: 'Photo updated.', 'photo-removed': 'Photo removed.',
+  guardian: 'Guardian saved.', 'guardian-added': 'Guardian added.',
+  'guardian-removed': 'Guardian removed.',
+  awarded: 'Bucks awarded.', spent: 'Bucks spent.', undone: 'That entry was undone.',
+  linked: 'Linked. Their details come from the church records and stay in step.',
+  restored: 'Back in [Kids Ministry].',
+  'card-issued': 'New card issued. Any earlier card has stopped working.',
+  'card-revoked': 'Card revoked. It will no longer open anything.',
+};
+const title = `${child.firstName} ${child.lastName}`;
+const consentLabel: Record<string, string> = {
+  unknown: 'Not recorded', opted_in: 'Can be texted', opted_out: 'Opted out',
+};
+---
+<KidsLayout title={title} user={user}>
+  <p style="margin:0 0 6px;"><a href="/kids/children" style="font-size:15px;">← All children</a></p>
+  <div style="display:flex; gap:14px; align-items:baseline; flex-wrap:wrap;">
+    <h1 style="margin-bottom:4px;">{title}</h1>
+    {/* The page a card tap opens. Reachable without one too — a card gets lost,
+        and a teacher may just want a balance without setting anything up. */}
+    <a href={`/kids/child/${child.id}/quick`} class="k-classroom">Classroom view →</a>
+  </div>
+  <p class="k-muted" style="margin:0 0 22px;">
+    {age !== null ? `${age} years old` : 'No birthday on file'}
+    {profile ? '' : ' · not in [Kids Ministry] yet'}
+  </p>
+
+  {child.archived && (
+    <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:18px;">
+      <strong>This child has left [Kids Ministry].</strong>
+      <p class="k-muted" style="margin:6px 0 0;">
+        They are hidden from the children's list, the registers and any texts.
+        Nothing has been deleted — their attendance and bucks are still here.
+      </p>
+      {canLinkChurchRecords(user.role) && (
+        <form method="POST" style="margin:12px 0 0;">
+          <input type="hidden" name="action" value="restore" />
+          <button class="k-btn" type="submit">Bring them back</button>
+        </form>
+      )}
+    </div>
+  )}
+
+  {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
+  {saved && SAVED[saved] && <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">{SAVED[saved]}</div>}
+
+  {/* Allergies first, above everything else, in red. Not a field in a form
+      somebody scrolls to — the one thing that has to be seen without looking. */}
+  {profile?.allergies && (
+    <div class="k-card" style="border-left:6px solid #b01818; margin-bottom:18px;">
+      <div class="k-label" style="color:#b01818;">Allergies</div>
+      <p style="margin:6px 0 0; font-size:19px; font-weight:600;">{profile.allergies}</p>
+      {profile.medicalNotes && <p class="k-muted" style="margin:8px 0 0;">{profile.medicalNotes}</p>}
+    </div>
+  )}
+
+  <div class="k-two">
+    <div>
+      <div class="k-card" style="margin-bottom:18px;">
+        <h2 style="margin-top:0;">In [Kids Ministry]</h2>
+        <form method="POST">
+          <input type="hidden" name="action" value="save-profile" />
+
+          <label class="k-field"><span>Class</span>
+            <select name="classId">
+              <option value="">— not in a class —</option>
+              {classRows.map((c) => (
+                <option value={c.id} selected={profile?.classId === c.id}>
+                  {c.name}{c.active ? '' : ' (not running)'}
+                </option>
+              ))}
+            </select>
+          </label>
+          {/* A SUGGESTION, never applied on its own. Class is a stored fact
+              because most bus children have no birthday to derive one from. */}
+          {suggested && outgrown && (
+            <p style="margin:-6px 0 14px; color:#a3540a; font-size:14px;">
+              Their age suggests <strong>{suggested.name}</strong>.
+            </p>
+          )}
+          {suggested && !profile?.classId && (
+            <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
+              Their age suggests {suggested.name}.
+            </p>
+          )}
+
+          <label class="k-field"><span>Bus route</span>
+            <select name="routeId">
+              {/* Most children walk in with their family, so no route is the
+                  normal answer and it is listed first. */}
+              <option value="">— no route —</option>
+              {routeRows.map((r) => (
+                <option value={r.id} selected={profile?.routeId === r.id}>
+                  {r.name}{r.active ? '' : ' (not running)'}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label class="k-field"><span>Allergies</span>
+            <input name="allergies" value={profile?.allergies ?? ''}
+                   placeholder="Peanuts — EpiPen in the office" autocomplete="off" /></label>
+          <label class="k-field"><span>Medical notes</span>
+            <textarea name="medicalNotes" rows="2">{profile?.medicalNotes ?? ''}</textarea></label>
+
+          <button class="k-btn" type="submit">{profile ? 'Save' : 'Add to [Kids Ministry]'}</button>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="k-card" style="margin-bottom:18px;">
+        <h2 style="margin-top:0;">Photo</h2>
+        {child.photoKey || photosEnabled(env) ? (
+          <>
+            {child.photoKey && (
+              <img src={`/kids/photo/${child.id}?v=${encodeURIComponent(child.photoKey.slice(-8))}`}
+                   alt="" width="150" height="150"
+                   style="border-radius:12px; object-fit:cover; display:block; margin-bottom:12px;" />
+            )}
+            <form method="POST" enctype="multipart/form-data" style="margin:0;">
+              <input type="hidden" name="action" value="photo" />
+              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp"
+                     style="font-size:14px; max-width:100%;" />
+              <button class="k-btn k-btn--quiet" type="submit" style="margin-top:10px;">Upload</button>
+            </form>
+            {child.photoKey && (
+              <form method="POST" style="margin:8px 0 0;">
+                <input type="hidden" name="action" value="photo-remove" />
+                <button class="k-btn k-btn--quiet" type="submit">Remove photo</button>
+              </form>
+            )}
+          </>
+        ) : (
+          <p class="k-muted" style="margin:0;">Photo storage is not switched on in this environment.</p>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <h2 style="margin:28px 0 12px;">[Kids Currency]</h2>
+  <div class="k-card" style="margin-bottom:18px;">
+    <div class="k-label" style="color:var(--k-ink-soft);">Balance</div>
+    <p style="margin:2px 0 16px; font-size:34px; font-weight:800; line-height:1;">
+      {balance}<span style="font-size:16px; font-weight:600; color:var(--k-ink-soft); margin-left:8px;">bucks</span>
+    </p>
+
+    <div class="k-bucks">
+      <form method="POST" class="k-bucks__form">
+        <input type="hidden" name="action" value="award" />
+        <div class="k-bucks__row">
+          <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="5" required
+                 aria-label="Bucks to award" />
+          <input name="note" placeholder="What for?" autocomplete="off" aria-label="What for" />
+          <button class="k-btn" type="submit">Award</button>
+        </div>
+      </form>
+      <form method="POST" class="k-bucks__form">
+        <input type="hidden" name="action" value="spend" />
+        <div class="k-bucks__row">
+          <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="5" required
+                 aria-label="Bucks to spend" />
+          <input name="note" placeholder="On what?" autocomplete="off" aria-label="On what" />
+          <button class="k-btn k-btn--quiet" type="submit">Spend</button>
+        </div>
+      </form>
+    </div>
+
+    {recent.length > 0 && (
+      <div style="margin-top:18px; border-top:1px solid rgba(13,27,69,.1); padding-top:14px;">
+        <div class="k-label" style="color:var(--k-ink-soft); margin-bottom:8px;">Recent</div>
+        {recent.map((e) => (
+          <div class="k-entry">
+            <span class="k-entry__delta" class:list={[e.delta < 0 && 'is-down']}>
+              {e.delta > 0 ? `+${e.delta}` : e.delta}
+            </span>
+            <span class="k-entry__what">
+              {REASON_LABEL[e.reason] ?? e.reason}
+              {e.note && <span class="k-muted"> · {e.note}</span>}
+            </span>
+            <span class="k-entry__when k-muted">{e.createdAt.slice(0, 10)}</span>
+            {/* Attendance credits are undone by unticking the register, not
+                here — see the handler for why a correction would strand them. */}
+            {e.reason !== 'attendance' && (
+              <form method="POST" style="margin:0;">
+                <input type="hidden" name="action" value="undo-entry" />
+                <input type="hidden" name="entryId" value={e.id} />
+                <button class="k-undo" type="submit"
+                        onclick="return confirm('Undo this entry?')">undo</button>
+              </form>
+            )}
+          </div>
+        ))}
+        {ledger.length > recent.length && (
+          <p class="k-muted" style="margin:10px 0 0; font-size:14px;">
+            and {ledger.length - recent.length} older {ledger.length - recent.length === 1 ? 'entry' : 'entries'}
+          </p>
+        )}
+      </div>
+    )}
+  </div>
+
+  <h2 style="margin:28px 0 12px;">Card</h2>
+  <div class="k-card" style="margin-bottom:18px;">
+    {liveCard ? (
+      <>
+        <p style="margin-top:0;">
+          Issued {liveCard.issuedAt.slice(0, 10)}
+          {liveCard.issuedBy && <span class="k-muted"> by {liveCard.issuedBy}</span>}
+        </p>
+        {canIssueCards(user.role) ? (
+          <>
+            {/* The URL to write to the tag. Shown only to whoever may issue
+                cards — it IS the credential, and a teacher has no reason to
+                read one off a screen. */}
+            <div class="k-label" style="color:var(--k-ink-soft);">Write this to the tag</div>
+            <input readonly value={cardUrl} onclick="this.select()" class="k-token" />
+            <p class="k-muted" style="margin:8px 0 14px; font-size:14px;">
+              Tapping it on a phone opens this page, already signed in. A found
+              card shows a sign-in screen and nothing else.
+            </p>
+            <form method="POST" style="display:inline-block; margin:0 8px 0 0;">
+              <input type="hidden" name="action" value="revoke-card" />
+              <input type="hidden" name="cardId" value={liveCard.id} />
+              <button class="k-btn k-btn--quiet" type="submit"
+                      onclick="return confirm('Revoke this card? It will stop working immediately.')">
+                Revoke</button>
+            </form>
+            <form method="POST" style="display:inline-block; margin:0;">
+              <input type="hidden" name="action" value="issue-card" />
+              <button class="k-btn k-btn--quiet" type="submit"
+                      onclick="return confirm('Issue a replacement? The current card stops working.')">
+                Replace</button>
+            </form>
+          </>
+        ) : (
+          <p class="k-muted" style="margin-bottom:0;">
+            Ask a director if this card needs replacing.
+          </p>
+        )}
+      </>
+    ) : (
+      <>
+        <p class="k-muted" style="margin-top:0;">No card issued.</p>
+        {canIssueCards(user.role) ? (
+          <form method="POST" style="margin:0;">
+            <input type="hidden" name="action" value="issue-card" />
+            <button class="k-btn" type="submit">Issue a card</button>
+          </form>
+        ) : (
+          <p class="k-muted" style="margin-bottom:0;">A director can issue one.</p>
+        )}
+      </>
+    )}
+
+    {cards.filter((c) => !c.active).length > 0 && canIssueCards(user.role) && (
+      <p class="k-muted" style="margin:14px 0 0; font-size:14px;">
+        {cards.filter((c) => !c.active).length} earlier
+        {cards.filter((c) => !c.active).length === 1 ? ' card has' : ' cards have'} been revoked
+        and no longer open anything.
+      </p>
+    )}
+  </div>
+
+  <h2 style="margin:28px 0 12px;">Guardians</h2>
+
+  {guardians.length === 0 && (
+    <div class="k-card" style="margin-bottom:14px;">
+      <p class="k-muted" style="margin:0;">Nobody recorded yet. Add whoever collects them.</p>
+    </div>
+  )}
+
+  {guardians.map((g) => (
+    <div class="k-card" style="margin-bottom:14px;">
+      {g.memberPersonId ? (
+        <>
+          {/* LINKED to a member. Their contact details live on the member's own
+              record so they stay in sync with the directory instead of being
+              copied here and going stale — so they are shown, not edited. */}
+          <div class="k-label" style="color:var(--k-ink-soft);">Guardian · also in the church directory</div>
+          <p style="margin:6px 0 2px; font-size:18px; font-weight:600;">
+            {g.memberFirst} {g.memberLast}
+            {g.relationship && <span style="font-weight:400; color:var(--k-ink-soft);"> · {g.relationship}</span>}
+          </p>
+          <p style="margin:0 0 4px;">{g.memberPhone ?? 'No number on file'}</p>
+          <p class="k-muted" style="margin:0; font-size:14px;">
+            Texting: {consentLabel[g.memberConsent ?? 'unknown']} — from their member record.
+            {/* The link goes to /people, which the gate refuses to a volunteer.
+                Showing it to them would be a dead end for exactly the people
+                who see this block most, so they get told who to ask instead. */}
+            {isKidsRole(user.role)
+              ? ' Their details are kept on the church record — ask the office to change them.'
+              : null}
+            {!isKidsRole(user.role) && (
+              <>{' '}Edit their details on <a href={`/people/${g.memberPersonId}`}>the church record</a>,
+              so they change in one place.</>
+            )}
+          </p>
+          <form method="POST" style="margin:10px 0 0;">
+            <input type="hidden" name="action" value="remove-guardian" />
+            <input type="hidden" name="guardianId" value={g.id} />
+            <button class="k-btn k-btn--quiet" type="submit"
+                    onclick="return confirm('Remove this guardian from this child?')">Remove</button>
+          </form>
+        </>
+      ) : (
+        <form method="POST" style="margin:0;">
+          <input type="hidden" name="action" value="save-guardian" />
+          <input type="hidden" name="guardianId" value={g.id} />
+          <div class="k-grid">
+            <label class="k-field"><span>Name</span>
+              <input name="name" value={g.name} required autocomplete="off" /></label>
+            <label class="k-field"><span>Relationship</span>
+              <input name="relationship" value={g.relationship ?? ''} placeholder="mother" autocomplete="off" /></label>
+            <label class="k-field"><span>Phone</span>
+              <input name="phone" value={g.phone ?? ''} placeholder="(317) 555-0142" autocomplete="off" /></label>
+            <label class="k-field"><span>Email</span>
+              <input name="email" type="email" value={g.email ?? ''} autocomplete="off" /></label>
+            <label class="k-field"><span>Texting</span>
+              <select name="smsConsent">
+                <option value="unknown" selected={g.smsConsent === 'unknown'}>Not recorded</option>
+                <option value="opted_in" selected={g.smsConsent === 'opted_in'}>Agreed to be texted</option>
+                <option value="opted_out" selected={g.smsConsent === 'opted_out'}>Opted out</option>
+              </select>
+            </label>
+          </div>
+          {/* An opt-out that came from the family THEMSELVES, by text. Staff can
+              still change it — a family may re-consent in person — but it should
+              never be flipped back without somebody noticing they are doing it. */}
+          {g.smsConsent === 'opted_out' && g.smsConsentSource === 'sms-stop' && (
+            <p style="margin:0 0 10px; color:#b01818; font-size:14px;">
+              They texted STOP{g.smsConsentAt ? ` on ${g.smsConsentAt.slice(0, 10)}` : ''}.
+              Do not put them back without them asking.
+            </p>
+          )}
+          <button class="k-btn" type="submit">Save</button>
+          <button class="k-btn k-btn--quiet" type="submit" name="action" value="remove-guardian"
+                  onclick="return confirm('Remove this guardian?')" style="margin-left:8px;">Remove</button>
+        </form>
+      )}
+    </div>
+  ))}
+
+  {canLinkChurchRecords(user.role) && (
+    <details class="k-card" style="margin-bottom:14px;" open={find.length >= 2}>
+      <summary style="cursor:pointer; font-weight:600;">Add a parent from the church directory</summary>
+      <p class="k-muted" style="margin:12px 0 12px; font-size:14px;">
+        For a child whose family already attends. Their phone number is not copied —
+        it is read from the church records, so it stays right when they change it.
+      </p>
+      {/* A GET form: the search is a link, so it works with no JavaScript and a
+          director can go straight back to it. */}
+      <form method="GET" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <input name="find" value={find} placeholder="Search by name" autocomplete="off"
+               style="flex:1; min-width:170px; padding:10px 12px; font:inherit; font-size:16px;
+                      color:var(--k-ink); border:1px solid rgba(13,27,69,.22);
+                      border-radius:9px; background:#fff;" />
+        <button class="k-btn k-btn--quiet" type="submit">Search</button>
+      </form>
+
+      {find.length >= 2 && matches.length === 0 && (
+        <p class="k-muted" style="margin:0;">Nobody by that name in the church records.</p>
+      )}
+
+      {matches.map((m) => (
+        <form method="POST" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+                                   padding:8px 0; border-top:1px solid rgba(13,27,69,.08);">
+          <input type="hidden" name="action" value="link-member" />
+          <input type="hidden" name="memberId" value={m.id} />
+          <span style="flex:1; min-width:150px;">
+            <strong>{m.firstName} {m.lastName}</strong>
+            <span class="k-muted" style="font-size:14px;">
+              {m.city ? ` · ${m.city}` : ''}
+              {m.textable && m.consent === 'opted_in' ? ' · can be texted' : ' · not textable'}
+            </span>
+          </span>
+          <input name="relationship" placeholder="mother" autocomplete="off"
+                 style="width:120px; padding:8px 10px; font:inherit; font-size:15px;
+                        color:var(--k-ink); border:1px solid rgba(13,27,69,.22);
+                        border-radius:9px; background:#fff;" />
+          <button class="k-btn" type="submit">Link</button>
+        </form>
+      ))}
+    </details>
+  )}
+
+  {canLinkChurchRecords(user.role) && !child.archived && (
+    <div class="k-card" style="margin-bottom:18px;">
+      <div class="k-label" style="color:var(--k-ink-soft);">If they stop coming</div>
+      <form method="POST" style="margin:10px 0 0;">
+        <input type="hidden" name="action" value="archive" />
+        <button class="k-btn k-btn--quiet" type="submit"
+                onclick="return confirm('Take this child out of [Kids Ministry]? Their attendance and bucks are kept, and you can bring them back.')">
+          This child has left [Kids Ministry]</button>
+      </form>
+      <p class="k-muted" style="margin:10px 0 0; font-size:14px;">
+        Takes them off the lists, the registers and any texts. Nothing is
+        deleted and it can be undone.
+      </p>
+    </div>
+  )}
+
+  <details class="k-card" style="margin-bottom:18px;">
+    <summary style="cursor:pointer; font-weight:600;">Add a grown-up who is not in the church records</summary>
+    <form method="POST" style="margin-top:14px;">
+      <input type="hidden" name="action" value="add-guardian" />
+      <div class="k-grid">
+        <label class="k-field"><span>Name</span><input name="name" required autocomplete="off" /></label>
+        <label class="k-field"><span>Relationship</span><input name="relationship" placeholder="mother" autocomplete="off" /></label>
+        <label class="k-field"><span>Phone</span><input name="phone" placeholder="(317) 555-0142" autocomplete="off" /></label>
+        <label class="k-field"><span>Email</span><input name="email" type="email" autocomplete="off" /></label>
+      </div>
+      <p class="k-muted" style="margin:0 0 10px; font-size:14px;">
+        A new guardian is not marked as agreeing to texts. Record that separately,
+        once they have actually said so.
+      </p>
+      <button class="k-btn" type="submit">Add</button>
+    </form>
+  </details>
+</KidsLayout>
+
+<style>
+  .k-two { display:grid; gap:18px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  @media (max-width: 760px) { .k-two { grid-template-columns: 1fr; } }
+  .k-grid { display:grid; gap:0 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .k-field { display:block; margin-bottom:14px; }
+  .k-field > span { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--k-ink-soft); margin-bottom:5px; }
+  .k-field input, .k-field select, .k-field textarea {
+    width:100%; padding:10px 12px; font:inherit; font-size:16px; color:var(--k-ink);
+    border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff;
+  }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-btn--quiet { background:transparent; color:var(--k-ink-soft);
+                  border:1px solid rgba(13,27,69,.22); font-weight:600; }
+  .k-bucks { display:grid; gap:10px; }
+  .k-bucks__row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .k-bucks__row input[type="number"] { width:88px; padding:10px 12px; font:inherit; font-size:16px;
+    color:var(--k-ink); border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-bucks__row input[name="note"] { flex:1; min-width:150px; padding:10px 12px; font:inherit;
+    font-size:16px; color:var(--k-ink); border:1px solid rgba(13,27,69,.22);
+    border-radius:9px; background:#fff; }
+  .k-entry { display:flex; align-items:center; gap:10px; padding:7px 0; font-size:15px; }
+  .k-entry + .k-entry { border-top:1px solid rgba(13,27,69,.06); }
+  .k-entry__delta { flex:0 0 48px; font-weight:800; color:#1f6b3a; }
+  .k-entry__delta.is-down { color:#b01818; }
+  .k-entry__what { flex:1; }
+  .k-entry__when { flex:0 0 auto; font-size:13px; }
+  .k-classroom { font-size:15px; font-weight:700; white-space:nowrap;
+                 padding:8px 14px; border-radius:999px; text-decoration:none;
+                 background:rgba(94,208,224,.14); border:1px solid rgba(94,208,224,.4); }
+  .k-token { width:100%; padding:10px 12px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+             font-size:13px; color:var(--k-ink); border:1px solid rgba(13,27,69,.22);
+             border-radius:9px; background:#f6f8fc; }
+  .k-undo { font:inherit; font-size:13px; background:none; border:0; cursor:pointer;
+            color:var(--k-ink-soft); text-decoration:underline; padding:0; }
+  .k-undo:hover { color:#b01818; }
+</style>

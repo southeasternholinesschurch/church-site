@@ -1,0 +1,190 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import heroImg from '../assets/photos/bowed.jpg';
+
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+---
+<BaseLayout
+  title="Give"
+  description="Give to [Your Church Name] through Zeffy, in person on a Sunday, or through our other online giving options. Zeffy passes on 100% of every gift."
+  navTheme="dark"
+>
+  <!-- ============ HERO ============ -->
+  <section class="ghero" data-par-frame>
+    <div class="ghero__img duo par" data-par="110" style="--drift-scale: 1.32;">
+      <Image src={heroImg} alt="Heads bowed during prayer in the sanctuary"
+             widths={[900, 1400, 2000, 2400]} sizes="140vw" fetchpriority="high" loading="eager" />
+    </div>
+    <div class="ghero__grade" aria-hidden="true"></div>
+    <div class="ghero__body par-fg" data-par="-30">
+      <p class="label load d1 ghero__eyebrow">Give</p>
+      <h1 class="serif load d2">Every gift stays <em>close to home</em></h1>
+      <p class="ghero__lede load d3">
+        Giving keeps the lights on, the doors open, and this church serving the
+        neighborhood it sits in.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ WAYS TO GIVE ============ -->
+  <section class="wrap ways-wrap">
+    <p class="label ways__h reveal">Ways To Give</p>
+    <div class="ways">
+      <div class="way way--lead reveal">
+        <p class="label way__kicker">Online</p>
+        <h2 class="serif way__title">Give through Zeffy</h2>
+        <p class="way__p">
+          Card or bank transfer, one-off or recurring. Zeffy passes on 100% of your
+          gift — they charge the church nothing and take no cut.
+        </p>
+        <a href={settings.zeffyUrl} target="_blank" rel="noreferrer" class="btn btn--solid way__btn">
+          Give now ↗
+        </a>
+      </div>
+
+      <div class="way reveal">
+        <p class="label way__kicker">In Person</p>
+        <h2 class="serif way__title">On a Sunday</h2>
+        <p class="way__p">
+          The offering is received during both Sunday services — no envelope or
+          arrangement needed, just bring it along.
+        </p>
+      </div>
+
+      {/* Deliberately no check payee or mailing details anywhere on this page:
+          who to make a check out to is not something the church publishes. The
+          Linktree gathers the other digital options instead. */}
+      <div class="way reveal">
+        <p class="label way__kicker">Other Ways</p>
+        <h2 class="serif way__title">Additional digital giving</h2>
+        <p class="way__p">
+          A few other ways to give online, all gathered in one place.
+        </p>
+        {settings.givingLinksUrl && (
+          <a href={settings.givingLinksUrl} target="_blank" rel="noreferrer" class="btn btn--ink way__btn">
+            See the options ↗
+          </a>
+        )}
+      </div>
+    </div>
+
+    <p class="ways__note reveal">
+      This website never handles or stores payment details — the Give button hands you
+      straight to Zeffy, who process everything.
+    </p>
+  </section>
+
+  <!-- ============ WHERE IT GOES ============ -->
+  <section class="wrap uses-wrap">
+    <p class="label uses__h reveal">Where It Goes</p>
+    <div class="uses">
+      <div class="use reveal">
+        <p class="use__n">01</p>
+        <div class="use__rule growx"></div>
+        <h3 class="serif use__title">Keeping the doors open</h3>
+        <p class="use__p">
+          The building, the utilities, and the ordinary running costs of being a church
+          that's here every week.
+        </p>
+      </div>
+      <div class="use reveal">
+        <p class="use__n">02</p>
+        <div class="use__rule growx"></div>
+        <h3 class="serif use__title">Ministry to families</h3>
+        <p class="use__p">
+          [Kids Ministry], [Youth Ministry] and the rest — materials, leaders, and the things that make a
+          Sunday work for a four-year-old.
+        </p>
+      </div>
+      <div class="use reveal">
+        <p class="use__n">03</p>
+        <div class="use__rule growx"></div>
+        <h3 class="serif use__title">Our neighbors</h3>
+        <p class="use__p">
+          Our church reaches out weekly into our community to pick up children for
+          church, provide meals to them bi-weekly, and be the hands and feet of Jesus
+          on the southeast side of Indy. Please partner with us!
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VERSE ============ -->
+  <section class="verse">
+    <blockquote class="verse__q reveal">
+      <p class="serif">“Each of you should give what you have decided in your heart to give.”</p>
+      <cite class="label verse__cite">2 Corinthians 9:7</cite>
+    </blockquote>
+  </section>
+</BaseLayout>
+
+<style>
+  /* NOTE: .ghero__img declares no transform — a scoped one would outrank .par
+     (0,2,0 beats 0,1,0) and silently kill the parallax. */
+  .ghero { position: relative; min-height: 78vh; overflow: clip; background: var(--ink);
+           color: var(--cream); display: flex; flex-direction: column; }
+  .ghero__img { position: absolute; inset: 0; z-index: 0; }
+  .ghero__img :global(img) { width: 100%; height: 100%; object-fit: cover; }
+  /* The design mockup's grade bottomed out at .28 and never let the photograph
+     breathe — the same fault already fixed on the home and About heroes.
+     Weight belongs where the TEXT sits, not spread evenly.
+
+     This hero is a special case: the text block is tall (eyebrow + a big
+     two-line display line + a lede) so it occupies everything below ~35%, and
+     this particular photograph is brightest exactly there. So the window for
+     the photo is the upper quarter, and the ramp starts early and finishes
+     hard. Opening the middle — which is right on the other heroes — leaves
+     cream type sitting on lit faces here. */
+  .ghero__grade { position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg, rgba(26,21,18,.46) 0%, rgba(26,21,18,.16) 22%,
+                                        rgba(26,21,18,.62) 52%, rgba(26,21,18,.9) 78%,
+                                        rgba(26,21,18,.96) 100%); }
+  .ghero__body { position: relative; z-index: 3; margin-top: auto;
+                 padding: 0 var(--pad) clamp(56px,7vw,84px); text-align: center; }
+  .ghero__eyebrow { color: var(--red-tint); margin: 0 0 20px; }
+  .ghero h1 { margin: 0; font-size: clamp(44px,6.4vw,92px); line-height: 1.02; letter-spacing: -.02em; }
+  .ghero h1 em { font-style: italic; }
+  .ghero__lede { margin: 22px auto 0; max-width: 50ch; font-size: 18px; line-height: 1.68;
+                 color: rgba(244,239,231,.8); }
+
+  .ways-wrap { padding-block: clamp(62px,7vw,100px); }
+  .ways__h { color: var(--red); margin: 0 0 28px; }
+  .ways { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 30px; }
+  .way { background: var(--cream-deep); border-radius: var(--radius-lg);
+         padding: clamp(30px,3.4vw,40px); display: flex; flex-direction: column; }
+  .way--lead { background: var(--ink); color: var(--cream); }
+  .way__kicker { color: var(--red); margin: 0 0 14px; }
+  .way--lead .way__kicker { color: var(--red-tint); }
+  .way__title { margin: 0 0 12px; font-size: clamp(24px,2.6vw,29px); line-height: 1.16; }
+  .way__p { margin: 0; font-size: 16px; line-height: 1.72; color: var(--ink-soft); }
+  .way--lead .way__p { color: rgba(244,239,231,.78); }
+  .way__btn { margin-top: auto; align-self: flex-start; padding-top: 14px; margin-top: 28px; }
+  /* the one remaining placeholder the pastor still has to write — visible, not silent */
+  .ways__note { margin: 34px 0 0; max-width: 66ch; font-size: 15px; line-height: 1.7; color: var(--ink-soft); }
+
+  .uses-wrap { padding-block: 0 clamp(70px,8vw,110px); }
+  .uses__h { color: var(--red); margin: 0 0 34px; }
+  .uses { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 46px; }
+  .use__n { margin: 0 0 14px; font-family: var(--font-display); font-size: 20px; color: var(--red); }
+  .use__rule { height: 1px; background: var(--hair); margin-bottom: 18px; }
+  .use__title { margin: 0 0 10px; font-size: clamp(22px,2.4vw,27px); line-height: 1.18; }
+  .use__p { margin: 0; font-size: 16px; line-height: 1.75; color: var(--ink-soft); }
+
+  .verse { background: var(--ink); color: var(--cream); }
+  .verse__q { margin: 0; padding: clamp(70px,8vw,110px) var(--pad); max-width: 900px;
+              margin-inline: auto; text-align: center; }
+  .verse__q p { margin: 0; font-family: var(--font-display); font-size: clamp(27px,4vw,46px);
+                line-height: 1.24; letter-spacing: -.01em; }
+  .verse__cite { display: block; margin-top: 24px; font-style: normal; color: var(--red-tint); }
+
+  @media (max-width: 860px) {
+    .ghero { min-height: 66vh; }
+    .ways, .uses { grid-template-columns: 1fr; }
+    .ways { gap: 18px; }
+    .uses { gap: 34px; }
+    .way__btn { align-self: stretch; text-align: center; }
+  }
+</style>

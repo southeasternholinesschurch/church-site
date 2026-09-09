@@ -1,0 +1,282 @@
+---
+import { eq } from 'drizzle-orm';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db/index';
+import DirectoryHead from '../../components/DirectoryHead.astro';
+import { readMemberSession } from '../../lib/directory';
+import { isDemoInstance, DEMO_MEMBER_PERSON_ID } from '../../lib/demo-instance';
+import { toE164 } from '../../lib/sms';
+
+/**
+ * "My listing" — the one page where a member writes rather than reads.
+ *
+ * The invite link already established WHO this is, so there is no account to
+ * pick and no way to address anyone else's row: every write below is scoped to
+ * session.personId, taken from the cookie, never from the form. A hidden id
+ * field would be the whole vulnerability.
+ *
+ * What is deliberately NOT editable here:
+ *   name              — attendance and check-in are keyed on it
+ *   photo             — storage is finite and a phone camera produces 5MB
+ *   includeInDirectory, adultChild, archived, notes
+ * Those stay with the office. This page exists for clerical drift: people move
+ * house and change carriers, and making them phone the office to say so is how
+ * a directory goes stale.
+ */
+const env = Astro.locals.runtime.env;
+/*
+ * On the public demo there is no member session, so this page bounced to the
+ * directory — hiding the member's own view, which is half the point of showing
+ * a directory at all. A fixed invented member stands in.
+ */
+const session = (await readMemberSession(env, Astro.cookies))
+  ?? (isDemoInstance(env) ? { personId: DEMO_MEMBER_PERSON_ID } as { personId: number } : null);
+if (!session) return Astro.redirect('/directory', 303);
+
+const db = getDb(env);
+let error: string | null = null;
+const saved = Astro.url.searchParams.get('saved');
+
+const load = async () => (await db.select({
+  firstName: schema.people.firstName, lastName: schema.people.lastName,
+  phone: schema.people.phone, phoneE164: schema.people.phoneE164,
+  email: schema.people.email,
+  birthday: schema.people.birthday, anniversary: schema.people.anniversary,
+  addressStreet: schema.people.addressStreet, addressCity: schema.people.addressCity,
+  addressState: schema.people.addressState, addressZip: schema.people.addressZip,
+  smsConsent: schema.people.smsConsent,
+}).from(schema.people).where(eq(schema.people.id, session.personId)).limit(1))[0];
+
+let me = await load();
+if (!me) return Astro.redirect('/directory', 303);
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const str = (k: string) => {
+    const v = form.get(k);
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  };
+
+  const phone = str('phone');
+  const phoneChanged = (phone ?? '') !== (me.phone ?? '');
+  // the pastor's rule: a changed number cannot be saved until they have said, on
+  // this screen, whether it should receive church texts. Enforced HERE and not
+  // only in the browser — the form can be replayed without the radio.
+  const choice = String(form.get('smsChoice') ?? '');
+
+  if (phoneChanged && phone && !choice) {
+    error = 'Please choose whether this new number should receive church texts.';
+  } else if (phoneChanged && phone && choice === 'yes' && !toE164(phone)) {
+    error = "That number doesn't look like one we can text. "
+          + 'Please write it as 10 digits, like (317) 555-0100.';
+  } else {
+    const values: Record<string, unknown> = {
+      phone,
+      // Lower-cased to match how the office enters them, so the same address
+      // typed two ways does not read as two different people.
+      email: str('email')?.toLowerCase() ?? null,
+      // Stored whole; only month and day are ever displayed. Keeping the year
+      // means the office can still work out a milestone without the directory
+      // publishing anyone's age.
+      birthday: str('birthday'), anniversary: str('anniversary'),
+      addressStreet: str('addressStreet'), addressCity: str('addressCity'),
+      addressState: str('addressState'), addressZip: str('addressZip'),
+      updatedAt: nowIso(),
+    };
+
+    if (phoneChanged) {
+      // The texting number only moves when they have opted the new one in.
+      // Saying no leaves phoneE164 null rather than pointing the broadcast at
+      // a number nobody agreed to — an unconsented send is the carriers'
+      // problem with us, not a member's problem with us.
+      if (choice === 'yes') {
+        Object.assign(values, {
+          phoneE164: toE164(phone),
+          smsConsent: 'opted_in', smsConsentSource: 'directory-self', smsConsentAt: nowIso(),
+        });
+      } else if (choice === 'no') {
+        Object.assign(values, {
+          phoneE164: null,
+          smsConsent: 'opted_out', smsConsentSource: 'directory-self', smsConsentAt: nowIso(),
+        });
+      }
+    } else {
+      // Unchanged number: the toggle alone can still flip consent, but only
+      // when it ACTUALLY changes — restamping an untouched opt-in would
+      // destroy the evidence of when they really agreed.
+      const wants = form.get('smsOptIn') === 'on' ? 'opted_in' : 'opted_out';
+      if (wants !== me.smsConsent) {
+        Object.assign(values, {
+          smsConsent: wants, smsConsentSource: 'directory-self', smsConsentAt: nowIso(),
+          phoneE164: wants === 'opted_in' ? (toE164(phone) ?? me.phoneE164) : null,
+        });
+      }
+    }
+
+    await db.update(schema.people).set(values)
+      .where(eq(schema.people.id, session.personId));
+    return Astro.redirect('/directory/me?saved=1', 303);
+  }
+  me = await load();
+}
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My listing · [Your Church Name]</title>
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="/favicon-48.png" />
+    <DirectoryHead />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+      :root { --ink:#1a1512; --ink-soft:#4a4038; --red:#b01818; --red-deep:#8e1313;
+              --cream:#f4efe7; --cream-deep:#eae2d6; --hair:rgba(26,21,18,.16);
+              --radius:3px;
+              --font-body:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+              --font-display:'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--cream-deep); color:var(--ink); line-height:1.5;
+             font-family:var(--font-body); }
+      .wrap { max-width:620px; margin-inline:auto; padding:36px clamp(18px,4vw,32px) 80px; }
+      .back { display:inline-block; font-size:14px; font-weight:700; color:var(--ink-soft);
+              text-decoration:none; margin-bottom:22px; }
+      .back:hover { color:var(--red-deep); }
+      h1 { font-family:var(--font-display); font-weight:400; font-size:clamp(30px,5vw,44px);
+           line-height:1.06; margin:0 0 6px; }
+      .sub { color:var(--ink-soft); margin:0 0 26px; font-size:16px; }
+      .card { background:var(--cream); border:1px solid var(--hair);
+              border-radius:var(--radius); padding:clamp(20px,3vw,28px); }
+      .f { display:block; margin-bottom:18px; }
+      .f__l { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+              text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
+      .f input { width:100%; font:inherit; font-size:17px; min-height:48px; padding:10px 12px;
+                 border:1px solid var(--hair); border-radius:var(--radius); background:#fff; }
+      .f input:focus { outline:2px solid var(--ink); outline-offset:-1px; }
+      .grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:0 14px; }
+      .dates { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+      .hint { margin:-8px 0 0; font-size:13px; line-height:1.6; color:var(--ink-soft); }
+      @media (max-width:520px) { .grid, .dates { grid-template-columns:1fr; } }
+      .locked { border-top:1px solid var(--hair); margin-top:6px; padding-top:18px;
+                font-size:14px; line-height:1.7; color:var(--ink-soft); }
+      .btn { font:inherit; font-size:15px; font-weight:700; padding:14px 26px; border:0;
+             background:var(--ink); color:var(--cream); border-radius:var(--radius); cursor:pointer; }
+      .btn:hover { background:#000; }
+      .notice { border-radius:var(--radius); padding:12px 16px; margin-bottom:22px; font-size:15px; }
+      .notice--ok { background:#e7efe7; border-left:3px solid #2f6b34; }
+      .notice--bad { background:#f7e9e9; border-left:3px solid var(--red); color:var(--red-deep); }
+      .sms { border-top:1px solid var(--hair); margin-top:22px; padding-top:20px; }
+      .sms__q { font-size:15px; line-height:1.6; margin:0 0 12px; }
+      .opt { display:flex; gap:10px; align-items:flex-start; font-size:16px;
+             padding:10px 0; cursor:pointer; }
+      .opt input { margin-top:3px; width:20px; height:20px; flex:none; }
+      #newnum { display:none; }
+      #newnum.show { display:block; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="back" href="/directory">← Back to the directory</a>
+      <h1>My listing</h1>
+      <p class="sub">What the church family sees for {me.firstName} {me.lastName}.</p>
+
+      {saved && <p class="notice notice--ok">Saved. The directory is updated for everyone.</p>}
+      {error && <p class="notice notice--bad">{error}</p>}
+
+      <form method="POST" class="card">
+        <label class="f">
+          <span class="f__l">Phone</span>
+          <input name="phone" type="tel" value={me.phone ?? ''} autocomplete="tel" />
+        </label>
+
+        <label class="f">
+          <span class="f__l">Email</span>
+          <input name="email" type="email" value={me.email ?? ''} autocomplete="email" />
+        </label>
+
+        <label class="f">
+          <span class="f__l">Street</span>
+          <input name="addressStreet" value={me.addressStreet ?? ''} autocomplete="street-address" />
+        </label>
+        <div class="grid">
+          <label class="f"><span class="f__l">City</span>
+            <input name="addressCity" value={me.addressCity ?? ''} autocomplete="address-level2" /></label>
+          <label class="f"><span class="f__l">State</span>
+            <input name="addressState" value={me.addressState ?? ''} autocomplete="address-level1" /></label>
+          <label class="f"><span class="f__l">ZIP</span>
+            <input name="addressZip" value={me.addressZip ?? ''} autocomplete="postal-code" /></label>
+        </div>
+
+        <div class="dates">
+          <label class="f"><span class="f__l">Birthday</span>
+            <input name="birthday" type="date" value={me.birthday ?? ''} /></label>
+          <label class="f"><span class="f__l">Anniversary</span>
+            <input name="anniversary" type="date" value={me.anniversary ?? ''} /></label>
+        </div>
+        <p class="hint">
+          Only the day and month are shown to anyone — never the year. The date
+          picker asks for one, so put anything if you'd rather not say.
+        </p>
+
+        <div class="sms">
+          {/* Two states, never both. Unchanged number: a plain toggle. Changed
+              number: an explicit either/or that must be answered before this
+              saves, so a new number is never silently added to the send list. */}
+          <div id="current">
+            <label class="opt">
+              <input type="checkbox" name="smsOptIn" checked={me.smsConsent === 'opted_in'} />
+              <span>Send church text messages to this number — service changes,
+                    cancellations and reminders.</span>
+            </label>
+          </div>
+
+          <div id="newnum">
+            <p class="sms__q"><strong>You've changed your number.</strong> Should church
+              text messages go to the new one?</p>
+            <label class="opt">
+              <input type="radio" name="smsChoice" value="yes" />
+              <span>Yes — text me at the new number.</span>
+            </label>
+            <label class="opt">
+              <input type="radio" name="smsChoice" value="no" />
+              <span>No — show it in the directory, but don't text it.</span>
+            </label>
+          </div>
+        </div>
+
+        <p class="locked">
+          Your name and photo are looked after by the office — ask any Sunday and
+          we'll change them. Whether you appear here at all is up to you: say the
+          word and you're off the list the same day.
+        </p>
+
+        <button type="submit" class="btn" style="margin-top:20px;">Save changes</button>
+      </form>
+    </div>
+
+    <script is:inline define:vars={{ original: me.phone ?? '' }}>
+      const phone = document.querySelector('input[name="phone"]');
+      const current = document.getElementById('current');
+      const newnum = document.getElementById('newnum');
+      const sync = () => {
+        const changed = phone.value.trim() !== original.trim() && phone.value.trim() !== '';
+        newnum.classList.toggle('show', changed);
+        current.style.display = changed ? 'none' : '';
+        // Only one of the two can be submitted, so the server never sees a
+        // stale answer from the half that is hidden.
+        for (const r of newnum.querySelectorAll('input')) r.disabled = !changed;
+        for (const c of current.querySelectorAll('input')) c.disabled = changed;
+      };
+      phone.addEventListener('input', sync);
+      sync();
+    </script>
+  </body>
+</html>

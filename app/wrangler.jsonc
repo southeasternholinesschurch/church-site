@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The staff app. Separate Worker, separate database from the public site —
+  // nothing here is reachable from example.org and no member data
+  // ever crosses into the static build.
+  //
+  // Deployed by Workers Builds from this repo (root directory `app`, build
+  // `npm run build`, deploy `npx wrangler deploy`), connected 2026-09-01. It
+  // used to go out only from a laptop. `npx wrangler deploy` by hand still
+  // works and is still the way to ship something urgent, but it is no longer
+  // the only way, and a version deployed that way will say "Manually
+  // deployed" in the dashboard while a built one names the commit.
+  "name": "CHANGEME-app",
+  "main": "dist/_worker.js/index.js",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "dist", "binding": "ASSETS" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "CHANGEME-app",
+      "database_id": "PASTE_FROM_WRANGLER_D1_CREATE"
+    }
+  ],
+  // Member portraits. Object storage rather than the database: a few hundred
+  // JPEGs do not belong in D1, and anything in the repo would be public.
+  // Never served directly — /directory/photo/[id] repeats the directory's own
+  // auth check, because a member's face is member data.
+  "r2_buckets": [
+    { "binding": "PHOTOS", "bucket_name": "CHANGEME-photos" }
+  ],
+  "observability": { "enabled": true },
+  // The staff app's own address. Deliberately a subdomain of the church domain
+  // rather than a workers.dev URL: volunteers have to remember it. It is behind
+  // the sign-in gate and marked noindex — the auth is the control, not the
+  // obscurity of the hostname.
+  "routes": [
+    { "pattern": "app.example.org", "custom_domain": true }
+  ]
+}

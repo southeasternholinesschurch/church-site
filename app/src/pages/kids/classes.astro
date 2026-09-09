@@ -1,0 +1,497 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { readForm } from '../../lib/form';
+import { getPerVisit, parsePerVisit, KEY_PER_VISIT, DEFAULT_PER_VISIT, MAX_AMOUNT } from '../../lib/bucks';
+
+/**
+ * Classes, who teaches them, and the bus routes.
+ *
+ * The director's structural screen. Everything here changes what the OTHER
+ * pages are made of, which is why it is the one part of [Kids Ministry] a teacher
+ * cannot open — the line is about what you can restructure, not what you can
+ * see or record.
+ *
+ * Classes and routes share a page because at this scale they are two short
+ * lists that are set up once and then left alone, and splitting them would mean
+ * two screens a director visits twice a year each.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+/*
+ * The middleware has already refused a teacher before this renders — /kids/classes
+ * is in KIDS_DIRECTOR_ONLY. Checked again anyway: a page that restructures the
+ * section should not depend on something else having remembered to guard it.
+ * Same reasoning as /staff.
+ */
+if (user.role === 'kids') return Astro.redirect('/kids', 302);
+
+let error: string | null = null;
+const back = (m: string) => Astro.redirect(`/kids/classes?saved=${m}`, 303);
+
+const int = (v: FormDataEntryValue | null) => {
+  const n = Number(String(v ?? '').trim());
+  return Number.isInteger(n) ? n : null;
+};
+const str = (v: FormDataEntryValue | null) => {
+  const s = String(v ?? '').trim();
+  return s === '' ? null : s;
+};
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? '');
+  const at = nowIso();
+
+  if (act === 'save-class') {
+    const id = int(form.get('id'));
+    const name = str(form.get('name'));
+    if (!id || !name) error = 'A class needs a name.';
+    else {
+      const min = int(form.get('minAge'));
+      const max = int(form.get('maxAge'));
+      if (min !== null && max !== null && min > max) error = 'The youngest age cannot be above the oldest.';
+      else {
+        await db.update(schema.kidClasses)
+          .set({ name, description: str(form.get('description')), minAge: min, maxAge: max })
+          .where(eq(schema.kidClasses.id, id));
+        return back('class');
+      }
+    }
+  }
+
+  if (act === 'add-class') {
+    const name = str(form.get('name'));
+    if (!name) error = 'A class needs a name.';
+    else {
+      const [dup] = await db.select({ id: schema.kidClasses.id }).from(schema.kidClasses)
+        .where(sql`lower(name) = ${name.toLowerCase()}`).limit(1);
+      // The name is UNIQUE in the schema, so this would fail anyway — but a
+      // constraint error is a 500 and "there is already a class called that"
+      // is an answer.
+      if (dup) error = 'There is already a class with that name.';
+      else {
+        const [last] = await db.select({ n: sql<number>`coalesce(max(sort), 0)` }).from(schema.kidClasses);
+        await db.insert(schema.kidClasses).values({
+          name, description: str(form.get('description')),
+          minAge: int(form.get('minAge')), maxAge: int(form.get('maxAge')),
+          sort: (last?.n ?? 0) + 1, active: true, createdAt: at,
+        });
+        return back('class-added');
+      }
+    }
+  }
+
+  if (act === 'toggle-class') {
+    const id = int(form.get('id'));
+    if (id) {
+      const [c] = await db.select().from(schema.kidClasses).where(eq(schema.kidClasses.id, id)).limit(1);
+      if (c) {
+        if (c.active) {
+          /*
+           * A class with children in it cannot be switched off.
+           *
+           * Their class_id would still point here, so they would belong to a
+           * class that no register lists and no group on the children page
+           * shows. That page now derives its catch-all by subtraction so they
+           * would still appear SOMEWHERE — but "somewhere" is not where their
+           * teacher looks, and quietly moving six children is not a thing a
+           * toggle should do. The director moves them first, deliberately.
+           */
+          const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kidProfiles)
+            .where(eq(schema.kidProfiles.classId, id));
+          if ((n?.c ?? 0) > 0) {
+            error = `${n!.c} ${n!.c === 1 ? 'child is' : 'children are'} still in ${c.name}. `
+                  + 'Move them to another class first.';
+          } else {
+            await db.update(schema.kidClasses).set({ active: false }).where(eq(schema.kidClasses.id, id));
+            return back('class');
+          }
+        } else {
+          await db.update(schema.kidClasses).set({ active: true }).where(eq(schema.kidClasses.id, id));
+          return back('class');
+        }
+      }
+    }
+  }
+
+  if (act === 'add-teacher') {
+    const staffId = int(form.get('staffId'));
+    const classId = int(form.get('classId'));
+    if (staffId && classId) {
+      // onConflictDoNothing against the unique pair: adding somebody twice is
+      // the same intent as adding them once, not an error to show.
+      await db.insert(schema.kidClassTeachers)
+        .values({ staffId, classId, createdAt: at }).onConflictDoNothing();
+      return back('teacher');
+    }
+  }
+
+  if (act === 'remove-teacher') {
+    const staffId = int(form.get('staffId'));
+    const classId = int(form.get('classId'));
+    if (staffId && classId) {
+      await db.delete(schema.kidClassTeachers).where(and(
+        eq(schema.kidClassTeachers.staffId, staffId),
+        eq(schema.kidClassTeachers.classId, classId)));
+      return back('teacher');
+    }
+  }
+
+  if (act === 'save-route' || act === 'add-route') {
+    const name = str(form.get('name'));
+    if (!name) error = 'A route needs a name.';
+    else if (act === 'add-route') {
+      const [dup] = await db.select({ id: schema.kidRoutes.id }).from(schema.kidRoutes)
+        .where(sql`lower(name) = ${name.toLowerCase()}`).limit(1);
+      if (dup) error = 'There is already a route with that name.';
+      else {
+        await db.insert(schema.kidRoutes)
+          .values({ name, notes: str(form.get('notes')), active: true, createdAt: at });
+        return back('route-added');
+      }
+    } else {
+      const id = int(form.get('id'));
+      if (id) {
+        await db.update(schema.kidRoutes).set({ name, notes: str(form.get('notes')) })
+          .where(eq(schema.kidRoutes.id, id));
+        return back('route');
+      }
+    }
+  }
+
+  if (act === 'save-bucks') {
+    const raw = String(form.get('perVisit') ?? '').trim();
+    /*
+     * Validated with the same function that READS it, so the two cannot drift.
+     * parsePerVisit falls back to the default on anything unusable — which is
+     * right on read, but on save it would silently store something other than
+     * what was typed. So compare: if the parse does not round-trip, it was not
+     * a valid answer and the director should be told rather than surprised.
+     */
+    if (String(parsePerVisit(raw)) !== raw) {
+      error = `The credit has to be a whole number of bucks, 0 to ${MAX_AMOUNT}. `
+            + 'Zero means coming to [Kids Ministry] earns nothing on its own.';
+    } else {
+      await db.insert(schema.appSettings)
+        .values({ key: KEY_PER_VISIT, value: raw, updatedAt: at, updatedBy: user.email })
+        .onConflictDoUpdate({
+          target: schema.appSettings.key,
+          set: { value: raw, updatedAt: at, updatedBy: user.email },
+        });
+      return back('bucks');
+    }
+  }
+
+  if (act === 'set-captain' || act === 'unset-captain') {
+    const staffId = int(form.get('staffId'));
+    const routeId = int(form.get('routeId'));
+    if (staffId && routeId) {
+      if (act === 'set-captain') {
+        await db.insert(schema.kidRouteCaptains)
+          .values({ staffId, routeId, createdAt: at }).onConflictDoNothing();
+        /*
+         * Assigning somebody to a route also gives them the send capability.
+         *
+         * The two were separate for a moment and it was wrong: a captain
+         * assigned to a route but without the flag can send to nobody, looks
+         * assigned on this screen, and finds out only when they try in bad
+         * weather. One action, one meaning.
+         */
+        await db.update(schema.staff).set({ kidsCanText: true })
+          .where(eq(schema.staff.id, staffId));
+      } else {
+        await db.delete(schema.kidRouteCaptains).where(and(
+          eq(schema.kidRouteCaptains.staffId, staffId),
+          eq(schema.kidRouteCaptains.routeId, routeId)));
+        /*
+         * And taking their last route away takes the capability with it. Left
+         * behind, the flag is a person who may send but has nobody to send to —
+         * which reads as permission on the /staff screen and is not.
+         */
+        const [left] = await db.select({ n: sql<number>`count(*)` })
+          .from(schema.kidRouteCaptains).where(eq(schema.kidRouteCaptains.staffId, staffId));
+        if ((left?.n ?? 0) === 0) {
+          await db.update(schema.staff).set({ kidsCanText: false })
+            .where(eq(schema.staff.id, staffId));
+        }
+      }
+      return back('captain');
+    }
+  }
+
+  if (act === 'toggle-route') {
+    const id = int(form.get('id'));
+    if (id) {
+      const [r] = await db.select().from(schema.kidRoutes).where(eq(schema.kidRoutes.id, id)).limit(1);
+      if (r) {
+        if (r.active) {
+          // Same rule as a class: a route with children riding it is not
+          // something to switch off by accident. Their pickup is somebody's
+          // Sunday morning.
+          const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kidProfiles)
+            .where(eq(schema.kidProfiles.routeId, id));
+          if ((n?.c ?? 0) > 0) {
+            error = `${n!.c} ${n!.c === 1 ? 'child rides' : 'children ride'} ${r.name}. `
+                  + 'Move them off it first.';
+          } else {
+            await db.update(schema.kidRoutes).set({ active: false }).where(eq(schema.kidRoutes.id, id));
+            return back('route');
+          }
+        } else {
+          await db.update(schema.kidRoutes).set({ active: true }).where(eq(schema.kidRoutes.id, id));
+          return back('route');
+        }
+      }
+    }
+  }
+}
+
+// ---- reads ------------------------------------------------------------------
+const classes = await db.select({
+  id: schema.kidClasses.id, name: schema.kidClasses.name,
+  description: schema.kidClasses.description,
+  minAge: schema.kidClasses.minAge, maxAge: schema.kidClasses.maxAge,
+  active: schema.kidClasses.active,
+  children: sql<number>`(select count(*) from kid_profiles kp where kp.class_id = kid_classes.id)`,
+}).from(schema.kidClasses).orderBy(asc(schema.kidClasses.sort), asc(schema.kidClasses.id));
+
+const routes = await db.select({
+  id: schema.kidRoutes.id, name: schema.kidRoutes.name, notes: schema.kidRoutes.notes,
+  active: schema.kidRoutes.active,
+  children: sql<number>`(select count(*) from kid_profiles kp where kp.route_id = kid_routes.id)`,
+}).from(schema.kidRoutes).orderBy(asc(schema.kidRoutes.name));
+
+const teachers = await db.select({
+  classId: schema.kidClassTeachers.classId,
+  staffId: schema.staff.id, name: schema.staff.name, email: schema.staff.email,
+}).from(schema.kidClassTeachers)
+  .innerJoin(schema.staff, eq(schema.staff.id, schema.kidClassTeachers.staffId))
+  .orderBy(asc(schema.staff.name));
+
+/* Everybody who can sign in, so a pastor who teaches can be assigned as easily
+ * as a volunteer. Assignment is for reports and for "your class" on a phone —
+ * it restricts nothing, because every [Kids Ministry] volunteer sees every child. */
+const staffRows = await db.select({
+  id: schema.staff.id, name: schema.staff.name, email: schema.staff.email, role: schema.staff.role,
+}).from(schema.staff).where(eq(schema.staff.active, true)).orderBy(asc(schema.staff.email));
+
+const perVisit = await getPerVisit(db);
+
+const captains = await db.select({
+  routeId: schema.kidRouteCaptains.routeId,
+  staffId: schema.staff.id, name: schema.staff.name, email: schema.staff.email,
+}).from(schema.kidRouteCaptains)
+  .innerJoin(schema.staff, eq(schema.staff.id, schema.kidRouteCaptains.staffId))
+  .orderBy(asc(schema.staff.name));
+
+const saved = Astro.url.searchParams.get('saved');
+const SAVED: Record<string, string> = {
+  class: 'Class saved.', 'class-added': 'Class added.', teacher: 'Teachers updated.',
+  route: 'Route saved.', 'route-added': 'Route added.',
+  bucks: '[Kids Currency] setting saved.',
+  captain: 'Who can text this route has been updated.',
+};
+---
+<KidsLayout title="Classes" user={user}>
+  <h1>Classes and routes</h1>
+  <p class="k-muted" style="margin:-4px 0 22px;">
+    How [Kids Ministry] is put together. Only a director can change this.
+  </p>
+
+  {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
+  {saved && SAVED[saved] && <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">{SAVED[saved]}</div>}
+
+  <h2 style="margin:24px 0 12px;">Classes</h2>
+
+  {classes.map((c) => (
+    <div class="k-card" style="margin-bottom:14px;" class:list={[!c.active && 'is-off']}>
+      <form method="POST">
+        <input type="hidden" name="action" value="save-class" />
+        <input type="hidden" name="id" value={c.id} />
+        <div class="k-grid">
+          <label class="k-field"><span>Name</span>
+            <input name="name" value={c.name} required autocomplete="off" /></label>
+          <label class="k-field"><span>Youngest</span>
+            <input name="minAge" type="number" min="0" max="30" value={c.minAge ?? ''} /></label>
+          <label class="k-field"><span>Oldest</span>
+            <input name="maxAge" type="number" min="0" max="30" value={c.maxAge ?? ''} /></label>
+        </div>
+        <label class="k-field"><span>Description</span>
+          <input name="description" value={c.description ?? ''} autocomplete="off" /></label>
+        <p class="k-muted" style="margin:-6px 0 12px; font-size:14px;">
+          {c.children} {c.children === 1 ? 'child' : 'children'}
+          {!c.active && ' · not running'}
+        </p>
+        <button class="k-btn" type="submit">Save</button>
+      </form>
+
+      <div class="k-teachers">
+        <div class="k-label" style="color:var(--k-ink-soft); margin-bottom:8px;">Teachers</div>
+        {teachers.filter((t) => t.classId === c.id).map((t) => (
+          <form method="POST" style="display:inline-block; margin:0 8px 8px 0;">
+            <input type="hidden" name="action" value="remove-teacher" />
+            <input type="hidden" name="classId" value={c.id} />
+            <input type="hidden" name="staffId" value={t.staffId} />
+            <button class="k-person" type="submit" title="Remove from this class">
+              {t.name ?? t.email} <span aria-hidden="true">×</span>
+            </button>
+          </form>
+        ))}
+        {teachers.filter((t) => t.classId === c.id).length === 0 && (
+          <p class="k-muted" style="margin:0 0 8px; font-size:14px;">Nobody assigned.</p>
+        )}
+        <form method="POST" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <input type="hidden" name="action" value="add-teacher" />
+          <input type="hidden" name="classId" value={c.id} />
+          <select name="staffId" class="k-mini">
+            {staffRows.map((s) => <option value={s.id}>{s.name ?? s.email}</option>)}
+          </select>
+          <button class="k-btn k-btn--quiet" type="submit">Add teacher</button>
+        </form>
+      </div>
+
+      <form method="POST" style="margin-top:12px;">
+        <input type="hidden" name="action" value="toggle-class" />
+        <input type="hidden" name="id" value={c.id} />
+        <button class="k-btn k-btn--quiet" type="submit">
+          {c.active ? 'Stop running this class' : 'Start running it again'}
+        </button>
+      </form>
+    </div>
+  ))}
+
+  <details class="k-card" style="margin-bottom:26px;">
+    <summary style="cursor:pointer; font-weight:600;">Add a class</summary>
+    <form method="POST" style="margin-top:14px;">
+      <input type="hidden" name="action" value="add-class" />
+      <div class="k-grid">
+        <label class="k-field"><span>Name</span><input name="name" required autocomplete="off" /></label>
+        <label class="k-field"><span>Youngest</span><input name="minAge" type="number" min="0" max="30" /></label>
+        <label class="k-field"><span>Oldest</span><input name="maxAge" type="number" min="0" max="30" /></label>
+      </div>
+      <label class="k-field"><span>Description</span><input name="description" autocomplete="off" /></label>
+      <button class="k-btn" type="submit">Add</button>
+    </form>
+  </details>
+
+  <h2 style="margin:28px 0 12px;">[Kids Currency]</h2>
+  <div class="k-card" style="margin-bottom:26px; max-width:520px;">
+    <form method="POST">
+      <input type="hidden" name="action" value="save-bucks" />
+      <label class="k-field"><span>Bucks for coming to [Kids Ministry]</span>
+        <input name="perVisit" type="number" min="0" max={MAX_AMOUNT} value={perVisit} required /></label>
+      <p class="k-muted" style="margin:-6px 0 12px; font-size:14px;">
+        Credited once per meeting, whether a child scans their card or a teacher
+        ticks them off by hand. Set it to 0 if turning up should not earn on its own.
+        {perVisit !== DEFAULT_PER_VISIT && ` The built-in default is ${DEFAULT_PER_VISIT}.`}
+      </p>
+      <button class="k-btn" type="submit">Save</button>
+    </form>
+  </div>
+
+  <h2 style="margin:28px 0 12px;">Bus routes</h2>
+  <p class="k-muted" style="margin:-6px 0 14px;">
+    A route is who a bus captain may text, so it has to be a real thing with a name —
+    not free text typed differently on each child.
+  </p>
+
+  {routes.length === 0 && (
+    <div class="k-card" style="margin-bottom:14px;">
+      <p class="k-muted" style="margin:0;">No routes yet.</p>
+    </div>
+  )}
+
+  {routes.map((r) => (
+    <div class="k-card" style="margin-bottom:14px;">
+      <form method="POST">
+        <input type="hidden" name="action" value="save-route" />
+        <input type="hidden" name="id" value={r.id} />
+        <label class="k-field"><span>Name</span>
+          <input name="name" value={r.name} required autocomplete="off" /></label>
+        <label class="k-field"><span>Notes</span>
+          <input name="notes" value={r.notes ?? ''} placeholder="Which streets, and where it turns"
+                 autocomplete="off" /></label>
+        <p class="k-muted" style="margin:-6px 0 12px; font-size:14px;">
+          {r.children} {r.children === 1 ? 'child rides' : 'children ride'} this route
+          {!r.active && ' · not running'}
+        </p>
+        <button class="k-btn" type="submit">Save</button>
+      </form>
+      <div class="k-teachers">
+        <div class="k-label" style="color:var(--k-ink-soft); margin-bottom:8px;">
+          Who can text this route
+        </div>
+        {captains.filter((c) => c.routeId === r.id).map((c) => (
+          <form method="POST" style="display:inline-block; margin:0 8px 8px 0;">
+            <input type="hidden" name="action" value="unset-captain" />
+            <input type="hidden" name="routeId" value={r.id} />
+            <input type="hidden" name="staffId" value={c.staffId} />
+            <button class="k-person" type="submit" title="Take this away">
+              {c.name ?? c.email} <span aria-hidden="true">×</span>
+            </button>
+          </form>
+        ))}
+        {captains.filter((c) => c.routeId === r.id).length === 0 && (
+          <p class="k-muted" style="margin:0 0 8px; font-size:14px;">
+            Only the director can text this route.
+          </p>
+        )}
+        <form method="POST" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <input type="hidden" name="action" value="set-captain" />
+          <input type="hidden" name="routeId" value={r.id} />
+          <select name="staffId" class="k-mini">
+            {staffRows.map((s) => <option value={s.id}>{s.name ?? s.email}</option>)}
+          </select>
+          <button class="k-btn k-btn--quiet" type="submit">Let them text it</button>
+        </form>
+        {/* Said plainly, because this is the button that spends money. */}
+        <p class="k-muted" style="margin:10px 0 0; font-size:13px;">
+          They will be able to text the families on this route, and no others.
+        </p>
+      </div>
+
+      <form method="POST" style="margin-top:12px;">
+        <input type="hidden" name="action" value="toggle-route" />
+        <input type="hidden" name="id" value={r.id} />
+        <button class="k-btn k-btn--quiet" type="submit">
+          {r.active ? 'Stop running this route' : 'Start running it again'}
+        </button>
+      </form>
+    </div>
+  ))}
+
+  <details class="k-card">
+    <summary style="cursor:pointer; font-weight:600;">Add a route</summary>
+    <form method="POST" style="margin-top:14px;">
+      <input type="hidden" name="action" value="add-route" />
+      <label class="k-field"><span>Name</span>
+        <input name="name" required placeholder="Route 4 — Garfield Park" autocomplete="off" /></label>
+      <label class="k-field"><span>Notes</span><input name="notes" autocomplete="off" /></label>
+      <button class="k-btn" type="submit">Add</button>
+    </form>
+  </details>
+</KidsLayout>
+
+<style>
+  .is-off { opacity:.72; }
+  .k-grid { display:grid; gap:0 14px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .k-field { display:block; margin-bottom:14px; }
+  .k-field > span { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--k-ink-soft); margin-bottom:5px; }
+  .k-field input { width:100%; padding:10px 12px; font:inherit; font-size:16px; color:var(--k-ink);
+                   border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-mini { padding:9px 11px; font:inherit; font-size:15px; color:var(--k-ink);
+            border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; max-width:230px; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-btn--quiet { background:transparent; color:var(--k-ink-soft);
+                  border:1px solid rgba(13,27,69,.22); font-weight:600; }
+  .k-teachers { margin-top:16px; padding-top:14px; border-top:1px solid rgba(13,27,69,.1); }
+  .k-person { font:inherit; font-size:14px; font-weight:600; padding:6px 12px; cursor:pointer;
+              border:1px solid rgba(13,27,69,.18); border-radius:999px;
+              background:rgba(13,27,69,.05); color:var(--k-ink); }
+  .k-person:hover { border-color:#b01818; color:#b01818; }
+</style>

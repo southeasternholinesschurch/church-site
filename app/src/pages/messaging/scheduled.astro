@@ -1,0 +1,330 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { invalidScheduleReason, WEEKDAYS, localNow, CHURCH_TZ } from '../../lib/schedules';
+import { isDemoInstance } from '../../lib/demo-instance';
+import { smsConfigured } from '../../lib/sms';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+let error: string | null = null;
+
+/**
+ * Scheduling a text for later. That is the whole job of this page.
+ *
+ * Automatic birthday texts used to live here as a third "kind" and no longer
+ * do — the pastor's call, and it was right. A birthday text is a standing
+ * arrangement, not something you sit down and schedule, and having it here made
+ * it look like a yearly chore somebody had to remember. It is now a switch on
+ * the Messaging page and runs on its own. Nothing on this screen mentions it.
+ *
+ * Audience is one of three, read in this order: named individuals, then a
+ * group, then everyone who can be texted.
+ */
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+
+  if (action === 'create') {
+    const kind = String(form.get('kind') ?? 'once') as 'once' | 'weekly';
+    const audience = String(form.get('audience') ?? 'everyone');
+    const picked = form.getAll('person').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const groupRaw = String(form.get('groupId') ?? '');
+
+    const draft = {
+      name: String(form.get('name') ?? '').trim(),
+      body: String(form.get('body') ?? '').trim(),
+      kind,
+      // Only the chosen audience is stored. Keeping the other two would leave
+      // a group id on a schedule that sends to individuals, and the runner
+      // reads them in priority order — so a stale value would silently win.
+      groupId: audience === 'group' && groupRaw ? Number(groupRaw) : null,
+      recipientIds: audience === 'people' && picked.length ? JSON.stringify(picked) : null,
+      sendAt: kind === 'once' ? `${form.get('date') ?? ''}T${form.get('time') ?? ''}` : null,
+      weekday: kind === 'weekly' ? Number(form.get('weekday')) : null,
+      localTime: kind === 'weekly' ? String(form.get('timeOfDay') ?? '') : null,
+    };
+
+    error = invalidScheduleReason({ ...draft, recipientIds: picked.length ? picked : null });
+    if (!error && audience === 'people' && picked.length === 0) error = 'Choose at least one person.';
+    if (!error && audience === 'group' && !groupRaw) error = 'Choose a group.';
+    if (!error) {
+      await db.insert(schema.messageSchedules).values({
+        ...draft, active: true, createdBy: user.email, createdAt: nowIso(),
+      });
+      return Astro.redirect('/messaging/scheduled?saved=1', 303);
+    }
+  }
+
+  if (action === 'toggle') {
+    const id = Number(form.get('id'));
+    if (id) {
+      await db.update(schema.messageSchedules)
+        .set({ active: String(form.get('active')) === '1' })
+        .where(eq(schema.messageSchedules.id, id));
+    }
+    return Astro.redirect('/messaging/scheduled', 303);
+  }
+
+  if (action === 'delete') {
+    const id = Number(form.get('id'));
+    // Queue rows it already produced are left alone: they are the record of
+    // what was actually sent, and deleting a rule should not rewrite history.
+    if (id) await db.delete(schema.messageSchedules).where(eq(schema.messageSchedules.id, id));
+    return Astro.redirect('/messaging/scheduled', 303);
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const configured = smsConfigured(env);
+const isDemo = isDemoInstance(env);
+const groups = await db.select().from(schema.groups).orderBy(asc(schema.groups.name));
+
+/** Only people a text can actually reach — picking someone unreachable would
+ *  look like it worked and quietly send nothing. */
+const people = await db.select({
+  id: schema.people.id, firstName: schema.people.firstName, lastName: schema.people.lastName,
+}).from(schema.people)
+  .where(and(eq(schema.people.archived, false), eq(schema.people.smsConsent, 'opted_in'),
+             sql`phone_e164 is not null`))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+
+const schedules = await db.select({
+  id: schema.messageSchedules.id, name: schema.messageSchedules.name,
+  body: schema.messageSchedules.body, kind: schema.messageSchedules.kind,
+  groupId: schema.messageSchedules.groupId, recipientIds: schema.messageSchedules.recipientIds,
+  sendAt: schema.messageSchedules.sendAt,
+  weekday: schema.messageSchedules.weekday, localTime: schema.messageSchedules.localTime,
+  active: schema.messageSchedules.active, lastRunAt: schema.messageSchedules.lastRunAt,
+  sent: sql<number>`(select count(*) from scheduled_messages sm
+                      where sm.schedule_id = message_schedules.id and sm.status = 'sent')`,
+  pending: sql<number>`(select count(*) from scheduled_messages sm
+                         where sm.schedule_id = message_schedules.id and sm.status = 'pending')`,
+  failed: sql<number>`(select count(*) from scheduled_messages sm
+                        where sm.schedule_id = message_schedules.id and sm.status = 'failed')`,
+}).from(schema.messageSchedules).orderBy(desc(schema.messageSchedules.id));
+
+const countIds = (raw: string | null) => {
+  try { const v = JSON.parse(raw ?? ''); return Array.isArray(v) ? v.length : 0; } catch { return 0; }
+};
+const audienceLabel = (s: typeof schedules[number]) => {
+  const n = countIds(s.recipientIds);
+  if (n) return n === 1 ? '1 person' : `${n} people`;
+  if (s.groupId) return groups.find((g) => g.id === s.groupId)?.name ?? 'Deleted group';
+  return 'Everyone';
+};
+const when = (s: typeof schedules[number]) =>
+  s.kind === 'once'
+    ? (s.sendAt ?? '').replace('T', ' at ')
+    : `Every ${WEEKDAYS[s.weekday ?? 0]} at ${s.localTime}`;
+
+const now = localNow(new Date());
+const clock = `${String(Math.floor(now.minutes / 60)).padStart(2, '0')}:${String(now.minutes % 60).padStart(2, '0')}`;
+---
+<AppLayout title="Scheduled texts" user={user}>
+  <h1>Scheduled texts</h1>
+  <p class="muted" style="max-width:62ch; margin:-4px 0 24px;">
+    Write a text now and have it go out later — once, or every week. Checked
+    every five minutes, so it goes out within a few minutes of the time you set.
+    Times are {CHURCH_TZ.split('/').pop()!.replace('_', ' ')} time; it is
+    currently {clock}.
+  </p>
+
+  {isDemo ? (
+    <p class="notice"><strong>This is the demo.</strong> Schedules save and run
+    exactly as they do in the real app; no text is ever actually sent.</p>
+  ) : !configured && (
+    <p class="notice"><strong>Texting is not connected yet.</strong> You can set
+    schedules up now, but nothing will send until Twilio is configured.</p>
+  )}
+  {saved && <p class="notice">Schedule saved.</p>}
+  {error && <p class="notice">{error}</p>}
+
+  <div class="card" style="margin-bottom:24px;">
+    <h2>New scheduled text</h2>
+    <form method="POST">
+      <input type="hidden" name="action" value="create" />
+
+      <div class="row">
+        <label class="field" style="margin:0; flex:2; min-width:200px;">
+          <span>Name</span>
+          <input name="name" placeholder="Saturday service reminder" required />
+          <small class="muted">So you can find it in the list below. Never texted.</small>
+        </label>
+        <label class="field" style="margin:0; flex:1; min-width:160px;">
+          <span>How often</span>
+          <select name="kind" id="kind">
+            <option value="once">Once, on a date</option>
+            <option value="weekly">Every week</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row k k-once">
+        <label class="field" style="margin:0;"><span>Date</span><input type="date" name="date" /></label>
+        <label class="field" style="margin:0;"><span>Time</span><input type="time" name="time" value="09:00" /></label>
+      </div>
+
+      <div class="row k k-weekly" style="display:none;">
+        <label class="field" style="margin:0;">
+          <span>Day</span>
+          <select name="weekday">
+            {WEEKDAYS.map((d, i) => <option value={i} selected={i === 6}>{d}</option>)}
+          </select>
+        </label>
+        <label class="field" style="margin:0;"><span>Time</span><input type="time" name="timeOfDay" value="18:00" /></label>
+      </div>
+
+      <label class="field" style="max-width:280px;">
+        <span>Send to</span>
+        <select name="audience" id="audience">
+          <option value="everyone">Everyone who can be texted</option>
+          <option value="group">A group</option>
+          <option value="people">Specific people</option>
+        </select>
+      </label>
+
+      <label class="field a a-group" style="display:none; max-width:280px;">
+        <span>Which group</span>
+        <select name="groupId">
+          <option value="">Choose a group…</option>
+          {groups.map((g) => <option value={g.id}>{g.name}</option>)}
+        </select>
+      </label>
+
+      <div class="a a-people" style="display:none;">
+        <p class="field__label">Which people</p>
+        <input id="pfilter" class="pfilter" type="search" placeholder="Type a name to narrow the list…" />
+        <div class="picker">
+          {people.map((p) => (
+            <label class="pick" data-name={`${p.firstName} ${p.lastName}`.toLowerCase()}>
+              <input type="checkbox" name="person" value={p.id} />
+              <span>{p.firstName} {p.lastName}</span>
+            </label>
+          ))}
+        </div>
+        <p class="muted" style="margin:8px 0 0; font-size:14px;">
+          <span id="pcount">0</span> selected · {people.length} people can be texted.
+          Anyone without a number or not opted in is not listed.
+        </p>
+      </div>
+
+      <label class="field">
+        <span>Message</span>
+        <textarea name="body" rows="3" required
+          placeholder="Reminder: our service is tomorrow at 10:30am. We look forward to seeing you."></textarea>
+        <small class="muted">
+          Optional: <code>{'{first}'}</code> becomes their first name and
+          <code>{'{name}'}</code> their full name. Anything else in braces is left
+          as written, so a typo shows up here rather than in everyone's pockets.
+        </small>
+      </label>
+
+      <button class="btn" type="submit">Save schedule</button>
+    </form>
+  </div>
+
+  <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+    <table class="t-stack">
+      <thead><tr><th>Scheduled text</th><th>When</th><th>Sends to</th><th>Activity</th><th></th></tr></thead>
+      <tbody>
+        {schedules.length === 0 ? (
+          <tr><td colspan="5" class="muted" style="padding:22px;">
+            Nothing scheduled yet.
+          </td></tr>
+        ) : schedules.map((s) => (
+          <tr style={s.active ? '' : 'opacity:.55;'}>
+            <td>
+              <strong>{s.name}</strong>{!s.active && <span class="muted"> · paused</span>}
+              <br /><span class="muted" style="font-size:14px;">{s.body}</span>
+            </td>
+            <td data-label="When">
+              {when(s)}
+              {s.lastRunAt && <><br /><span class="muted" style="font-size:13px;">last ran {s.lastRunAt}</span></>}
+            </td>
+            <td data-label="Sends to">{audienceLabel(s)}</td>
+            <td data-label="Activity">
+              {s.sent} sent
+              {s.pending > 0 && <span class="muted"> · {s.pending} queued</span>}
+              {s.failed > 0 && <><br /><span style="color:#b3261e;">{s.failed} failed</span></>}
+            </td>
+            <td data-label="">
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <form method="POST">
+                  <input type="hidden" name="action" value="toggle" />
+                  <input type="hidden" name="id" value={s.id} />
+                  <input type="hidden" name="active" value={s.active ? '0' : '1'} />
+                  <button class="btn btn--ghost" style="min-height:36px; padding:6px 12px;" type="submit">
+                    {s.active ? 'Pause' : 'Resume'}
+                  </button>
+                </form>
+                <form method="POST" onsubmit="return confirm('Delete this scheduled text? Anything it has already sent stays in the record.')">
+                  <input type="hidden" name="action" value="delete" />
+                  <input type="hidden" name="id" value={s.id} />
+                  <button class="btn btn--ghost" style="min-height:36px; padding:6px 12px;" type="submit">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>
+
+<style>
+  .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .field__label { display:block; margin:0 0 6px; font-size:14px; font-weight:600; }
+  .pfilter { width:100%; max-width:340px; margin-bottom:8px; }
+  /* Scrolls rather than running to 75 rows — the picker has to stay a control
+     on the page, not become the page. */
+  .picker { max-height:230px; overflow-y:auto; border:1px solid var(--hair,#d9d2c6);
+            border-radius:3px; padding:6px 10px; }
+  .pick { display:flex; gap:9px; align-items:center; padding:5px 0; font-size:15px; cursor:pointer; }
+  .pick input { width:16px; height:16px; flex:none; }
+  .pick[hidden] { display:none; }
+</style>
+
+<script>
+  // Show only the fields the chosen options actually use. Without this the form
+  // offers a date, a weekday, a group and a person picker all at once, and it
+  // is not obvious which of them matter.
+  const kind = document.querySelector('#kind') as HTMLSelectElement | null;
+  const audience = document.querySelector('#audience') as HTMLSelectElement | null;
+  if (kind && audience) {
+    const show = (el: HTMLElement, on: boolean, as = 'flex') => {
+      el.style.display = on ? as : 'none';
+    };
+    const sync = () => {
+      for (const el of document.querySelectorAll<HTMLElement>('.k')) {
+        show(el, el.classList.contains(`k-${kind.value}`));
+      }
+      for (const el of document.querySelectorAll<HTMLElement>('.a')) {
+        show(el, el.classList.contains(`a-${audience.value}`), 'block');
+      }
+    };
+    kind.addEventListener('change', sync);
+    audience.addEventListener('change', sync);
+    sync();
+
+    // Narrow a 75-name list to the one you want without scrolling it.
+    const filter = document.querySelector('#pfilter') as HTMLInputElement | null;
+    const count = document.querySelector('#pcount');
+    const picks = [...document.querySelectorAll<HTMLElement>('.pick')];
+    filter?.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const p of picks) p.hidden = q ? !(p.dataset.name ?? '').includes(q) : false;
+    });
+    const tally = () => {
+      if (count) {
+        count.textContent = String(
+          document.querySelectorAll<HTMLInputElement>('input[name="person"]:checked').length);
+      }
+    };
+    for (const p of picks) p.querySelector('input')?.addEventListener('change', tally);
+    tally();
+  }
+</script>

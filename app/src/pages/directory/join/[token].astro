@@ -1,0 +1,54 @@
+---
+import { redeemInvite, createMemberSession } from '../../../lib/directory';
+
+/**
+ * Where a texted invite lands. Spends the token, starts a member session, and
+ * sends them into the directory.
+ *
+ * A GET performs a write, which is normally wrong — but the whole point of a
+ * magic link is that tapping it works, and requiring a button press first
+ * would strand anyone whose messaging app previews links. The link is REUSABLE
+ * for 30 days (see INVITE_DAYS), so a preview fetch costs nothing at all: the
+ * member taps the same link afterwards and it still works.
+ */
+const env = Astro.locals.runtime.env;
+const token = Astro.params.token ?? '';
+const result = await redeemInvite(env, token);
+
+if (result.ok && result.personId) {
+  await createMemberSession(env, Astro.cookies, result.personId,
+                            Astro.url.protocol === 'https:');
+  return Astro.redirect('/directory', 303);
+}
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Directory link · [Your Church Name]</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <style>
+      body { margin:0; background:#f4efe7; color:#1a1512; line-height:1.55;
+             font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+      .box { max-width:440px; margin:14vh auto; padding-inline:22px; text-align:center; }
+      h1 { font-size:26px; margin:0 0 12px; }
+      p { color:#4a4038; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>This link is no longer valid</h1>
+      {/* Deliberately identical wording for every failure. Expired, already
+          used, revoked and never-existed must be indistinguishable, or the
+          page becomes a way to test which tokens were once real. */}
+      {/* The wording used to say "can only be used once", which stopped being
+          true when links became reusable — and mattered: it talks somebody out
+          of retrying the link that would have worked. */}
+      <p>
+        Directory links stop working after 30 days. Ask at the church office and
+        we will send you a new one.
+      </p>
+    </div>
+  </body>
+</html>

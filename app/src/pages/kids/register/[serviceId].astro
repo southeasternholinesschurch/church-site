@@ -1,0 +1,68 @@
+---
+import KidsLayout from '../../../layouts/KidsLayout.astro';
+import { getDb, schema } from '../../../db';
+import { asc, eq, sql } from 'drizzle-orm';
+import { formatDate, kindLabel, kindHasClasses, isKidsKind } from '../../../lib/services';
+
+/**
+ * Which class, for one [Kids Ministry] meeting.
+ *
+ * A teacher's first tap on a Sunday morning. Each class shows how many of its
+ * children are already marked, so somebody arriving late can see at a glance
+ * which registers still need taking.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const serviceId = Number(Astro.params.serviceId);
+if (!Number.isInteger(serviceId)) return Astro.redirect('/kids/register', 302);
+
+const [service] = await db.select().from(schema.services)
+  .where(eq(schema.services.id, serviceId)).limit(1);
+// Only [Kids Ministry] meetings. The id in the URL is a number somebody can change, and
+// the sanctuary register is not this page's business.
+if (!service || !isKidsKind(service.kind)) return Astro.redirect('/kids/register', 302);
+if (!kindHasClasses(service.kind)) return Astro.redirect(`/kids/register/${serviceId}/all`, 302);
+
+const classes = await db.select({
+  id: schema.kidClasses.id,
+  name: schema.kidClasses.name,
+  description: schema.kidClasses.description,
+  enrolled: sql<number>`(select count(*) from kid_profiles kp where kp.class_id = kid_classes.id)`,
+  marked: sql<number>`(select count(*) from attendance a
+    where a.service_id = ${serviceId} and a.class_id = kid_classes.id)`,
+}).from(schema.kidClasses)
+  .where(eq(schema.kidClasses.active, true))
+  .orderBy(asc(schema.kidClasses.sort));
+
+/* Children who are here but not in anybody's class yet.
+ *
+ * Today that means a teacher ticked them somewhere and then took them out
+ * again. From release two it will mostly mean the kiosk saw them arrive and no
+ * register has claimed them — which is exactly the number a director wants on
+ * a Sunday morning, so it is surfaced now rather than added later. */
+const [loose] = await db.select({ n: sql<number>`count(*)` })
+  .from(schema.attendance)
+  .where(sql`service_id = ${serviceId} and class_id is null`);
+---
+<KidsLayout title={kindLabel(service.kind)} user={user}>
+  <p style="margin:0 0 6px;"><a href="/kids/register" style="font-size:15px;">← Registers</a></p>
+  <h1 style="margin-bottom:4px;">{kindLabel(service.kind)}</h1>
+  <p class="k-muted" style="margin:0 0 22px;">{formatDate(service.date)}</p>
+
+  <div class="k-tiles">
+    {classes.map((c) => (
+      <a class="k-tile" href={`/kids/register/${serviceId}/${c.id}`}>
+        <div class="k-tile__name">{c.name}</div>
+        <div class="k-tile__note">
+          <strong style="color:var(--k-text); font-size:17px;">{c.marked}</strong> of {c.enrolled} marked
+        </div>
+      </a>
+    ))}
+  </div>
+
+  {(loose?.n ?? 0) > 0 && (
+    <p class="k-muted" style="margin-top:18px;">
+      {loose!.n} {loose!.n === 1 ? 'child is' : 'children are'} marked here but not in a class.
+    </p>
+  )}
+</KidsLayout>

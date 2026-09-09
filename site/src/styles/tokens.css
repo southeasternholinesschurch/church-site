@@ -1,0 +1,53 @@
+/*
+ * ACTIVE THEME — change the ONE line below to restyle the whole site.
+ *
+ *   sanctuary   warm, editorial, timeless      traditional / established
+ *   open        airy, contemporary, unfussy    contemporary / young families
+ *   heritage    formal, classical              historic / liturgical
+ *   plain       bold, minimal                  church plant / younger
+ *
+ * See SETUP.md step 3a for what each looks like and how to choose.
+ */
+@import './themes/sanctuary.css';
+
+/*
+ * ---------------------------------------------------------------------------
+ * Everything below maps a theme's tokens onto the names the pages already use.
+ *
+ * Do not edit this to restyle the site — edit the theme, or write a new one.
+ * The indirection exists so that swapping themes touches ONE line rather than
+ * every stylesheet in the project, and so a page written against `--cream`
+ * keeps working when the paper is no longer cream.
+ * ---------------------------------------------------------------------------
+ */
+:root {
+  /* Historical names, kept so no page CSS has to change. `--cream` is whatever
+     the theme calls paper; `--red` is whatever it calls the accent. */
+  --cream: var(--paper);
+  --cream-deep: var(--paper-deep);
+  --red: var(--accent);
+  --red-deep: var(--accent-deep);
+  --red-tint: var(--accent-tint);
+
+  /* Derived from the theme rather than fixed, so a hairline on navy is a navy
+     hairline. */
+  --hair: color-mix(in srgb, var(--ink) 16%, transparent);
+  --hair-inv: color-mix(in srgb, var(--paper) 26%, transparent);
+
+  --pad: 60px;             /* page gutter; narrows on phones */
+  --ease: cubic-bezier(.19, 1, .22, 1);
+  --dur: 1.05s;
+}
+
+/* Ministry accent ramps. Scoped ONLY to a ministry's own block, never the site
+   palette — a ministry colour bleeding into the chrome is the fault this
+   scoping exists to prevent. Each theme supplies its own harmonised set. */
+[data-ministry='kids']    { --ministry-accent: var(--kids-a);    --ministry-accent-soft: var(--kids-b); }
+[data-ministry='youth']   { --ministry-accent: var(--youth-a);   --ministry-accent-soft: var(--youth-b); }
+[data-ministry='men']     { --ministry-accent: var(--men-a);     --ministry-accent-soft: var(--men-b); }
+[data-ministry='women']   { --ministry-accent: var(--women-a);   --ministry-accent-soft: var(--women-b); }
+[data-ministry='seniors'] { --ministry-accent: var(--seniors-a); --ministry-accent-soft: var(--seniors-b); }
+
+@media (max-width: 760px) {
+  :root { --pad: 22px; }
+}

@@ -1,0 +1,319 @@
+---
+import KidsLayout from '../../../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../../../db';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { readForm } from '../../../../lib/form';
+import { churchToday, formatDate, kindLabel, kindHasClasses, isKidsKind } from '../../../../lib/services';
+import { ageOn } from '../../../../lib/kids';
+import { getPerVisit } from '../../../../lib/bucks';
+
+/**
+ * The register. A teacher, in their class, on their own phone.
+ *
+ * THE ONE RULE THAT MATTERS (brief §5.1): a child marked here and a child
+ * marked at the door are the SAME attendance row. Two rows would be two numbers
+ * that disagree with no way to explain why, and from release two it would also
+ * be two [Kids Currency] credits.
+ *
+ * So marking present is an UPSERT: insert (service, person, class), or if the
+ * row already exists — because they scanned in on arrival — set its class_id.
+ * `unique(service_id, person_id)` does the rest, and must not be weakened.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const serviceId = Number(Astro.params.serviceId);
+const classParam = String(Astro.params.classId ?? '');
+const isAll = classParam === 'all';
+const classId = isAll ? null : Number(classParam);
+
+if (!Number.isInteger(serviceId) || (!isAll && !Number.isInteger(classId))) {
+  return Astro.redirect('/kids/register', 302);
+}
+
+const [service] = await db.select().from(schema.services)
+  .where(eq(schema.services.id, serviceId)).limit(1);
+// Only ever an [Kids Ministry] meeting. The ids in the URL are numbers somebody can
+// change, and this page must not become a second way to edit the sanctuary
+// register — which has different rules and a different audience.
+if (!service || !isKidsKind(service.kind)) return Astro.redirect('/kids/register', 302);
+
+const [klass] = classId
+  ? await db.select().from(schema.kidClasses).where(eq(schema.kidClasses.id, classId)).limit(1)
+  : [undefined];
+if (classId && !klass) return Astro.redirect(`/kids/register/${serviceId}`, 302);
+// The Wednesday club is one register; a class register for it would be a page
+// about a structure that does not exist.
+if (!isAll && !kindHasClasses(service.kind)) return Astro.redirect(`/kids/register/${serviceId}/all`, 302);
+
+// ---- marking ----------------------------------------------------------------
+/** Fetch sends this so one handler can answer both a script and a form post. */
+const wantsJson = Astro.request.headers.get('x-kids-register') === 'json';
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const personId = Number(form.get('personId') ?? 0);
+  const present = String(form.get('present') ?? '') === '1';
+
+  let ok = false;
+  if (Number.isInteger(personId) && personId > 0) {
+    // The child must actually be enrolled in [Kids Ministry] — a person id from
+    // anywhere else in the congregation must not become a children's
+    // attendance row by editing a form value.
+    const [enrolled] = await db.select({ personId: schema.kidProfiles.personId })
+      .from(schema.kidProfiles).where(eq(schema.kidProfiles.personId, personId)).limit(1);
+
+    if (enrolled) {
+      ok = true;
+      if (present) {
+        /*
+         * UPSERT, never a plain insert. If the child already has a row for this
+         * service — today only from another class's register, and from release
+         * two because the kiosk saw them arrive — this claims that same row for
+         * this class instead of failing on the unique constraint.
+         */
+        await db.insert(schema.attendance)
+          .values({ serviceId, personId, classId, createdAt: nowIso() })
+          .onConflictDoUpdate({
+            target: [schema.attendance.serviceId, schema.attendance.personId],
+            set: { classId },
+          });
+
+        /*
+         * The [Kids Currency] credit for being here.
+         *
+         * A child marked BY HAND is credited exactly as one who scanned a card
+         * (the pastor, §2) — forgetting your card is not a punishment. So this fires
+         * from the register as it will from the kiosk, and both are guarded the
+         * same way.
+         *
+         * onConflictDoNothing against kid_ledger_attendance_once, the partial
+         * unique index on (person_id, service_id) where reason = 'attendance'.
+         * A child already credited — by another class's register, or from
+         * release two by the kiosk on their way in — simply does not get a
+         * second one, and no code had to remember to check.
+         *
+         * Zero per visit is a real setting and means no automatic credit, so
+         * nothing is written rather than a row of delta 0 cluttering a history
+         * somebody may one day have to read back to a seven-year-old.
+         */
+        const perVisit = await getPerVisit(db);
+        if (perVisit > 0) {
+          await db.insert(schema.kidLedger).values({
+            personId, delta: perVisit, reason: 'attendance', serviceId,
+            /*
+             * NULL rather than 0 when there is no real staff row behind the
+             * session. staff_id is a foreign key, and the demo instance's
+             * synthetic user has id 0, which is not a row — inserting it fails
+             * the constraint and 500s the register. On the real app every
+             * session comes from a staff row, so this only ever bites the
+             * demo; it bit it immediately.
+             *
+             * The column is nullable by design anyway: from release two the
+             * kiosk credits children with no person behind it at all.
+             */
+            staffId: user.id > 0 ? user.id : null,
+            createdAt: nowIso(),
+          }).onConflictDoNothing();
+        }
+      } else {
+        /*
+         * Unticking DELETES the row.
+         *
+         * Right today, because every row on an [Kids Ministry] service was put there by
+         * this register, so unticking can only mean "I tapped the wrong name".
+         *
+         * REVISIT WHEN THE KIOSK LANDS (release two). Then a row may record
+         * that a child scanned in at the door, and deleting it would erase an
+         * arrival the teacher never made and never saw — the correct behaviour
+         * there is to clear class_id and keep the row. It is left alone now
+         * rather than guessed at, because the two cases are indistinguishable
+         * without knowing who created the row, and that is a decision to make
+         * with the kiosk in front of you.
+         */
+        await db.delete(schema.attendance)
+          .where(and(eq(schema.attendance.serviceId, serviceId),
+                     eq(schema.attendance.personId, personId)));
+
+        /*
+         * And the credit it earned.
+         *
+         * The ledger is append-only in the sense that matters — a balance is
+         * never edited in place, and a real correction is its own row. But an
+         * attendance credit is a CONSEQUENCE of an attendance row, not an event
+         * of its own: if the child was never here, the credit is not history to
+         * preserve, it is a mis-tap to undo. Leaving it would hand a child five
+         * bucks for a morning they missed.
+         *
+         * Writing a -5 correction instead would be worse, not purer: the
+         * original credit would still occupy the unique index, so re-ticking
+         * could never re-credit them and they would sit permanently five down.
+         *
+         * Scoped to reason='attendance' so an award a teacher gave them is
+         * untouched — that WAS an event, and it stands whatever the register
+         * says.
+         */
+        await db.delete(schema.kidLedger)
+          .where(and(eq(schema.kidLedger.serviceId, serviceId),
+                     eq(schema.kidLedger.personId, personId),
+                     eq(schema.kidLedger.reason, 'attendance')));
+      }
+    }
+  }
+
+  if (wantsJson) {
+    const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.attendance)
+      .where(classId
+        ? and(eq(schema.attendance.serviceId, serviceId), eq(schema.attendance.classId, classId))
+        : eq(schema.attendance.serviceId, serviceId));
+    return new Response(JSON.stringify({ ok, present, marked: n?.c ?? 0 }),
+      { status: ok ? 200 : 400, headers: { 'content-type': 'application/json' } });
+  }
+  // No JavaScript: reload the page it came from. Every tap costs a round trip,
+  // which is slower but always works.
+  return Astro.redirect(Astro.url.pathname, 303);
+}
+
+// ---- the list ---------------------------------------------------------------
+/*
+ * Every child in this class, present or not — a register is a list of who
+ * SHOULD be here, and absence is the absence of a tick. For the Wednesday club
+ * it is every enrolled child, since there are no breakout classes.
+ */
+const children = await db.select({
+  id: schema.people.id,
+  firstName: schema.people.firstName,
+  lastName: schema.people.lastName,
+  birthday: schema.people.birthday,
+  allergies: schema.kidProfiles.allergies,
+  routeName: schema.kidRoutes.name,
+  attendanceId: schema.attendance.id,
+  markedClassId: schema.attendance.classId,
+}).from(schema.kidProfiles)
+  .innerJoin(schema.people, eq(schema.people.id, schema.kidProfiles.personId))
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
+  .leftJoin(schema.attendance, and(
+    eq(schema.attendance.personId, schema.kidProfiles.personId),
+    eq(schema.attendance.serviceId, serviceId)))
+  .where(and(
+    eq(schema.people.archived, false),
+    classId ? eq(schema.kidProfiles.classId, classId) : sql`1 = 1`,
+  ))
+  .orderBy(asc(schema.people.firstName), asc(schema.people.lastName));
+
+const today = churchToday();
+const rows = children.map((c) => ({
+  ...c,
+  age: ageOn(c.birthday, today),
+  // Present in THIS class, versus here but claimed by another register.
+  here: c.attendanceId !== null && (isAll || c.markedClassId === classId),
+  elsewhere: c.attendanceId !== null && !isAll && c.markedClassId !== classId,
+}));
+const marked = rows.filter((r) => r.here).length;
+const heading = isAll ? kindLabel(service.kind) : klass!.name;
+---
+<KidsLayout title={heading} user={user}>
+  <p style="margin:0 0 6px;">
+    <a href={kindHasClasses(service.kind) ? `/kids/register/${serviceId}` : '/kids/register'}
+       style="font-size:15px;">← {kindHasClasses(service.kind) ? 'Classes' : 'Registers'}</a>
+  </p>
+  <h1 style="margin-bottom:4px;">{heading}</h1>
+  <p class="k-muted" style="margin:0 0 8px;">{formatDate(service.date)} · {kindLabel(service.kind)}</p>
+  <p style="margin:0 0 20px; font-size:19px;">
+    <strong id="count">{marked}</strong> of {rows.length} here
+  </p>
+
+  {/* Said plainly, because the pastor is telling volunteers the same thing by mouth:
+      a child already ticked was ticked for a reason. */}
+  <p class="k-muted" style="margin:-10px 0 18px; font-size:14px;">
+    Someone already ticked is already counted. Don’t untick them to mean “I can’t see them”.
+  </p>
+
+  {rows.length === 0 && (
+    <div class="k-card"><p class="k-muted" style="margin:0;">
+      No children in this class yet. Put them in one from <a href="/kids/children">the children list</a>.
+    </p></div>
+  )}
+
+  <div class="k-card" style="padding:8px;">
+    {rows.map((r) => (
+      <form method="POST" class="k-mark" data-person={r.id}>
+        <input type="hidden" name="personId" value={r.id} />
+        <input type="hidden" name="present" value={r.here ? '0' : '1'} />
+        <button type="submit" class:list={['k-mark__btn', r.here && 'is-here']} aria-pressed={r.here ? 'true' : 'false'}>
+          <span class="k-mark__tick" aria-hidden="true">{r.here ? '✓' : ''}</span>
+          <span class="k-mark__name">
+            {r.firstName} {r.lastName}
+            {r.age !== null && <span class="k-mark__age">{r.age}</span>}
+          </span>
+          <span class="k-mark__tags">
+            {r.allergies && <span class="k-tag k-tag--allergy">allergy</span>}
+            {r.elsewhere && <span class="k-tag">in another class</span>}
+            {r.routeName && <span class="k-tag">{r.routeName.split('—')[0].trim()}</span>}
+          </span>
+        </button>
+      </form>
+    ))}
+  </div>
+</KidsLayout>
+
+<style>
+  .k-mark { margin:0; }
+  .k-mark + .k-mark .k-mark__btn { border-top:1px solid rgba(13,27,69,.08); }
+  /* A whole row is the target, not a small checkbox: this is tapped one-handed,
+     standing up, by somebody also holding a register of names in their head. */
+  .k-mark__btn { display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+                 padding:14px 12px; background:none; border:0; border-radius:10px;
+                 font:inherit; font-size:17px; color:var(--k-ink); cursor:pointer; }
+  .k-mark__btn:hover { background:rgba(13,27,69,.05); }
+  .k-mark__tick { flex:0 0 30px; height:30px; border-radius:50%; display:grid; place-items:center;
+                  border:2px solid rgba(13,27,69,.25); color:#fff; font-size:16px; font-weight:800; }
+  .is-here .k-mark__tick { background:var(--k-orange); border-color:var(--k-orange); }
+  .k-mark__name { font-weight:600; flex:1; }
+  .is-here .k-mark__name { color:var(--k-ink); }
+  .k-mark__age { font-weight:400; color:var(--k-ink-soft); margin-left:8px; font-size:14px; }
+  .k-mark__tags { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .k-tag { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+           padding:3px 8px; border-radius:999px; background:rgba(13,27,69,.08); color:var(--k-ink-soft); }
+  .k-tag--allergy { background:#b01818; color:#fff; }
+</style>
+
+<script is:inline>
+  /*
+   * Progressive enhancement. Every row is a real form that works with no
+   * JavaScript at all — it just costs a page load per child. With script, the
+   * same POST goes by fetch so a teacher ticking fourteen names does not sit
+   * through fourteen reloads on church wifi.
+   *
+   * The button is updated from the SERVER's answer, not optimistically. A tick
+   * that appears and then silently is not recorded is worse than a slow one.
+   */
+  (function () {
+    var count = document.getElementById('count');
+    document.querySelectorAll('.k-mark').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = form.querySelector('.k-mark__btn');
+        var flag = form.querySelector('input[name="present"]');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        fetch(location.pathname, {
+          method: 'POST',
+          headers: { 'x-kids-register': 'json',
+                     'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(form)).toString(),
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.ok) { form.submit(); return; }   // fall back to the real post
+            btn.classList.toggle('is-here', d.present);
+            btn.setAttribute('aria-pressed', String(d.present));
+            btn.querySelector('.k-mark__tick').textContent = d.present ? '✓' : '';
+            flag.value = d.present ? '0' : '1';
+            if (count) count.textContent = d.marked;
+          })
+          .catch(function () { form.submit(); })
+          .then(function () { btn.disabled = false; });
+      });
+    });
+  })();
+</script>

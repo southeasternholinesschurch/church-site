@@ -1,0 +1,274 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { randomToken } from '../../lib/auth';
+import { canIssueCards } from '../../lib/permissions';
+
+/**
+ * WRITING THE CARDS. Seventy of them, in a sitting, on an Android phone.
+ *
+ * The alternative this replaces: open a child, issue a card, select and copy a
+ * seventy-character URL, switch to a tag-writing app, paste it, hold the tag,
+ * go back. Three to five minutes each, four to six hours for the ministry — and
+ * every copy-paste a chance to write one child's URL onto another child's card,
+ * discovered weeks later when a seven-year-old checks in as somebody else.
+ *
+ * Here the phone does both halves: it issues the card and writes the tag in one
+ * motion, so NO URL IS EVER HANDLED BY A HUMAN and the two cannot be mismatched.
+ *
+ * Needs Chrome on Android — Web NFC is the device's own radio, and no external
+ * reader can be reached from a web page. Written to degrade honestly: on any
+ * other browser it says so rather than half-working.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+// The middleware already refused a teacher; checked again because this page
+// mints credentials in bulk.
+if (!canIssueCards(user.role)) return Astro.redirect('/kids', 302);
+
+/* ---- issuing, for the script to call ------------------------------------- */
+if (Astro.request.method === 'POST') {
+  const body = await Astro.request.json().catch(() => null) as { personId?: number } | null;
+  const personId = Number(body?.personId ?? 0);
+  const json = (o: unknown, status = 200) =>
+    new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+
+  if (!Number.isInteger(personId) || personId <= 0) return json({ error: 'bad child' }, 400);
+
+  const [child] = await db.select({ id: schema.people.id })
+    .from(schema.people)
+    .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
+    .where(and(eq(schema.people.id, personId), eq(schema.people.archived, false))).limit(1);
+  if (!child) return json({ error: 'not an [Kids Ministry] child' }, 400);
+
+  /*
+   * IDEMPOTENT. Returns the existing active card if there is one rather than
+   * minting another — because a failed tag write is common (the tag slips, it
+   * is the wrong type, the phone moves) and every retry would otherwise burn a
+   * token and leave a trail of revoked cards behind one child.
+   */
+  const [existing] = await db.select({ token: schema.kidCards.token })
+    .from(schema.kidCards)
+    .where(and(eq(schema.kidCards.personId, personId), eq(schema.kidCards.active, true)))
+    .limit(1);
+
+  let token = existing?.token;
+  if (!token) {
+    token = randomToken(32);
+    await db.insert(schema.kidCards).values({
+      personId, token, active: true, issuedAt: nowIso(), issuedBy: user.email,
+    });
+  }
+  return json({ url: `${Astro.url.origin}/kids/card/${token}` });
+}
+
+/* ---- the queue ------------------------------------------------------------ */
+const rows = await db.select({
+  id: schema.people.id,
+  firstName: schema.people.firstName,
+  lastName: schema.people.lastName,
+  className: schema.kidClasses.name,
+  cardId: schema.kidCards.id,
+}).from(schema.kidProfiles)
+  .innerJoin(schema.people, eq(schema.people.id, schema.kidProfiles.personId))
+  .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kidProfiles.classId))
+  .leftJoin(schema.kidCards, and(
+    eq(schema.kidCards.personId, schema.kidProfiles.personId),
+    eq(schema.kidCards.active, true)))
+  .where(eq(schema.people.archived, false))
+  .orderBy(asc(schema.kidClasses.sort), asc(schema.people.firstName), asc(schema.people.lastName));
+
+const needed = rows.filter((r) => r.cardId === null);
+const done = rows.length - needed.length;
+---
+<KidsLayout title="Write the cards" user={user}>
+  <h1>Write the cards</h1>
+  <p class="k-muted" style="margin:-4px 0 20px; max-width:620px;">
+    Hold a blank tag to the back of the phone for each child. It issues their
+    card and writes the tag in one go — you never copy an address, so a card
+    cannot end up pointing at the wrong child.
+  </p>
+
+  <div class="k-card" style="margin-bottom:18px;">
+    <p style="margin:0; font-size:19px;">
+      <strong>{needed.length}</strong> to write
+      {done > 0 && <span class="k-muted"> · {done} already done</span>}
+    </p>
+  </div>
+
+  {/* Only ever seen on a browser that cannot do this. Said plainly rather than
+      leaving somebody tapping a dead button. */}
+  <div id="unsupported" class="k-card" hidden style="border-left:5px solid #a3540a; margin-bottom:18px;">
+    <strong>This phone or browser cannot write tags.</strong>
+    <p class="k-muted" style="margin:8px 0 0;">
+      Card writing needs <strong>Chrome on Android</strong>, on a device with NFC
+      built in. An add-on reader will not work — a web page can only reach the
+      phone's own NFC.
+    </p>
+    <p class="k-muted" style="margin:8px 0 0;">
+      You can still issue cards one at a time from each child's page and write
+      them with a separate tag app.
+    </p>
+  </div>
+
+  {needed.length === 0 ? (
+    <div class="k-card"><p style="margin:0;">Every child has a card. Nothing to write.</p></div>
+  ) : (
+    <>
+      <div id="stage" class="w-stage" hidden>
+        <p class="w-who" id="who"></p>
+        <p class="w-class" id="whoClass"></p>
+        <p class="w-status" id="status">Hold a blank tag to the back of the phone</p>
+        <div class="w-actions">
+          <button id="cancel" class="k-btn k-btn--quiet" type="button">Stop</button>
+          <button id="skip" class="k-btn k-btn--quiet" type="button">Skip this child</button>
+        </div>
+      </div>
+
+      <button id="start" class="w-start" type="button">Start writing</button>
+
+      <div class="k-card" style="margin-top:18px; padding:6px 8px;">
+        {needed.map((r) => (
+          <div class="w-row" data-id={r.id} data-name={`${r.firstName} ${r.lastName}`}
+               data-class={r.className ?? ''}>
+            <span class="w-tick" aria-hidden="true"></span>
+            <span class="w-name">{r.firstName} {r.lastName}</span>
+            <span class="w-cls k-muted">{r.className}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  )}
+</KidsLayout>
+
+<style>
+  .w-start { width:100%; font:inherit; font-size:20px; font-weight:800; padding:20px;
+             border:0; border-radius:14px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .w-stage { background:#fff; color:var(--k-ink); border-radius:16px; padding:26px 22px;
+             text-align:center; margin-bottom:14px; }
+  .w-who { font-size:clamp(30px,8vw,46px); font-weight:800; margin:0 0 2px; line-height:1.05; }
+  .w-class { margin:0 0 16px; color:var(--k-ink-soft); font-size:16px; }
+  .w-status { margin:0 0 18px; font-size:18px; font-weight:600; min-height:1.4em; }
+  .w-status.is-ok { color:#1f6b3a; }
+  .w-status.is-bad { color:#b01818; }
+  .w-actions { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .w-row { display:flex; align-items:center; gap:10px; padding:11px 12px; font-size:16px;
+           color:var(--k-ink); }
+  .w-row + .w-row { border-top:1px solid rgba(13,27,69,.08); }
+  .w-row.is-done { opacity:.5; }
+  .w-row.is-current { background:rgba(250,102,1,.12); border-radius:10px; font-weight:700; }
+  .w-tick { flex:0 0 22px; height:22px; border-radius:50%; border:2px solid rgba(13,27,69,.22);
+            display:grid; place-items:center; font-size:13px; font-weight:800; color:#fff; }
+  .is-done .w-tick { background:#1f6b3a; border-color:#1f6b3a; }
+  .is-done .w-tick::after { content:"✓"; }
+  .w-name { flex:1; }
+  .w-cls { font-size:14px; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:11px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-btn--quiet { background:transparent; color:var(--k-ink-soft);
+                  border:1px solid rgba(13,27,69,.22); }
+</style>
+
+<script is:inline>
+  (function () {
+    var start = document.getElementById('start');
+    if (!start) return;                       // nothing to write
+    var stage = document.getElementById('stage');
+    var who = document.getElementById('who');
+    var whoClass = document.getElementById('whoClass');
+    var status = document.getElementById('status');
+    var cancel = document.getElementById('cancel');
+    var skip = document.getElementById('skip');
+    var rows = [].slice.call(document.querySelectorAll('.w-row'));
+    var i = -1, stopped = false, writer = null;
+
+    if (!('NDEFReader' in window)) {
+      document.getElementById('unsupported').hidden = false;
+      start.hidden = true;
+      return;
+    }
+
+    function say(text, kind) {
+      status.textContent = text;
+      status.className = 'w-status' + (kind ? ' is-' + kind : '');
+    }
+
+    function next() {
+      if (stopped) return;
+      // Step past anybody already written in this sitting.
+      do { i++; } while (i < rows.length && rows[i].classList.contains('is-done'));
+      rows.forEach(function (r) { r.classList.remove('is-current'); });
+      if (i >= rows.length) {
+        stage.hidden = true;
+        start.hidden = false;
+        start.textContent = 'All done';
+        start.disabled = true;
+        return;
+      }
+      var row = rows[i];
+      row.classList.add('is-current');
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      who.textContent = row.getAttribute('data-name');
+      whoClass.textContent = row.getAttribute('data-class') || '';
+      say('Hold a blank tag to the back of the phone');
+      writeFor(row);
+    }
+
+    function writeFor(row) {
+      var id = Number(row.getAttribute('data-id'));
+      /*
+       * Issue FIRST, then write. The token has to exist before it can go on a
+       * tag — and the endpoint is idempotent, so a retry after a failed write
+       * reuses the same card rather than burning a new token and leaving a
+       * trail of revoked ones behind one child.
+       */
+      fetch(location.pathname, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ personId: id }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.url) throw new Error(d && d.error ? d.error : 'could not issue a card');
+          writer = new NDEFReader();
+          return writer.write({ records: [{ recordType: 'url', data: d.url }] });
+        })
+        .then(function () {
+          if (stopped) return;
+          row.classList.add('is-done');
+          row.classList.remove('is-current');
+          say('Written — next child', 'ok');
+          setTimeout(next, 700);
+        })
+        .catch(function (e) {
+          if (stopped) return;
+          /* A failed write is ordinary: the tag slipped, or is the wrong type,
+             or is locked. Say so and let them hold it again — the card is
+             already issued, so this retries the same one. */
+          say((e && e.message ? e.message : 'That did not write') + ' — hold the tag again', 'bad');
+          setTimeout(function () { if (!stopped) writeFor(row); }, 1400);
+        });
+    }
+
+    start.addEventListener('click', function () {
+      stopped = false;
+      start.hidden = true;
+      stage.hidden = false;
+      next();
+    });
+    cancel.addEventListener('click', function () {
+      stopped = true;
+      stage.hidden = true;
+      start.hidden = false;
+      start.textContent = 'Carry on';
+      rows.forEach(function (r) { r.classList.remove('is-current'); });
+    });
+    skip.addEventListener('click', function () {
+      if (i >= 0 && i < rows.length) rows[i].classList.remove('is-current');
+      say('Skipped');
+      setTimeout(next, 300);
+    });
+  })();
+</script>

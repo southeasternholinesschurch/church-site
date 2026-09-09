@@ -1,0 +1,292 @@
+---
+import DirectoryHead from '../../components/DirectoryHead.astro';
+import { listedAdults, readMemberSession, destroyMemberSession } from '../../lib/directory';
+import { readSession } from '../../lib/session';
+import { demoPerson } from '../../lib/demo';
+import { isDemoInstance } from '../../lib/demo-instance';
+
+const env = Astro.locals.runtime.env;
+
+if (Astro.request.method === 'POST') {
+  await destroyMemberSession(env, Astro.cookies);
+  return Astro.redirect('/directory', 303);
+}
+
+/**
+ * The member-facing directory.
+ *
+ * Not behind the staff gate — members are not staff — so it does its OWN check
+ * here, and shows nothing at all without a valid member session. Staff signed
+ * into the dashboard also get in, so the page can be checked without anyone
+ * texting themselves an invite.
+ */
+const member = await readMemberSession(env, Astro.cookies);
+// Read directly, NOT from Astro.locals: /directory is a public prefix so the
+// middleware returns early and never populates locals.user. Relying on it here
+// meant the staff fallback silently did nothing.
+const staff = await readSession(env, Astro.cookies);
+/*
+ * /directory is in PUBLIC_PREFIXES, so the middleware returns BEFORE it injects
+ * the demo user — which meant the public demo showed the locked sign-in gate
+ * rather than the directory, the single most persuasive screen in the app. The
+ * instance flag has to be read here too, exactly as the staff fallback is.
+ */
+const onDemoInstance = isDemoInstance(env);
+const allowed = Boolean(member || staff || onDemoInstance);
+
+// Loaded ONLY when allowed. Fetching first and hiding in the template is how
+// contact details end up in the HTML of a page that looks locked.
+/*
+ * Demo mode is STAFF ONLY, even here. A member reaching this page with ?demo=1
+ * must see the real directory — it is the thing they were invited to — so the
+ * flag is gated on the staff session, not on `allowed`.
+ */
+// Every person on the demo instance is invented already, so no transform is
+// needed there — only the real app's ?demo=1 screenshot mode applies it.
+const demo = Boolean(staff) && Astro.url.searchParams.get('demo') === '1';
+const people = allowed
+  ? (await listedAdults(env)).map((p) => demoPerson(p, p.id, demo))
+  : [];
+const initials = (f: string, l: string) => `${f[0] ?? ''}${l[0] ?? ''}`.toUpperCase();
+
+/**
+ * Day and month, never the year.
+ *
+ * The year is kept in the database — the office may want to know a milestone —
+ * but a church directory that publishes everyone's age is a different and much
+ * less welcome document. Parsed by hand rather than through Date(): a bare
+ * 'YYYY-MM-DD' is read as UTC midnight, which in Indianapolis renders as the
+ * evening BEFORE, and being wished a happy birthday a day early is exactly the
+ * kind of small wrongness nobody reports and everybody notices.
+ */
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+function dayAndMonth(iso: string | null): string | null {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return null;
+  const month = Number(m[2]), day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${MONTHS[month - 1]} ${day}`;
+}
+// Only letters somebody actually falls under. A full A–Z index would be two
+// rows of mostly-dead buttons on a phone.
+const letters = [...new Set(people.map((p) => (p.lastName[0] ?? '').toUpperCase()))]
+  .filter(Boolean).sort();
+const viewerName = member ? `${member.firstName} ${member.lastName}` : staff?.name ?? staff?.email ?? '';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Church Directory · [Your Church Name]</title>
+    <!-- Never indexed, never cached by anything in between. This page is the
+         congregation's contact details. -->
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="/favicon-48.png" />
+    <DirectoryHead />
+    <!-- The same two faces as the website, so this page reads as part of it
+         rather than as a piece of admin software. Texta is the pastor's licensed
+         face, self-hosted; Instrument Serif is Google Fonts, OFL. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+
+      /* Lifted from the website's tokens.css rather than re-picked by eye.
+         Corners are 3px on purpose — the whole identity is square. */
+      :root { --ink:#1a1512; --ink-soft:#4a4038; --red:#b01818; --red-deep:#8e1313;
+              --cream:#f4efe7; --cream-deep:#eae2d6; --hair:rgba(26,21,18,.16);
+              --radius:3px;
+              --font-body:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+              --font-display:'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--cream-deep); color:var(--ink); line-height:1.5;
+             font-family:var(--font-body); }
+      .wrap { max-width:1080px; margin-inline:auto; padding:36px clamp(18px,4vw,32px) 80px; }
+      h1 { font-family:var(--font-display); font-weight:400; letter-spacing:-.01em;
+           font-size:clamp(34px,6vw,54px); line-height:1.04; margin:0 0 6px; }
+      .sub { color:var(--ink-soft); margin:0 0 26px; font-size:16px; }
+
+      /* Underline-only field, like the sample's toolbar — a boxed input would
+         be the one rounded, chrome-heavy thing on the page. */
+      .search { width:100%; font:inherit; font-size:17px; min-height:44px;
+                padding:8px 2px; color:var(--ink); background:transparent;
+                border:0; border-bottom:1px solid var(--hair); border-radius:0;
+                margin-bottom:22px; }
+      .search::placeholder { color:rgba(74,64,56,.62); }
+      .search:focus { outline:none; border-bottom-color:var(--ink); }
+
+      .alpha { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:26px; }
+      .alpha button { font:inherit; font-size:13px; font-weight:700; min-width:34px; min-height:34px;
+                      padding:0 8px; border:0; background:transparent; color:var(--ink-soft);
+                      border-radius:var(--radius); cursor:pointer; }
+      .alpha button:hover { background:rgba(26,21,18,.07); }
+      .alpha button.on { background:var(--ink); color:var(--cream); }
+
+      .people { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
+      .person { display:flex; gap:16px; align-items:flex-start; background:var(--cream);
+                border:1px solid var(--hair); border-radius:var(--radius); padding:20px; }
+      .person[hidden] { display:none; }
+      .person__av { flex:none; width:58px; height:58px; border-radius:999px; overflow:hidden;
+                    background:var(--cream-deep); border:1px solid var(--hair);
+                    display:flex; align-items:center; justify-content:center;
+                    font-family:var(--font-display); font-size:18px; color:rgba(26,21,18,.34); }
+      .person__av img { width:100%; height:100%; object-fit:cover; display:block; }
+      .person__body { min-width:0; }
+      .person__nm { font-family:var(--font-display); font-weight:400; font-size:20px;
+                    line-height:1.2; margin:0 0 8px; }
+      /* Still links — tapping a number to call is the point of carrying this
+         on a phone — but they sit in the body colour instead of shouting red.
+         The red is saved for the two or three places that need attention. */
+      .person__ln { display:block; font-size:14px; line-height:1.72; color:var(--ink-soft);
+                    text-decoration:none; word-break:break-word; }
+      .person__ln:hover { color:var(--red-deep); text-decoration:underline; }
+      .person__addr { margin:0; font-size:14px; line-height:1.72; color:var(--ink-soft); }
+      .person__dates { margin:8px 0 0; display:flex; flex-wrap:wrap; gap:4px 12px; }
+      .person__dates span { font-size:12px; letter-spacing:.04em; color:rgba(74,64,56,.78); }
+
+      .gate { max-width:560px; margin:14vh auto; text-align:center; padding-inline:20px; }
+      .gate .sub { font-size:17px; line-height:1.76; }
+      /* Matches the website's .btn--ink: square, ink, no red. */
+      .btn { display:inline-block; margin-top:28px; padding:14px 26px;
+             background:var(--ink); color:var(--cream); border-radius:var(--radius);
+             font-size:15px; font-weight:700; text-decoration:none; }
+      .btn:hover { background:#000; }
+      .lock { width:62px; height:62px; border-radius:999px; border:1px solid var(--hair);
+              display:flex; align-items:center; justify-content:center; margin:0 auto 26px;
+              color:var(--ink-soft); }
+      .foot { margin-top:34px; padding-top:20px; border-top:1px solid var(--hair);
+              color:var(--ink-soft); font-size:14px; display:flex; gap:14px;
+              justify-content:space-between; flex-wrap:wrap; }
+      .foot button { font:inherit; font-size:14px; background:none; border:0;
+                     color:var(--ink-soft); text-decoration:underline; cursor:pointer; padding:0; }
+      .foot button:hover { color:var(--red-deep); }
+      .foot__me { color:var(--ink-soft); }
+      .foot__me:hover { color:var(--red-deep); }
+
+      @media (max-width:900px) { .people { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+      @media (max-width:640px) { .people { grid-template-columns:1fr; } }
+    </style>
+  </head>
+  <body>
+    {!allowed ? (
+      <div class="gate">
+        <div class="lock" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" width="24" height="24">
+            <rect x="4" y="10.5" width="16" height="10" rx="2"></rect>
+            <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path>
+          </svg>
+        </div>
+        <h1>This directory is private</h1>
+        <p class="sub" style="margin-top:14px;">
+          It's shared by personal invitation — there's no password to pass around
+          and nothing here to browse. If you're part of the church family and
+          haven't had a link yet, ask in the office and we'll send you one.
+        </p>
+        <a class="btn" href="https://example.org/contact?about=directory">Ask for a link</a>
+        <p class="sub" style="font-size:14px; line-height:1.7; margin-top:24px;">
+          Already been sent a link? Open it on the device you want to use — it
+          signs that device in and remembers it. Links keep working for 30 days,
+          however many times you open them.
+        </p>
+      </div>
+    ) : (
+      <div class="wrap">
+        <h1>Church Directory</h1>
+        <p class="sub">{people.length} of the church family</p>
+
+        <input id="q" class="search" type="search" placeholder="Search name, street or phone…" autocomplete="off" />
+
+        <div class="alpha" id="alpha">
+          <button type="button" class="on" data-letter="">All</button>
+          {letters.map((l) => <button type="button" data-letter={l}>{l}</button>)}
+        </div>
+
+        <div id="list" class="people">
+          {people.map((p) => (
+            <article class="person" data-letter={(p.lastName[0] ?? '').toUpperCase()}
+                     data-search={[p.firstName, p.lastName, p.phone, p.addressStreet, p.addressCity,
+                                   dayAndMonth(p.birthday), dayAndMonth(p.anniversary)]
+                       .filter(Boolean).join(' ').toLowerCase()}>
+              {/* Round photo slot, sized and reserved now so the grid does not
+                  reflow when the professional portraits land. Until then it
+                  holds a monogram rather than a grey silhouette — initials read
+                  as a person, a placeholder icon reads as a missing file. */}
+              <div class="person__av">
+                {(p.photoKey || onDemoInstance)
+                  ? <img src={`/directory/photo/${p.id}`} alt="" width="128" height="128" loading="lazy" />
+                  : <span>{initials(p.firstName, p.lastName)}</span>}
+              </div>
+              <div class="person__body">
+                <p class="person__nm">{p.firstName} {p.lastName}</p>
+                {p.phone && <a class="person__ln" href={`tel:${p.phone.replace(/[^\d+]/g,'')}`}>{p.phone}</a>}
+                {p.email && <a class="person__ln" href={`mailto:${p.email}`}>{p.email}</a>}
+                {p.addressStreet && (
+                  <p class="person__addr">
+                    {p.addressStreet}{p.addressCity ? `, ${p.addressCity}` : ''}
+                    {p.addressState ? `, ${p.addressState}` : ''} {p.addressZip ?? ''}
+                  </p>
+                )}
+                {(dayAndMonth(p.birthday) || dayAndMonth(p.anniversary)) && (
+                  <p class="person__dates">
+                    {dayAndMonth(p.birthday) && <span>Birthday {dayAndMonth(p.birthday)}</span>}
+                    {dayAndMonth(p.anniversary) && <span>Anniversary {dayAndMonth(p.anniversary)}</span>}
+                  </p>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+        <p id="none" class="sub" hidden>Nobody matches that.</p>
+
+        <div class="foot">
+          <span>
+            Signed in as {viewerName}
+            {member && <> · <a class="foot__me" href="/directory/me">Edit my listing</a></>}
+            {/* Otherwise the install page is reachable only by scanning the
+                printed card, which the people already holding it don't have. */}
+            · <a class="foot__me" href="/directory/install">Add to home screen</a>
+          </span>
+          <form method="POST" style="margin:0;"><button type="submit">Sign out</button></form>
+        </div>
+      </div>
+    )}
+
+    {allowed && (
+      <script is:inline>
+        const q = document.getElementById('q');
+        const cards = [...document.querySelectorAll('#list .person')];
+        const alpha = document.getElementById('alpha');
+        const none = document.getElementById('none');
+        let letter = '';
+
+        function apply() {
+          const t = q.value.trim().toLowerCase();
+          let shown = 0;
+          for (const c of cards) {
+            const hit = (!t || c.dataset.search.includes(t))
+                     && (!letter || c.dataset.letter === letter);
+            c.hidden = !hit;
+            if (hit) shown++;
+          }
+          none.hidden = shown > 0;
+        }
+        q.addEventListener('input', apply);
+        alpha.addEventListener('click', (e) => {
+          const b = e.target.closest('button');
+          if (!b) return;
+          letter = b.dataset.letter;
+          alpha.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+          apply();
+        });
+      </script>
+    )}
+  </body>
+</html>

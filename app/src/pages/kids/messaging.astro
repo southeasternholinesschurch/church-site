@@ -1,0 +1,257 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema } from '../../db';
+import { asc, eq } from 'drizzle-orm';
+import { kidsSendScope } from '../../lib/permissions';
+import { buildKidsAudience } from '../../lib/kids-recipients';
+import { smsConfigured, COST_PER_SEGMENT_USD } from '../../lib/sms';
+import { isDemoInstance } from '../../lib/demo-instance';
+
+/**
+ * Texting a bus route.
+ *
+ * The highest-risk screen in [Kids Ministry]: it costs money, it reaches people outside
+ * the congregation, and it cannot be undone.
+ *
+ * Reachable by any kids role — the path gate cannot express "has the send
+ * capability", because that is a flag rather than a role — so the page refuses
+ * anyone without it. The send endpoint refuses again, independently, reading
+ * the scope from the database rather than the form.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+const assigned = await db.select({ routeId: schema.kidRouteCaptains.routeId })
+  .from(schema.kidRouteCaptains)
+  .where(eq(schema.kidRouteCaptains.staffId, user.id));
+const scope = kidsSendScope(user.role, user.kidsCanText, assigned.map((a) => a.routeId));
+
+const allRoutes = await db.select().from(schema.kidRoutes)
+  .where(eq(schema.kidRoutes.active, true)).orderBy(asc(schema.kidRoutes.name));
+const routes = scope === 'all' ? allRoutes
+  : allRoutes.filter((r) => scope !== null && scope.includes(r.id));
+
+/*
+ * EVERY count computed here, server-side, one per option — and carried on the
+ * <option> itself.
+ *
+ * This is the bug fixed on /messaging on 2026-09-07 and explicitly called out
+ * in the brief as the one not to repeat. That page rendered the count once for
+ * "everyone" and never recomputed it, so choosing a group changed who the send
+ * reached but left the old number on screen — and the cost estimate and the
+ * confirmation dialog both quoted it. An empty group looked identical to a full
+ * one until the API refused.
+ *
+ * The route picker here has exactly the same shape, so the counts are resolved
+ * for every option the sender may choose and the screen reads them off the
+ * selection with no round trip.
+ */
+const options: { id: number | null; label: string; handsets: number; excluded: number }[] = [];
+if (scope === 'all') {
+  const a = await buildKidsAudience(db, 'all');
+  options.push({ id: null, label: 'Every [Kids Ministry] family', handsets: a.handsets.length,
+                 excluded: a.excluded.noNumber + a.excluded.optedOut + a.excluded.noConsent });
+}
+for (const r of routes) {
+  const a = await buildKidsAudience(db, [r.id]);
+  options.push({ id: r.id, label: r.name, handsets: a.handsets.length,
+                 excluded: a.excluded.noNumber + a.excluded.optedOut + a.excluded.noConsent });
+}
+
+const configured = smsConfigured(env);
+const onDemo = isDemoInstance(env);
+const TEMPLATES = [
+  'The bus will be about {n} minutes late this morning.',
+  '{route} is cancelled today because of the weather.',
+  'Pickup this Sunday is at {time} from {place}.',
+  'No [Kids Ministry] this week. See you next Sunday!',
+];
+---
+<KidsLayout title="Messaging" user={user}>
+  <h1>Text a bus route</h1>
+
+  {scope === null ? (
+    <div class="k-card" style="max-width:600px;">
+      <p style="margin-top:0;"><strong>You cannot send [Kids Ministry] texts.</strong></p>
+      <p class="k-muted" style="margin-bottom:0;">
+        Texting costs money and reaches families outside the church, so it is
+        given to specific people. Ask the children's director if you need it.
+      </p>
+    </div>
+  ) : options.length === 0 ? (
+    <div class="k-card" style="max-width:600px;">
+      <p style="margin-top:0;"><strong>You have no routes assigned.</strong></p>
+      <p class="k-muted" style="margin-bottom:0;">
+        You have permission to send, but not to any route yet. Ask the
+        children's director to assign you one.
+      </p>
+    </div>
+  ) : (
+    <>
+      <p class="k-muted" style="margin:-4px 0 22px; max-width:620px;">
+        Pickup times, delays and cancellations. It goes to the grown-ups who have
+        agreed to be texted — anyone who has opted out is never included.
+      </p>
+
+      {!configured && !onDemo && (
+        <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;">
+          <strong>Texting is not switched on yet.</strong>
+          <p class="k-muted" style="margin:6px 0 0;">Twilio is not configured in this environment.</p>
+        </div>
+      )}
+      {onDemo && (
+        <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:18px;">
+          <strong>This is the demo.</strong>
+          <p class="k-muted" style="margin:6px 0 0;">Nothing is ever actually sent.</p>
+        </div>
+      )}
+
+      <div class="k-card" style="max-width:660px;">
+        <label class="k-field"><span>Who</span>
+          <select id="route">
+            {options.map((o) => (
+              <option value={o.id ?? ''} data-handsets={o.handsets} data-excluded={o.excluded}>
+                {o.label} — {o.handsets} {o.handsets === 1 ? 'phone' : 'phones'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p id="audience" class="k-muted" style="margin:-6px 0 16px; font-size:14px;"></p>
+
+        <label class="k-field"><span>Message</span>
+          <textarea id="body" rows="4" placeholder="The bus will be about 10 minutes late this morning."></textarea></label>
+
+        <div class="k-label" style="color:var(--k-ink-soft); margin-bottom:8px;">Or start from one of these</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+          {TEMPLATES.map((t) => (
+            <button type="button" class="k-tmpl" data-t={t}>{t.length > 38 ? t.slice(0, 36) + '…' : t}</button>
+          ))}
+        </div>
+
+        <p id="meter" class="k-muted" style="margin:0 0 4px; font-size:14px;"></p>
+        <p id="cost" class="k-muted" style="margin:0 0 16px; font-size:14px;"></p>
+
+        <button id="send" class="k-btn" type="button">Send</button>
+        <p id="result" style="margin:14px 0 0;"></p>
+      </div>
+    </>
+  )}
+</KidsLayout>
+
+<style>
+  .k-field { display:block; margin-bottom:14px; }
+  .k-field > span { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--k-ink-soft); margin-bottom:5px; }
+  .k-field select, .k-field textarea { width:100%; padding:10px 12px; font:inherit; font-size:16px;
+    color:var(--k-ink); border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:11px 20px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-btn[disabled] { opacity:.5; cursor:default; }
+  .k-tmpl { font:inherit; font-size:13px; padding:7px 11px; cursor:pointer; text-align:left;
+            border:1px solid rgba(13,27,69,.2); border-radius:999px;
+            background:rgba(13,27,69,.04); color:var(--k-ink); }
+  .k-tmpl:hover { border-color:var(--k-orange); }
+</style>
+
+<script is:inline define:vars={{ costPerSegment: COST_PER_SEGMENT_USD }}>
+  (function () {
+    var route = document.getElementById('route');
+    if (!route) return;                     // no permission, nothing to wire
+    var body = document.getElementById('body');
+    var meter = document.getElementById('meter');
+    var cost = document.getElementById('cost');
+    var audience = document.getElementById('audience');
+    var send = document.getElementById('send');
+    var result = document.getElementById('result');
+
+    function opt() { return route.options[route.selectedIndex]; }
+    function handsets() { return Number(opt().getAttribute('data-handsets') || 0); }
+    function excluded() { return Number(opt().getAttribute('data-excluded') || 0); }
+
+    /* GSM-7 vs UCS-2. A curly apostrophe pasted from Notes cuts a segment from
+       160 characters to 70 and triples the cost — the trap the birthday message
+       documents. Same rule as the main compose meter. */
+    var GSM = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+            + "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+    var GSM_EXT = "^{}\\[~]|€";
+    function segmentsFor(t) {
+      var gsm = true, len = 0;
+      for (var i = 0; i < t.length; i++) {
+        var c = t[i];
+        if (GSM.indexOf(c) !== -1) len += 1;
+        else if (GSM_EXT.indexOf(c) !== -1) len += 2;
+        else { gsm = false; break; }
+      }
+      if (!gsm) return { gsm: false, segments: t.length <= 70 ? 1 : Math.ceil(t.length / 67) };
+      return { gsm: true, segments: len <= 160 ? 1 : Math.ceil(len / 153) };
+    }
+
+    function refresh() {
+      var n = handsets(), ex = excluded();
+      audience.textContent = n === 0
+        ? 'Nobody on this route can be texted.'
+        : n + (n === 1 ? ' phone' : ' phones')
+          + (ex ? ' · ' + ex + ' left out (no number, or not opted in)' : '');
+
+      var t = body.value;
+      var info = segmentsFor(t);
+      meter.textContent = t.length
+        ? t.length + ' characters · ' + info.segments + ' segment' + (info.segments === 1 ? '' : 's')
+          + (info.gsm ? '' : ' · special characters make each one shorter')
+        : '';
+      var total = info.segments * n;
+      cost.textContent = (t.length && n)
+        ? total + ' segments · about $' + (total * costPerSegment).toFixed(2)
+        : '';
+      // Nothing to confirm when there is nobody to send to.
+      send.disabled = !t.trim() || n === 0;
+    }
+
+    route.addEventListener('change', refresh);
+    body.addEventListener('input', refresh);
+    document.querySelectorAll('.k-tmpl').forEach(function (b) {
+      b.addEventListener('click', function () {
+        body.value = b.getAttribute('data-t');
+        body.focus();
+        refresh();
+      });
+    });
+
+    send.addEventListener('click', function () {
+      var n = handsets();
+      var label = opt().textContent.split('—')[0].trim();
+      /* The confirmation states the REAL number for the CHOSEN route. The
+         whole point of computing counts per option. */
+      if (!confirm('Send this to ' + n + (n === 1 ? ' phone' : ' phones') + ' on ' + label + '?')) return;
+
+      send.disabled = true;
+      result.textContent = 'Sending…';
+      var payload = { text: body.value, routeId: opt().value === '' ? null : Number(opt().value) };
+
+      function go(offset, tally) {
+        return fetch('/kids/send', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: payload.text, routeId: payload.routeId, offset: offset }),
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { result.textContent = res.d.error || 'That did not send.'; send.disabled = false; return; }
+            tally.sent += res.d.sent; tally.failed += res.d.failed;
+            // Keep going until the slices are exhausted — the Worker can only
+            // make so many outbound requests per incoming one.
+            if (res.d.remaining > 0) return go(offset + res.d.sent + res.d.failed, tally);
+            result.textContent = 'Sent to ' + tally.sent + (tally.sent === 1 ? ' phone' : ' phones')
+              + (tally.failed ? ', ' + tally.failed + ' failed' : '') + '.';
+            body.value = '';
+            refresh();
+          });
+      }
+      go(0, { sent: 0, failed: 0 }).catch(function () {
+        result.textContent = 'That did not send.';
+        send.disabled = false;
+      });
+    });
+
+    refresh();
+  })();
+</script>

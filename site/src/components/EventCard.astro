@@ -1,0 +1,97 @@
+---
+import type { ChurchEvent } from '../lib/ical';
+import { eventWhen, eventDateBlock } from '../lib/format';
+import { MINISTRY_TAG_LABELS, ministryHref, type MinistryTag } from '../lib/ministry-tags';
+
+interface Props {
+  event: ChurchEvent;
+  /** The Events page uses a wider row; the homepage strip uses the compact card. */
+  variant?: 'card' | 'row';
+  /**
+   * Drop one ministry's chip. Used when the card already sits under that
+   * ministry's own heading, where its chip is circular — but any OTHER
+   * ministry's chip still earns its place, because it is how you learn the
+   * event is shared (a joint [Kids Ministry]/[Youth Ministry] festival, say).
+   */
+  omitMinistry?: MinistryTag;
+}
+const { event, variant = 'card', omitMinistry } = Astro.props;
+const ministries = event.ministries.filter((m) => m !== omitMinistry);
+
+// All date/time wording comes from format.ts so the multi-day and timezone
+// rules are applied identically everywhere.
+const { month, day, isRange } = eventDateBlock(event);
+const when = eventWhen(event);
+
+// Apple Calendar can't express "7pm nightly" — that detail lives in the
+// event's Notes. Shown on the Events page, where there's room for it.
+const notes = event.description?.trim();
+---
+<article class:list={['ev', variant === 'row' && 'ev--row', 'reveal']}>
+  <div class="ev__date">
+    <span class="ev__mon">{month}</span>
+    <span class:list={['ev__day', isRange && 'ev__day--range']}>{day}</span>
+  </div>
+  <div class="ev__body">
+    <p class="ev__when">{when}</p>
+    <h3 class="serif ev__title">{event.title}</h3>
+    {event.location && <p class="ev__where">{event.location}</p>}
+    {/* Shown in BOTH variants. On a multi-day event the notes carry the real
+        schedule and eventWhen() drops the derived start time, so hiding them
+        on the compact card would leave it with no timing at all. */}
+    {notes && <p class="ev__desc">{notes}</p>}
+    {/* From #kids-style tags in the event's Notes. The tag itself is already
+        stripped out of `notes` above, so this is the only place it surfaces. */}
+    {ministries.length > 0 && (
+      <p class="ev__mins">
+        {ministries.map((m) => (
+          <a href={ministryHref(m)} class="ev__min" data-ministry={m}>{MINISTRY_TAG_LABELS[m]}</a>
+        ))}
+      </p>
+    )}
+    {event.url && <a href={event.url} class="ev__link">More info →</a>}
+  </div>
+</article>
+
+<style>
+  .ev { display: flex; gap: 20px; padding: 22px 0; border-top: 1px solid var(--hair); }
+  .ev__date { flex: 0 0 62px; text-align: center; padding-top: 2px; }
+  .ev__mon { display: block; font-size: 11px; font-weight: 700; letter-spacing: .18em; color: var(--red); }
+  .ev__day { display: block; font-family: var(--font-display); font-size: 38px; line-height: 1; margin-top: 2px; }
+  /* "22–27" is roughly twice as wide as "22" — shrink it so a multi-day span
+     still fits the fixed date column instead of shoving the title across */
+  .ev__day--range { font-size: 24px; letter-spacing: -.01em; }
+  .ev__when { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .12em;
+              text-transform: uppercase; color: var(--ink-soft); }
+  .ev__title { margin: 0; font-size: 22px; line-height: 1.22; }
+  .ev__where { margin: 6px 0 0; font-size: 15px; color: var(--ink-soft); }
+  .ev__desc { margin: 8px 0 0; font-size: 14px; line-height: 1.6; color: var(--ink-soft); max-width: 62ch; }
+  .ev--row .ev__desc { margin-top: 10px; font-size: 15px; line-height: 1.7; }
+  .ev__link { display: inline-block; margin-top: 12px; font-size: 14px; font-weight: 700; color: var(--red); }
+
+  /* The ministry's own colour, same restraint as on the Ministries page: it
+     appears as a thin edge, never as a fill behind text. */
+  .ev__mins { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+  .ev__min { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+             color: var(--ink-soft); padding: 5px 11px 4px; border-radius: 999px;
+             border: 1px solid var(--hair); border-bottom-width: 3px;
+             border-bottom-color: var(--ministry-accent, var(--red)); }
+  .ev__min:hover { color: var(--ink); border-color: var(--hair); border-bottom-color: var(--ministry-accent, var(--red)); }
+  /* --ministry-accent comes from the global [data-ministry] rules in
+     tokens.css, so the chip needs no per-ministry CSS of its own. */
+
+  /* the Events page row: bigger date, more air */
+  .ev--row { gap: 40px; padding: 34px 0; }
+  .ev--row .ev__date { flex-basis: 96px; }
+  .ev--row .ev__day { font-size: 58px; }
+  .ev--row .ev__day--range { font-size: 34px; }
+  .ev--row .ev__title { font-size: clamp(26px,3vw,36px); }
+
+  @media (max-width: 640px) {
+    .ev, .ev--row { gap: 18px; padding: 22px 0; }
+    .ev__date, .ev--row .ev__date { flex-basis: 54px; }
+    .ev__day, .ev--row .ev__day { font-size: 34px; }
+    .ev__day--range, .ev--row .ev__day--range { font-size: 21px; }
+    .ev--row .ev__title { font-size: 22px; }
+  }
+</style>

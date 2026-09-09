@@ -1,0 +1,121 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import { STAFF_PHOTOS } from '../../lib/staff-assets';
+
+const staff = (await getCollection('staff')).sort((a, b) => a.data.order - b.data.order);
+const rendered = await Promise.all(staff.map((s) => s.render()));
+---
+<BaseLayout
+  title="Staff & Leadership"
+  description="The people who serve [Your Church Name] week to week."
+>
+  <section class="phead">
+    <div class="phead__body">
+      <a href="/about" class="phead__back load d1">← About</a>
+      <p class="label load d1 phead__eyebrow">Who We Are</p>
+      <h1 class="serif load d2">Staff &amp; Leadership</h1>
+      <p class="phead__lede load d3">
+        The people who serve here week to week. Any of them are glad to talk on a Sunday.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap grid-wrap">
+    <div class="people">
+      {staff.map((person, i) => {
+        const { Content } = rendered[i];
+        const photo = person.data.photo ? STAFF_PHOTOS[person.data.photo] : undefined;
+        return (
+          <article class="person reveal">
+            <div class="person__figure">
+            {photo ? (
+              /* Circular crop. `focus` sets how far down the photo the circle
+                 centres — 50% clips the top of the head on a seated portrait. */
+              <div class="person__ring">
+                {/* The first row sits above the fold and is the page's whole
+                    point, so those load eagerly; anything further down stays
+                    lazy so a long staff list doesn't fetch everything at once. */}
+                <Image src={photo} alt={person.data.photoAlt ?? `${person.data.name}, ${person.data.role}`}
+                       widths={[300, 460, 620]} sizes="(max-width: 860px) 60vw, 280px"
+                       loading={i < 3 ? 'eager' : 'lazy'}
+                       style={`object-position: 50% ${person.data.focus}%;`} />
+              </div>
+            ) : (
+              <div class="person__ring person__ring--empty"><span class="label">Photo needed</span></div>
+            )}
+            </div>
+            <div class="person__body">
+              <p class="label person__role">{person.data.role}</p>
+              <h2 class="serif person__name">{person.data.name}</h2>
+              <div class="person__bio"><Content /></div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  </section>
+
+  <section class="wrap cta-wrap">
+    <div class="cta reveal">
+      <div>
+        <h2 class="serif cta__title">Want to talk to someone?</h2>
+        <p class="cta__p">
+          Come on a Sunday and introduce yourself, or send a message and we'll put you
+          in touch with the right person.
+        </p>
+      </div>
+      <a href="/contact" class="btn btn--solid cta__btn">Get in touch</a>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .phead { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .phead__body { position: relative; z-index: 3; padding: 130px var(--pad) 82px; }
+  .phead__back { display: inline-block; font-size: 14px; font-weight: 700;
+                 color: rgba(244,239,231,.7); margin-bottom: 26px; }
+  .phead__back:hover { color: var(--cream); }
+  .phead__eyebrow { color: rgba(244,239,231,.6); margin: 0 0 18px; }
+  .phead h1 { margin: 0; font-size: clamp(42px,5.6vw,80px); line-height: 1; letter-spacing: -.02em; }
+  .phead__lede { margin: 20px 0 0; max-width: 50ch; font-size: 18px; line-height: 1.68; color: rgba(244,239,231,.78); }
+
+  .grid-wrap { padding-block: clamp(56px,7vw,90px) 0; }
+  /* Rows, not an equal-cell grid: bios vary from one line to six paragraphs,
+     and a grid would either crush the long one or strand the short ones in
+     tall empty cells. */
+  .people { display: flex; flex-direction: column; }
+  .person { display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 48px;
+            align-items: start; padding-block: clamp(32px,4vw,48px);
+            border-top: 1px solid var(--hair); }
+  .person:first-child { border-top: 0; padding-top: 0; }
+  .person__figure { position: sticky; top: 110px; }
+  .person__ring { width: 100%; aspect-ratio: 1; margin: 0;
+                  border-radius: 50%; overflow: hidden; background: var(--cream-deep); }
+  .person__ring :global(img) { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .person__ring--empty { display: flex; align-items: center; justify-content: center;
+                         border: 1px dashed rgba(26,21,18,.22); }
+  .person__ring--empty .label { color: rgba(26,21,18,.62); }
+  .person__role { color: var(--red); margin: 0 0 8px; }
+  .person__name { margin: 0 0 14px; font-size: clamp(28px,3.4vw,40px); line-height: 1.06; letter-spacing: -.02em; }
+  .person__bio :global(p) { margin: 0 0 16px; font-size: 17px; line-height: 1.78;
+                            color: var(--ink-soft); max-width: 62ch; }
+  .person__bio :global(p:last-child) { margin-bottom: 0; }
+  .person__bio :global(a) { color: var(--red); text-decoration: underline; text-underline-offset: 3px; }
+
+  .cta-wrap { padding-block: clamp(70px,8vw,110px); }
+  .cta { background: var(--ink); color: var(--cream); border-radius: var(--radius-lg);
+         padding: clamp(40px,5vw,64px); display: flex; align-items: center;
+         justify-content: space-between; gap: 34px; flex-wrap: wrap; }
+  .cta__title { margin: 0 0 10px; font-size: clamp(26px,3.4vw,38px); line-height: 1.14; }
+  .cta__p { margin: 0; font-size: 16px; line-height: 1.7; color: rgba(244,239,231,.72); max-width: 50ch; }
+  .cta__btn { flex-shrink: 0; }
+
+  @media (max-width: 860px) {
+    .phead__body { padding: 108px var(--pad) 50px; }
+    .person { grid-template-columns: 1fr; gap: 22px; justify-items: start; }
+    .person__figure { position: static; width: min(200px, 55%); }
+    .cta__btn { width: 100%; }
+  }
+</style>

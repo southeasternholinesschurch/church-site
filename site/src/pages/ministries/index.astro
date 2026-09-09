@@ -1,0 +1,125 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import { MINISTRY_PHOTOS, MINISTRY_LOGOS, MINISTRY_PHOTO_ALT } from '../../lib/ministry-assets';
+
+/**
+ * An index, not the content itself. Each ministry now has its own page
+ * (`/ministries/<slug>`) carrying the full description and its upcoming
+ * events; this page's job is to show what exists and get you there.
+ */
+const ministries = (await getCollection('ministries')).sort((a, b) => a.data.order - b.data.order);
+---
+<BaseLayout
+  title="Ministries"
+  description="[Kids Ministry], [Youth Ministry], [Ladies Ministry] and [Seniors Ministry] — something for every season of life at [Your Church Name]."
+>
+  <!-- ============ HEADER ============ -->
+  <section class="phead">
+    <div class="phead__body">
+      <p class="label load d1 phead__eyebrow">Get Involved</p>
+      <h1 class="serif load d2">Ministries</h1>
+      <p class="phead__lede load d3">
+        Something for every season of life — from four-year-olds to the people who
+        have been here longest.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ GRID ============ -->
+  <section class="wrap grid-wrap">
+    <div class="grid">
+      {ministries.map((m) => {
+        const photo = MINISTRY_PHOTOS[m.data.accent];
+        const logo = MINISTRY_LOGOS[m.data.accent];  // presence only — see below
+        return (
+          <a href={`/ministries/${m.slug}`} class="card reveal" data-ministry={m.data.accent}>
+            <div class="card__media">
+              {photo ? (
+                <Image src={photo} alt={MINISTRY_PHOTO_ALT[m.data.accent] ?? ''}
+                       widths={[600, 900, 1400]} sizes="(max-width: 860px) 100vw, 46vw" />
+              ) : (
+                /* No photo yet. A tinted panel in the ministry's own colour reads
+                   as a design choice; "Photo needed" reads as a broken page. The
+                   outstanding photo is tracked in docs/README.md, not on the site. */
+                <div class="card__placeholder" aria-hidden="true"></div>
+              )}
+            </div>
+            <div class="card__body">
+              {/* No logo here on purpose. The marks are pale pastel artwork —
+                  low contrast on cream — and the two differ wildly in shape
+                  ([Kids Ministry] portrait, [Youth Ministry] wide), so no single size suits both.
+                  They appear on each ministry's own dark hero, where they read
+                  properly. The name in serif carries this card. */}
+              <h2 class="serif card__name">{m.data.name}</h2>
+              {m.data.ageRange && <span class="card__age">{m.data.ageRange}</span>}
+              <p class="card__sum">{m.data.summary}</p>
+              <span class="card__more">Learn more →</span>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section class="wrap cta-wrap">
+    <div class="cta reveal">
+      <div>
+        <h2 class="serif cta__title">Not sure where you'd fit?</h2>
+        <p class="cta__p">
+          Come on a Sunday and ask anyone. Nobody here expects you to have picked a
+          group before you've met people.
+        </p>
+      </div>
+      <a href="/about" class="btn btn--solid cta__btn">Plan your visit</a>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .phead { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .phead__body { position: relative; z-index: 3; padding: 150px var(--pad) 86px; }
+  .phead__eyebrow { color: rgba(244,239,231,.6); margin: 0 0 20px; }
+  .phead h1 { margin: 0; font-size: clamp(46px,6vw,88px); line-height: 1; letter-spacing: -.02em; }
+  .phead__lede { margin: 22px 0 0; max-width: 52ch; font-size: 18px; line-height: 1.68; color: rgba(244,239,231,.78); }
+
+  .grid-wrap { padding-block: clamp(56px,7vw,90px) 0; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 40px 34px; }
+
+  .card { display: flex; flex-direction: column; color: inherit; }
+  .card__media { position: relative; aspect-ratio: 4/3; overflow: clip;
+                 border-radius: var(--radius); background: var(--cream-deep); }
+  .card__media :global(img) { width: 100%; height: 100%; object-fit: cover;
+                              transition: transform .7s var(--ease); }
+  .card:hover .card__media :global(img) { transform: scale(1.04); }
+  /* the ministry's color appears ONLY as this edge — never the page palette */
+  .card__media::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 5px;
+                        background: var(--ministry-accent, var(--red)); }
+  .card__placeholder { position: absolute; inset: 0;
+                       background: color-mix(in srgb, var(--ministry-accent, var(--red)) 18%, var(--cream-deep)); }
+
+  .card__body { padding-top: 20px; }
+  .card__name { margin: 0 0 10px; font-size: clamp(28px,3.4vw,40px); line-height: 1.06; letter-spacing: -.02em; }
+  .card__age { display: inline-block; margin-bottom: 12px; font-size: 11px; font-weight: 700;
+               letter-spacing: .28em; text-transform: uppercase; color: var(--ink-soft);
+               padding-bottom: 6px; border-bottom: 3px solid var(--ministry-accent, var(--red)); }
+  .card__sum { margin: 8px 0 0; font-size: 17px; line-height: 1.72; color: var(--ink-soft); max-width: 46ch; }
+  .card__more { display: inline-block; margin-top: 16px; font-size: 14px; font-weight: 700; color: var(--red); }
+  .card:hover .card__more { text-decoration: underline; text-underline-offset: 3px; }
+
+  .cta-wrap { padding-block: clamp(70px,8vw,110px); }
+  .cta { background: var(--ink); color: var(--cream); border-radius: var(--radius-lg);
+         padding: clamp(40px,5vw,64px); display: flex; align-items: center;
+         justify-content: space-between; gap: 34px; flex-wrap: wrap; }
+  .cta__title { margin: 0 0 10px; font-size: clamp(26px,3.4vw,38px); line-height: 1.14; }
+  .cta__p { margin: 0; font-size: 16px; line-height: 1.7; color: rgba(244,239,231,.72); max-width: 50ch; }
+  .cta__btn { flex-shrink: 0; }
+
+  @media (max-width: 860px) {
+    .phead__body { padding: 110px var(--pad) 52px; }
+    .grid { grid-template-columns: 1fr; gap: 34px; }
+    .cta__btn { width: 100%; }
+  }
+</style>

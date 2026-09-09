@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Static assets + ONE dynamic route.
+  //
+  // The site is a plain `astro build` producing static HTML in dist/ — that
+  // has not changed, and `output: 'static'` in astro.config.mjs is what keeps
+  // it that way. What "main" adds is a hand-written Worker (worker/index.ts)
+  // that answers /api/live-status and hands everything else to the ASSETS
+  // binding.
+  //
+  // This is NOT the Astro Cloudflare adapter, and must not become it. That
+  // adapter turns the whole site into a server-rendered Worker, which breaks
+  // the build: node-ical uses Node's `fs` and sharp is a native binary, both
+  // build-time-only tools that cannot run in the Worker runtime. If you ever
+  // see `astro add cloudflare` proposed, the answer is no — the build command
+  // stays `astro build` and this Worker stays hand-written.
+  //
+  // Assets are matched BEFORE the Worker runs, so every real file in dist/ is
+  // served without the Worker waking up at all; only /api/* and paths with no
+  // file behind them reach it. See docs/README.md → "Deploying".
+  // MUST match the Worker that is actually deployed — check it against the
+  // *.workers.dev hostname, not against what looks tidy. Workers Builds names
+  // the Worker after the Cloudflare project (which took its name from the
+  // repo) and ignores this field entirely, so a mismatch here does not break
+  // deploys and gives no sign anything is wrong. What it breaks is the CLI:
+  // `wrangler secret put` and `wrangler deploy` both target THIS name, so a
+  // stale value writes secrets to a Worker that serves no traffic and reports
+  // success. That cost an afternoon on 2026-08-31 — the livestream API key
+  // went to the wrong Worker and the endpoint kept saying it was unconfigured.
+  "name": "southeaster-holiness-church-site-1",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-28",
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS"
+  },
+  // The real domain. `custom_domain` makes Cloudflare create and own the DNS
+  // records for these names, which is why the zone deliberately has no A
+  // record for the apex or www — a hand-made one would collide with this.
+  //
+  // www is attached as well as the apex so the name resolves at all. It is NOT
+  // redirected in the Worker — assets are matched before the Worker runs (see
+  // the note above), so a page request on www never reaches Worker code. The
+  // canonical tag in BaseLayout is what keeps the two hostnames from reading
+  // as two copies of the site; a Cloudflare Redirect Rule would do a real 301
+  // if that is ever wanted, because rules run at the edge ahead of assets.
+  "routes": [
+    { "pattern": "example.org", "custom_domain": true },
+    { "pattern": "www.example.org", "custom_domain": true }
+  ]
+}

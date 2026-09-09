@@ -1,0 +1,10 @@
+# Homepage banner — "banners and seasonal graphics" per build brief §1.
+# Edit via Decap CMS ("Homepage Banner") or directly here.
+# Turn `active` on and upload an image whenever there's something
+# seasonal to announce (VBS, Christmas Eve, a sermon series launch,
+# whatever) — turn it back off when it's over.
+active: false
+image: ""
+headline: ""
+linkUrl: ""
+linkLabel: ""

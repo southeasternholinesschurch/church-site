@@ -1,0 +1,301 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { getDb, schema } from '../../db';
+import { asc, eq } from 'drizzle-orm';
+import { kindLabel, formatDate } from '../../lib/services';
+import { tally } from '../../lib/tally';
+import { demoOn, demoPerson } from '../../lib/demo';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/attendance', 302);
+
+const svc = (await db.select().from(schema.services).where(eq(schema.services.id, id)).limit(1))[0];
+if (!svc) return new Response('Not found', { status: 404 });
+
+const demo = demoOn(Astro.url, user);
+const people = await db.select({
+  id: schema.people.id, firstName: schema.people.firstName, lastName: schema.people.lastName,
+  adultChild: schema.people.adultChild,
+}).from(schema.people).where(eq(schema.people.archived, false))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName))
+  .then((rs) => rs.map((r) => demoPerson(r, r.id, demo)));
+
+const presentRows = await db.select({ personId: schema.attendance.personId })
+  .from(schema.attendance).where(eq(schema.attendance.serviceId, id));
+const present = new Set(presentRows.map((r) => r.personId));
+
+const visitors = await db.select().from(schema.visitors).where(eq(schema.visitors.serviceId, id));
+
+const counts = tally(people.filter((p) => present.has(p.id)), visitors);
+---
+<AppLayout title={`${kindLabel(svc.kind)} · ${svc.date}`} user={user}>
+  {demo && <p class="demo-flag">Demo mode — the people shown are invented. Counts and dates are real.</p>}
+  <div class="chead">
+    <a href="/attendance" class="chead__back">← All services</a>
+    <h1 class="chead__h">{kindLabel(svc.kind)}</h1>
+    <p class="chead__d">{formatDate(svc.date)}</p>
+  </div>
+
+  <div class="tally" id="tally" data-service={id}>
+    <div><span class="tally__n" data-t="total">{counts.total}</span><span class="tally__l">Total</span></div>
+    <div><span class="tally__n" data-t="adults">{counts.adults}</span><span class="tally__l">Adults</span></div>
+    <div><span class="tally__n" data-t="children">{counts.children}</span><span class="tally__l">Children</span></div>
+    <div><span class="tally__n" data-t="visitors">{counts.visitors}</span><span class="tally__l">Visitors</span></div>
+  </div>
+
+  <input id="search" type="search" placeholder="Search for a name…" autocomplete="off"
+         aria-label="Search the list"
+         style="width:100%; min-height:52px; font-size:17px; padding:10px 14px; margin-bottom:12px;
+                border:1px solid var(--hair); border-radius:8px;" />
+
+  <div class="acts">
+    <button class="btn btn--ghost acts__b" type="button" id="add-visitor-btn">+ Visitor</button>
+    <button class="btn btn--ghost acts__b" type="button" id="add-person-btn">+ New person</button>
+    {/* Archiving is rare and destructive-looking; check-in is constant tapping.
+        Keeping the two apart is the whole point of this toggle — the × buttons
+        do not exist in the DOM's default state at all. */}
+    <button class="acts__manage" type="button" id="manage-btn" aria-pressed="false">Manage list</button>
+  </div>
+
+  <noscript><p class="notice">Check-in needs JavaScript. Everything else in the app works without it.</p></noscript>
+
+  <ul class="roll" id="roll">
+    {people.map((p) => (
+      <li class="roll__row" data-id={p.id} data-name={`${p.firstName} ${p.lastName}`.toLowerCase()}
+          data-kind={p.adultChild}>
+        <button type="button" class="roll__hit" aria-pressed={present.has(p.id) ? 'true' : 'false'}>
+          <span class="roll__tick" aria-hidden="true"></span>
+          <span class="roll__name">{p.lastName}, {p.firstName}</span>
+          {p.adultChild !== 'adult' && <span class="chip">{p.adultChild === 'child' ? 'child' : 'unconfirmed'}</span>}
+        </button>
+        <button type="button" class="roll__x" title="Archive this person"
+                aria-label={`Archive ${p.firstName} ${p.lastName}`} tabindex="-1">Archive</button>
+      </li>
+    ))}
+  </ul>
+
+  {/* Always in the DOM, hidden when empty, so a tap can append into it without
+      re-rendering the page underneath the volunteer. */}
+  <div class="card" id="visitor-card" style={`margin-top:22px;${visitors.length ? '' : 'display:none;'}`}>
+    <h2>Visitors today</h2>
+    <ul class="vis" id="vis-list">
+      {visitors.map((v, i) => (
+        <li class="vis__row" data-vid={v.id}>
+          <span>Visitor {i + 1}{v.adultChild !== 'unknown' ? ` · ${v.adultChild}` : ''}{v.firstTime ? ' · first time' : ''}{v.name ? ` · ${v.name}` : ''}</span>
+          <button type="button" class="vis__x" aria-label="Remove this visitor">×</button>
+        </li>
+      ))}
+    </ul>
+  </div>
+</AppLayout>
+
+<style>
+  /* Sticky so the number stays visible while scrolling a long roll — the whole
+     point is being able to read the total out without hunting for it. */
+  .tally { position: sticky; top: 0; z-index: 5; display: grid;
+           grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--hair);
+           border: 1px solid var(--hair); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .tally > div { background: #fff; padding: 12px 8px; text-align: center; }
+  .tally__n { display: block; font-size: 30px; font-weight: 700; line-height: 1; }
+  .tally__l { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+              color: var(--ink-soft); margin-top: 5px; }
+
+  .roll { list-style: none; margin: 0; padding: 0; border: 1px solid var(--hair);
+          border-radius: 10px; overflow: hidden; background: #fff; }
+  .roll__row { display: flex; align-items: stretch; border-bottom: 1px solid var(--hair); }
+  .roll__row:last-child { border-bottom: 0; }
+  .roll__row[hidden] { display: none; }
+  /* 56px, not 44: this is used standing up, one-handed, in a doorway. */
+  .roll__hit { flex: 1; display: flex; align-items: center; gap: 14px; min-height: 56px;
+               padding: 8px 14px; background: none; border: 0; font: inherit; font-size: 17px;
+               text-align: left; cursor: pointer; color: var(--ink); }
+  .roll__hit:hover { background: var(--cream-deep); }
+  .roll__tick { flex: none; width: 26px; height: 26px; border-radius: 6px;
+                border: 2px solid var(--hair); position: relative; }
+  .roll__hit[aria-pressed="true"] { background: #eaf3ec; }
+  .roll__hit[aria-pressed="true"] .roll__tick { background: var(--ok); border-color: var(--ok); }
+  .roll__hit[aria-pressed="true"] .roll__tick::after {
+    content: ""; position: absolute; left: 7px; top: 3px; width: 6px; height: 12px;
+    border: solid #fff; border-width: 0 2.5px 2.5px 0; transform: rotate(45deg);
+  }
+  .roll__hit[aria-pressed="true"] .roll__name { font-weight: 600; }
+  .roll__name { flex: 1; }
+  /* Hidden by default — not merely small. During check-in there is no archive
+     control anywhere near the names being tapped. */
+  .roll__x { display: none; flex: none; border: 0; border-left: 1px solid var(--hair);
+             background: none; color: var(--red); cursor: pointer;
+             font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+             text-transform: uppercase; padding: 0 14px; }
+  .roll__x:hover { background: #f7e9e9; }
+  .roll--manage .roll__x { display: block; }
+  /* In manage mode the ticks stop responding, so a tap meant for the list
+     cannot silently mark someone present instead. */
+  .roll--manage .roll__hit { pointer-events: none; opacity: .72; }
+  .roll--manage .roll__tick { visibility: hidden; }
+
+  .chead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 14px; }
+  .chead__back { flex: 0 0 100%; font-size: 14px; }
+  .chead__h { margin: 2px 0 0; }
+  .chead__d { margin: 0; color: var(--ink-soft); }
+
+  .acts { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+  .acts__manage { margin-left: auto; background: none; border: 0; font: inherit; font-size: 14px;
+                  color: var(--ink-soft); text-decoration: underline; text-underline-offset: 3px;
+                  cursor: pointer; padding: 10px 4px; }
+  .acts__manage[aria-pressed="true"] { color: var(--red); font-weight: 700; }
+
+  /* --- phone: the layout that actually matters here --- */
+  @media (max-width: 700px) {
+    .chead__h { font-size: 22px; }
+    .chead__d { font-size: 14px; }
+    .tally { margin-bottom: 12px; }
+    .tally > div { padding: 8px 4px; }
+    .tally__n { font-size: 24px; }
+    .tally__l { font-size: 9px; letter-spacing: .1em; margin-top: 3px; }
+    #search { min-height: 46px !important; font-size: 16px !important; margin-bottom: 10px !important; }
+    .acts__b { min-height: 40px; padding: 8px 14px; font-size: 15px; }
+    /* Names get the width the × was taking, which is what was wrapping them. */
+    .roll__hit { gap: 12px; padding: 6px 12px; }
+    .roll__name { line-height: 1.25; }
+  }
+
+  .vis { list-style: none; margin: 0; padding: 0; }
+  .vis__row { display: flex; align-items: center; justify-content: space-between;
+              gap: 12px; min-height: 44px; border-bottom: 1px solid var(--hair); }
+  .vis__row:last-child { border-bottom: 0; }
+  .vis__x { width: 40px; height: 40px; border: 0; background: none; color: var(--ink-soft);
+            font-size: 20px; cursor: pointer; border-radius: 6px; }
+  .vis__x:hover { background: #f7e9e9; color: var(--red); }
+</style>
+
+<script>
+  const roll = document.getElementById('roll')!;
+  const tally = document.getElementById('tally')!;
+  const serviceId = Number(tally.dataset.service);
+  const search = document.getElementById('search') as HTMLInputElement;
+  const manageBtn = document.getElementById('manage-btn')!;
+
+  manageBtn.addEventListener('click', () => {
+    const on = roll.classList.toggle('roll--manage');
+    manageBtn.setAttribute('aria-pressed', String(on));
+    manageBtn.textContent = on ? 'Done managing' : 'Manage list';
+  });
+
+  interface CheckinResult {
+    present?: boolean; total?: number; adults?: number;
+    children?: number; visitors?: number; error?: string;
+    visitor?: { id: number };
+  }
+
+  const post = async (body: Record<string, unknown>): Promise<CheckinResult | null> => {
+    const r = await fetch('/api/checkin', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ serviceId, ...body }),
+    });
+    const data = (await r.json().catch(() => ({}))) as CheckinResult;
+    if (!r.ok) { alert(data.error ?? 'That did not save. Try again.'); return null; }
+    return data;
+  };
+
+  const paint = (c: CheckinResult | null) => {
+    if (!c) return;
+    for (const k of ['total', 'adults', 'children', 'visitors']) {
+      const el = tally.querySelector(`[data-t="${k}"]`);
+      const v = (c as Record<string, unknown>)[k];
+      if (el && typeof v === 'number') el.textContent = String(v);
+    }
+  };
+
+  roll.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    const row = target.closest('.roll__row') as HTMLElement | null;
+    if (!row) return;
+    const personId = Number(row.dataset.id);
+
+    if (target.closest('.roll__x')) {
+      const name = row.querySelector('.roll__name')!.textContent;
+      // Archived, not deleted — so this is a recoverable mistake, and the
+      // wording says so rather than implying something final.
+      if (!confirm(`Archive ${name}?\n\nThey come off the check-in list and out of the member directory. Past attendance is kept, and this can be undone.`)) return;
+      const res = await post({ action: 'archive-person', personId });
+      if (res) { row.remove(); paint(res); }
+      return;
+    }
+
+    const hit = target.closest('.roll__hit') as HTMLButtonElement | null;
+    if (!hit) return;
+    // Optimistic: the tick flips now, because a volunteer tapping down a row of
+    // forty should never be waiting on a round trip. Reverted if the save fails.
+    const was = hit.getAttribute('aria-pressed') === 'true';
+    hit.setAttribute('aria-pressed', was ? 'false' : 'true');
+    const res = await post({ action: 'toggle', personId });
+    if (!res) hit.setAttribute('aria-pressed', was ? 'true' : 'false');
+    else { hit.setAttribute('aria-pressed', res.present ? 'true' : 'false'); paint(res); }
+  });
+
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    for (const row of Array.from(roll.children) as HTMLElement[]) {
+      (row as HTMLElement).hidden = q ? !row.dataset.name!.includes(q) : false;
+    }
+  });
+
+  const visCard = document.getElementById('visitor-card')!;
+  const visList = document.getElementById('vis-list')!;
+
+  const renumber = () => {
+    [...visList.children].forEach((li, i) => {
+      li.querySelector('span')!.textContent = `Visitor ${i + 1}`;
+    });
+    visCard.style.display = visList.children.length ? '' : 'none';
+  };
+
+  // One tap adds a visitor. No name, no adult/child, no first-time, no reload —
+  // a volunteer counting heads at a door should be able to hit this repeatedly
+  // without the page moving under them.
+  document.getElementById('add-visitor-btn')!.addEventListener('click', async () => {
+    const res = await post({ action: 'add-visitor' });
+    if (!res) return;
+    paint(res);
+    const li = document.createElement('li');
+    li.className = 'vis__row';
+    if (res.visitor?.id) li.dataset.vid = String(res.visitor.id);
+    li.innerHTML = '<span></span><button type="button" class="vis__x" aria-label="Remove this visitor">×</button>';
+    visList.appendChild(li);
+    renumber();
+  });
+
+  // Removal has to be as easy as adding, because one-tap adding guarantees
+  // stray taps. No confirm: a visitor is an anonymous headcount with nothing
+  // hanging off it, and a dialog here is the very friction just removed.
+  visList.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('.vis__x');
+    if (!btn) return;
+    const li = btn.closest('.vis__row') as HTMLElement;
+    const res = await post({ action: 'remove-visitor', visitorId: Number(li.dataset.vid) || undefined });
+    if (!res) return;
+    li.remove();
+    renumber();
+    paint(res);
+  });
+
+  document.getElementById('add-person-btn')!.addEventListener('click', async () => {
+    const firstName = prompt('First name:');
+    if (!firstName) return;
+    const lastName = prompt('Last name:');
+    if (!lastName) return;
+    const child = confirm('Is this a child?\n\nOK = child, Cancel = adult');
+    const res = await post({ action: 'add-person', firstName, lastName, adultChild: child ? 'child' : 'adult' });
+    if (res) location.reload();
+  });
+</script>
+
+<style>
+  /* Unmistakable: a screenshot of invented data mistaken for real data is the
+     one way this feature could do harm. */
+  .demo-flag { background:#fdf0d9; border-left:4px solid #b8860b; color:#5c4405;
+               padding:10px 14px; margin:0 0 18px; font-size:14px; border-radius:3px; }
+</style>

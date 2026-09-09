@@ -1,0 +1,129 @@
+/* Shares the public site's palette and type so the two do not feel like
+   different products, but the app is a TOOL: denser, plainer, and optimised
+   for someone standing in a doorway on a Sunday morning with one hand free. */
+:root {
+  --ink: #1a1512;
+  --ink-soft: #4a4038;
+  --cream: #f4efe7;
+  --cream-deep: #ece4d7;
+  --red: #b01818;
+  --red-deep: #8c1212;
+  --hair: rgba(26, 21, 18, 0.14);
+  --ok: #1f6b3a;
+  --radius: 6px;
+  --radius-lg: 12px;
+  /* 22px floor, not 18: at 390px the old value left the bar's five links
+     spanning the full width with nothing to breathe against either edge. */
+  --pad: clamp(22px, 4vw, 34px);
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--cream); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--red); }
+h1, h2, h3 { line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 4vw, 34px); }
+h2 { font-size: 21px; }
+
+.wrap { max-width: 1100px; margin-inline: auto; padding-inline: var(--pad); }
+.label { font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+.muted { color: var(--ink-soft); }
+
+/* ---- app bar ---- */
+/* Positioned so a fixed backdrop cannot paint over it. An unpositioned
+   element loses to any positioned one regardless of DOM order, and the
+   dashboard backdrop is exactly that. */
+.bar { position: relative; z-index: 2; background: var(--ink); color: var(--cream); }
+.bar__in { display: flex; align-items: center; gap: 18px; padding: 12px var(--pad);
+           max-width: 1100px; margin-inline: auto; flex-wrap: wrap; }
+
+/* Check-in happens on a phone, standing up, and every pixel of chrome is a
+   name the volunteer cannot see. The bar wrapped to three rows and ate 129px
+   on its own. */
+@media (max-width: 700px) {
+  .bar__in { gap: 10px 14px; padding: 8px var(--pad); }
+  .bar__brand { font-size: 15px; }
+  /* Roomy enough that the row wraps to two comfortable lines instead of five
+     items crammed edge to edge. the pastor said vertical density is not the issue;
+     legibility across the width is. */
+  .bar__nav { gap: 12px 20px; width: 100%; margin-left: 0; }
+  .bar__nav a, .bar__nav button { font-size: 15px !important; }
+  /* The signed-in name is reassurance, not navigation — it can go. */
+  .bar__who { display: none; }
+}
+.bar__brand { font-weight: 700; letter-spacing: .04em; color: var(--cream); text-decoration: none; }
+.bar__nav { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.bar__nav a { color: rgba(244,239,231,.82); text-decoration: none; font-size: 15px; }
+.bar__nav a:hover, .bar__nav a[aria-current="page"] { color: var(--cream); }
+.bar__who { font-size: 13px; color: rgba(244,239,231,.6); }
+
+/* ---- controls: 44px minimum, because these are used one-handed ---- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 10px 20px; border-radius: var(--radius);
+  border: 1px solid var(--ink); background: var(--ink); color: var(--cream);
+  font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.btn:hover { background: #2a2320; }
+.btn--ghost { background: transparent; color: var(--ink); }
+.btn--ghost:hover { background: var(--cream-deep); }
+.btn--danger { background: var(--red); border-color: var(--red); }
+
+.field { display: block; margin-bottom: 16px; }
+.field > span { display: block; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+                text-transform: uppercase; color: var(--ink-soft); margin-bottom: 6px; }
+.field input, .field select, .field textarea {
+  width: 100%; font: inherit; min-height: 44px; padding: 9px 12px;
+  border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; color: var(--ink);
+}
+.field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible {
+  outline: 2px solid var(--red); outline-offset: 2px;
+}
+
+.card { background: #fff; border: 1px solid var(--hair); border-radius: var(--radius-lg); padding: 22px; }
+.notice { border-left: 3px solid var(--red); background: #f7e9e9; color: var(--red-deep);
+          padding: 12px 16px; border-radius: 0 var(--radius) var(--radius) 0; margin: 0 0 20px; }
+.notice--ok { border-color: var(--ok); background: #e8f2eb; color: #16532c; }
+
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+     color: var(--ink-soft); padding: 10px 12px; border-bottom: 2px solid var(--ink); }
+td { padding: 12px; border-bottom: 1px solid var(--hair); }
+tr:hover td { background: var(--cream-deep); }
+
+.chip { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+        text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+        background: var(--cream-deep); color: var(--ink-soft); }
+.chip--warn { background: #fbeee0; color: #8a5316; }
+
+/* --- tables that stop being tables on a phone ---
+   A five-column table cannot fit 360px, and putting it in a horizontal
+   scroller just means half the row is off-screen with nothing to say so. Below
+   700px each row becomes a stacked block with its column name beside the value,
+   so everything is readable at the width of the screen. Add `t-stack` to the
+   table and `data-label` to each cell. */
+@media (max-width: 700px) {
+  .t-stack thead { display: none; }
+  .t-stack, .t-stack tbody, .t-stack tr, .t-stack td { display: block; width: 100%; }
+  .t-stack tr { padding: 12px 4px; border-bottom: 1px solid var(--hair); }
+  .t-stack tr:last-child { border-bottom: 0; }
+  .t-stack tr:hover td { background: none; }
+  .t-stack td { border: 0; padding: 4px 12px; display: flex; gap: 14px;
+                align-items: baseline; justify-content: space-between; }
+  .t-stack td::before {
+    content: attr(data-label); flex: none;
+    font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  /* the first cell is the row's identity — it leads, without a label */
+  .t-stack td:first-child { font-size: 17px; padding-bottom: 6px; }
+  .t-stack td:first-child::before { content: none; }
+  /* a stacked table has nothing left to scroll sideways */
+  .t-wrap { overflow-x: visible !important; }
+}
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                   clip: rect(0 0 0 0); white-space: nowrap; }

@@ -1,0 +1,139 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { getDb, schema } from '../../db';
+import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
+import { smsConfigured, COST_PER_LOOKUP_USD } from '../../lib/sms';
+import { demoOn, demoPerson } from '../../lib/demo';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const configured = smsConfigured(env);
+
+/**
+ * Which numbers can actually receive a text.
+ *
+ * A landline cannot, however opted-in its owner is, and that is the likeliest
+ * meaning of a 30005 failure. Numbers copied from a printed directory are
+ * exactly where landlines hide, because a household line is what people write
+ * on a paper form. Checking is silent — Twilio is asked about the number, not
+ * sent a message — so this can be run without bothering anyone.
+ */
+const demo = demoOn(Astro.url, user);
+const rows = await db.select({
+  id: schema.people.id, firstName: schema.people.firstName, lastName: schema.people.lastName,
+  phone: schema.people.phone, phoneE164: schema.people.phoneE164,
+  lineType: schema.people.phoneLineType, carrier: schema.people.phoneCarrier,
+  checkedAt: schema.people.phoneCheckedAt, consent: schema.people.smsConsent,
+}).from(schema.people)
+  .where(and(eq(schema.people.archived, false),
+             isNotNull(schema.people.phoneE164), ne(schema.people.phoneE164, '')))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName))
+  .then((rs) => rs.map((r) => demoPerson(r, r.id, demo)));
+
+const handsets = new Set(rows.map((r) => r.phoneE164)).size;
+const unchecked = rows.filter((r) => !r.checkedAt).length;
+const bad = rows.filter((r) => r.lineType === 'landline' || r.lineType === 'invalid');
+const cost = (handsets * COST_PER_LOOKUP_USD).toFixed(2);
+
+const badge = (t: string | null) =>
+  t === 'mobile' ? 'ok' : t === 'landline' || t === 'invalid' ? 'bad' : t ? 'warn' : 'none';
+const label = (t: string | null) =>
+  !t ? 'Not checked' : t === 'invalid' ? 'Not a real number' : t;
+---
+<AppLayout title="Check numbers" user={user}>
+  {demo && <p class="demo-flag">Demo mode — the people shown are invented. Counts and dates are real.</p>}
+  <h1>Check numbers</h1>
+  <p class="muted" style="max-width:64ch; margin:-4px 0 20px;">
+    Asks Twilio what each number is, <strong>without texting anyone</strong>.
+    A landline can never receive a text however opted-in its owner is — which is
+    the likeliest reason a message fails with error 30005. Numbers taken from
+    the printed directory are where household landlines tend to hide.
+  </p>
+
+  {!configured && <p class="notice"><strong>Twilio is not configured</strong>, so nothing can be checked yet.</p>}
+
+  <div class="card" style="margin-bottom:20px;">
+    <p style="margin:0 0 12px;">
+      <strong>{rows.length}</strong> people on <strong>{handsets}</strong> numbers.
+      {unchecked > 0
+        ? <> <strong>{unchecked}</strong> not checked yet.</>
+        : <> All checked.</>}
+      {bad.length > 0 && <> <span class="bad-txt">{bad.length} cannot receive texts.</span></>}
+    </p>
+    <button class="btn" id="run" disabled={!configured}>Check all {handsets} numbers</button>
+    <span id="status" class="muted" style="margin-left:12px;"></span>
+    <p class="muted" style="margin:10px 0 0; font-size:14px;">
+      Each number is checked once even when two people share it. Costs roughly
+      <strong>${cost}</strong> in total — about half a cent a number, paid to
+      Twilio. Running it again costs the same again, so there is no need to
+      repeat it unless numbers have changed.
+    </p>
+  </div>
+
+  <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+    <table class="t-stack">
+      <thead><tr><th>Person</th><th>Number</th><th>Type</th><th>Carrier</th><th>Checked</th></tr></thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr data-phone={r.phoneE164}>
+            <td>{r.firstName} {r.lastName}
+              {r.consent !== 'opted_in' && <span class="muted" style="font-size:13px;"> · not opted in</span>}</td>
+            <td data-label="Number">{r.phone ?? r.phoneE164}</td>
+            <td data-label="Type"><span class={`pill pill--${badge(r.lineType)}`}>{label(r.lineType)}</span></td>
+            <td data-label="Carrier" class="muted">{r.carrier ?? '—'}</td>
+            <td data-label="Checked" class="muted" style="font-size:13px;">{r.checkedAt?.slice(0, 10) ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>
+
+<style>
+  .pill { display:inline-block; padding:2px 9px; border-radius:3px; font-size:13px; font-weight:700; }
+  .pill--ok   { background:#e3f1e4; color:#1e5b28; }
+  .pill--bad  { background:#fbe3e1; color:#8c1d18; }
+  .pill--warn { background:#fdf0d9; color:#7a4b04; }
+  .pill--none { background:#eee9df; color:#6b6459; }
+  .bad-txt { color:#b3261e; font-weight:700; }
+</style>
+
+<script>
+  // Walks the endpoint's offsets. One request per 40 numbers, because a
+  // Workers request may make only 50 outbound calls — checking all of them in
+  // one go would silently lose everything past the fiftieth.
+  const run = document.querySelector('#run') as HTMLButtonElement | null;
+  const status = document.querySelector('#status');
+  run?.addEventListener('click', async () => {
+    run.disabled = true;
+    let offset: number | null = 0, done = 0, total = 0;
+    try {
+      while (offset !== null) {
+        const res = await fetch('/api/sms/check-numbers', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ offset }),
+        });
+        const data = await res.json() as any;
+        if (!res.ok || data.error) throw new Error(data.error ?? `Failed (${res.status})`);
+        done += data.checked; total = data.total;
+        if (status) status.textContent = `Checked ${done} of ${total}…`;
+        offset = data.nextOffset;
+      }
+      if (status) status.textContent = `Checked all ${total}. Reloading…`;
+      location.reload();
+    } catch (err) {
+      // Say how far it got: a partial check is still worth keeping, and the
+      // results already written are saved.
+      if (status) status.textContent = `Stopped after ${done} of ${total || '?'} — ${String(err)}`;
+      run.disabled = false;
+    }
+  });
+</script>
+
+<style>
+  /* Unmistakable: a screenshot of invented data mistaken for real data is the
+     one way this feature could do harm. */
+  .demo-flag { background:#fdf0d9; border-left:4px solid #b8860b; color:#5c4405;
+               padding:10px 14px; margin:0 0 18px; font-size:14px; border-radius:3px; }
+</style>

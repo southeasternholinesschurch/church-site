@@ -1,0 +1,180 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../db';
+import { desc, eq } from 'drizzle-orm';
+import { readForm } from '../../lib/form';
+import { randomToken } from '../../lib/auth';
+import { setKioskCookie } from '../../lib/kiosk';
+import { destroySession } from '../../lib/session';
+
+/**
+ * Registering and pairing the check-in tablet.
+ *
+ * Director only. A kiosk is a credential — one that marks children present and
+ * credits them — so handing one out belongs with the other structural acts.
+ *
+ * PAIRING HAPPENS ON THE TABLET ITSELF. A director signs in on it, presses one
+ * button, and that button writes the kiosk cookie AND ends their staff session
+ * in the same request. The tablet is left holding a kiosk credential and
+ * nothing else, which is the state §6.3 requires — no staff session on a device
+ * that lives in a hallway.
+ *
+ * There is no pairing URL and no code to type. A long secret typed on a tablet
+ * in a foyer is shoulder-read, and one put in a URL lands in a history.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+// The middleware has refused a teacher already; checked again because this page
+// hands out a credential and should not lean on something else remembering.
+if (user.role === 'kids') return Astro.redirect('/kids', 302);
+
+let error: string | null = null;
+const back = (m: string) => Astro.redirect(`/kids/kiosk?saved=${m}`, 303);
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? '');
+  const id = Number(form.get('id') ?? 0);
+  const at = nowIso();
+
+  if (act === 'add') {
+    const name = String(form.get('name') ?? '').trim();
+    if (!name) error = 'Give the tablet a name, so you know which one it is.';
+    else {
+      await db.insert(schema.kioskDevices).values({
+        name, token: randomToken(32), active: true,
+        createdBy: user.email, createdAt: at,
+      });
+      return back('added');
+    }
+  }
+
+  if (act === 'revoke' && Number.isInteger(id) && id > 0) {
+    /*
+     * The one that matters when a tablet walks off. readKioskDevice re-reads
+     * `active` on every request, so this stops the device on its very next
+     * scan — not whenever a cookie happens to expire.
+     */
+    await db.update(schema.kioskDevices).set({ active: false, revokedAt: at })
+      .where(eq(schema.kioskDevices.id, id));
+    return back('revoked');
+  }
+
+  if (act === 'pair' && Number.isInteger(id) && id > 0) {
+    const [device] = await db.select().from(schema.kioskDevices)
+      .where(eq(schema.kioskDevices.id, id)).limit(1);
+    if (!device || !device.active) error = 'That device has been revoked.';
+    else {
+      setKioskCookie(Astro.cookies, device.token, Astro.url.protocol === 'https:');
+      /*
+       * And sign the director out, in the same breath.
+       *
+       * This is the point of the whole flow. A tablet that kept a staff session
+       * would be one tap from every child's address — and the person pairing it
+       * is standing in a foyer, about to walk away. Making them remember to
+       * sign out separately is making them remember the security property.
+       */
+      await destroySession(env, Astro.cookies);
+      return Astro.redirect('/kiosk', 303);
+    }
+  }
+}
+
+const devices = await db.select().from(schema.kioskDevices)
+  .orderBy(desc(schema.kioskDevices.active), desc(schema.kioskDevices.id));
+
+const saved = Astro.url.searchParams.get('saved');
+const SAVED: Record<string, string> = {
+  added: 'Tablet registered. Pair it from the tablet itself.',
+  revoked: 'Revoked. That tablet stops working on its next scan.',
+};
+const fmt = (s: string | null) => (s ? s.slice(0, 16).replace('T', ' ') : 'never');
+---
+<KidsLayout title="Check-in tablet" user={user}>
+  <h1>Check-in tablet</h1>
+  <p class="k-muted" style="margin:-4px 0 22px; max-width:640px;">
+    The tablet in the hallway that children scan their card on. It can do one
+    thing — mark a child present and credit their bucks — and it never holds a
+    staff sign-in.
+  </p>
+
+  {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
+  {saved && SAVED[saved] && <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">{SAVED[saved]}</div>}
+
+  {devices.map((d) => (
+    <div class="k-card" style="margin-bottom:14px;" class:list={[!d.active && 'is-off']}>
+      <div style="display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <p style="margin:0 0 4px; font-size:18px; font-weight:700;">{d.name}</p>
+          <p class="k-muted" style="margin:0; font-size:14px;">
+            {d.active ? `Last scan: ${fmt(d.lastSeenAt)}` : `Revoked ${fmt(d.revokedAt)}`}
+          </p>
+        </div>
+        {d.active && (
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <form method="POST" style="margin:0;">
+              <input type="hidden" name="action" value="pair" />
+              <input type="hidden" name="id" value={d.id} />
+              <button class="k-btn" type="submit"
+                      onclick="return confirm('Turn THIS device into the check-in kiosk? You will be signed out of the staff app on it.')">
+                Pair this device</button>
+            </form>
+            <form method="POST" style="margin:0;">
+              <input type="hidden" name="action" value="revoke" />
+              <input type="hidden" name="id" value={d.id} />
+              <button class="k-btn k-btn--quiet" type="submit"
+                      onclick="return confirm('Revoke it? Check-in stops working on that tablet immediately.')">
+                Revoke</button>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
+  ))}
+
+  {devices.length === 0 && (
+    <div class="k-card" style="margin-bottom:14px;">
+      <p class="k-muted" style="margin:0;">No tablet registered yet.</p>
+    </div>
+  )}
+
+  <div class="k-card" style="margin-bottom:18px; max-width:520px;">
+    <h2 style="margin-top:0;">Register a tablet</h2>
+    <form method="POST">
+      <input type="hidden" name="action" value="add" />
+      <label class="k-field"><span>Name</span>
+        <input name="name" required placeholder="Foyer iPad" autocomplete="off" /></label>
+      <button class="k-btn" type="submit">Register</button>
+    </form>
+  </div>
+
+  <div class="k-card" style="max-width:640px;">
+    <h2 style="margin-top:0;">How to set it up</h2>
+    <ol style="margin:0; padding-left:20px; line-height:1.7;">
+      <li>Register the tablet above, giving it a name.</li>
+      <li><strong>On the tablet</strong>, sign in to this app as yourself and come back to this page.</li>
+      <li>Press <strong>Pair this device</strong>. You will be signed out on that tablet, and it will
+        show the check-in screen from then on.</li>
+      <li>Leave it on that screen. It stays paired until you revoke it here.</li>
+    </ol>
+    <p class="k-muted" style="margin:14px 0 0; font-size:14px;">
+      If the tablet ever goes missing, press Revoke from your phone. It stops
+      working on its next scan.
+    </p>
+  </div>
+</KidsLayout>
+
+<style>
+  .is-off { opacity:.6; }
+  .k-field { display:block; margin-bottom:14px; }
+  .k-field > span { display:block; font-size:12px; font-weight:700; letter-spacing:.1em;
+                    text-transform:uppercase; color:var(--k-ink-soft); margin-bottom:5px; }
+  .k-field input { width:100%; padding:10px 12px; font:inherit; font-size:16px; color:var(--k-ink);
+                   border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-btn--quiet { background:transparent; color:var(--k-ink-soft);
+                  border:1px solid rgba(13,27,69,.22); font-weight:600; }
+</style>

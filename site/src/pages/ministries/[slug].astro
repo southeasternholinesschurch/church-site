@@ -1,0 +1,201 @@
+---
+import type { GetStaticPaths } from 'astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import EventCard from '../../components/EventCard.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import { getUpcomingEvents } from '../../lib/ical';
+import { MINISTRY_PHOTOS, MINISTRY_LOGOS, MINISTRY_PHOTO_ALT, MINISTRY_PHOTO_FOCUS,
+         MINISTRY_HERO_MOTION, DEFAULT_HERO_MOTION } from '../../lib/ministry-assets';
+
+export const getStaticPaths = (async () => {
+  const ministries = await getCollection('ministries');
+  return ministries.map((m) => ({ params: { slug: m.slug }, props: { ministry: m } }));
+}) satisfies GetStaticPaths;
+
+const { ministry } = Astro.props;
+const { Content } = await ministry.render();
+const { name, ageRange, accent, meets, where, summary, placeholder } = ministry.data;
+
+const photo = MINISTRY_PHOTOS[accent];
+// Scale and drift move together — see MINISTRY_HERO_MOTION for why.
+const motion = MINISTRY_HERO_MOTION[accent] ?? DEFAULT_HERO_MOTION;
+const logo = MINISTRY_LOGOS[accent];
+
+// Events tagged #<accent> in their Notes — see lib/ministry-tags.ts. Wrapped
+// because a calendar hiccup must never take a ministry's page down with it.
+const [settingsEntry] = await getCollection('settings');
+let events: Awaited<ReturnType<typeof getUpcomingEvents>> = [];
+try {
+  if (settingsEntry.data.calendarFeedUrl) {
+    const all = await getUpcomingEvents(settingsEntry.data.calendarFeedUrl, 180);
+    events = all.filter((e) => e.ministries.includes(accent as never));
+  }
+} catch {
+  events = [];
+}
+
+// Ordered siblings, so the page can offer the next ministry rather than dead-end.
+const siblings = (await getCollection('ministries')).sort((a, b) => a.data.order - b.data.order);
+const idx = siblings.findIndex((m) => m.slug === ministry.slug);
+const next = siblings[(idx + 1) % siblings.length];
+---
+<BaseLayout title={name} description={summary}>
+  <!-- ============ HERO ============ -->
+  <section class="mhero" data-ministry={accent} data-par-frame>
+    {photo && (
+      <div class="mhero__img duo par" data-par={motion.drift}
+           style={`--drift-scale: ${motion.scale}; --focus: ${MINISTRY_PHOTO_FOCUS[accent] ?? '50% 50%'};`}>
+        <Image src={photo} alt={MINISTRY_PHOTO_ALT[accent] ?? ''}
+               widths={[900, 1400, 2000, 2400]} sizes="140vw" fetchpriority="high" loading="eager" />
+      </div>
+    )}
+    <div class="mhero__grade" aria-hidden="true"></div>
+    <div class="mhero__body par-fg" data-par="-26">
+      <a href="/ministries" class="mhero__back load d1">← All ministries</a>
+      {/* No "branding pending" note here. A ministry without a logo
+          simply shows none — nothing looks broken, so a marker would only
+          advertise an internal to-do to visitors. Tracked in docs/README.md. */}
+      {logo && <Image src={logo} alt="" class="mhero__logo load d2"
+                 width={520} densities={[1, 2]} loading="eager" />}
+      {/* When a logo is present it already reads as the ministry's name, so
+          showing the name again beneath it is redundant. The h1 stays in the
+          DOM but visually hidden: still the page heading for screen readers and
+          the document outline, with the logo kept alt="" so the name is not
+          announced twice. */}
+      <h1 class:list={['serif', 'load', 'd3', logo && 'visually-hidden']}>{name}</h1>
+      {ageRange && <span class:list={['mhero__age', 'load', 'd3', logo && 'mhero__age--tight']}>{ageRange}</span>}
+      <p class="mhero__lede load d4">{summary}</p>
+    </div>
+  </section>
+
+  <!-- ============ ABOUT + PRACTICALS ============ -->
+  <section class="wrap body-wrap" data-ministry={accent}>
+    <div class="body reveal">
+      <div class="body__copy"><Content /></div>
+      <aside class="body__side">
+        {(meets || where) && (
+          <>
+            {meets && (<><p class="label side__l">Meets</p><p class="side__v">{meets}</p></>)}
+            {where && (<><p class="label side__l">Where</p><p class="side__v">{where}</p></>)}
+          </>
+        )}
+        <p class="label side__l">Questions?</p>
+        <p class="side__v">
+          Ask any Sunday, or <a href="/contact">send us a message</a>.
+        </p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ COMING UP ============ -->
+  <section class="wrap up-wrap" data-ministry={accent}>
+    <div class="up__head reveal">
+      <h2 class="label up__h">Coming Up</h2>
+      <a href="/events" class="up__all">All church events →</a>
+    </div>
+    {events.length > 0 ? (
+      <div class="up__list">
+        {events.map((event) => <EventCard event={event} variant="row" omitMinistry={accent as never} />)}
+      </div>
+    ) : (
+      /* Not an error state. Most of the year a ministry has nothing special on,
+         and saying so plainly beats an empty heading. */
+      <p class="up__none reveal">
+        Nothing extra on the calendar for {name} right now — the regular meeting
+        above runs as usual. Anything special will show up here.
+      </p>
+    )}
+  </section>
+
+  <!-- ============ NEXT ============ -->
+  <section class="wrap next-wrap">
+    <a href={`/ministries/${next.slug}`} class="next reveal" data-ministry={next.data.accent}>
+      <div>
+        <p class="label next__k">Next Ministry</p>
+        <p class="serif next__n">{next.data.name}</p>
+      </div>
+      <span class="next__arrow" aria-hidden="true">→</span>
+    </a>
+  </section>
+</BaseLayout>
+
+<style>
+  /* NOTE: .mhero__img declares no transform — a scoped one would outrank .par
+     (0,2,0 beats 0,1,0) and silently kill the parallax. */
+  .mhero { position: relative; overflow: clip; background: var(--ink); color: var(--cream);
+           min-height: 62vh; display: flex; flex-direction: column; }
+  .mhero__img { position: absolute; inset: 0; z-index: 0; }
+  /* --focus is set per ministry — see MINISTRY_PHOTO_FOCUS. Centre is the
+     default and is right for a wide shot; a portrait needs the crop held
+     higher or the face is the part that gets thrown away. */
+  .mhero__img :global(img) { width: 100%; height: 100%; object-fit: cover;
+                             object-position: var(--focus, 50% 50%); }
+  /* Weight at the bottom where the text sits; open across the middle so the
+     photograph is actually visible — the fault the Give hero originally had. */
+  .mhero__grade { position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg, rgba(26,21,18,.58) 0%, rgba(26,21,18,.24) 26%,
+                                        rgba(26,21,18,.66) 62%, rgba(26,21,18,.95) 100%); }
+  .mhero__body { position: relative; z-index: 3; margin-top: auto;
+                 padding: 130px var(--pad) clamp(46px,6vw,72px); }
+  .mhero__back { display: inline-block; font-size: 14px; font-weight: 700;
+                 color: rgba(244,239,231,.7); margin-bottom: 28px; }
+  .mhero__back:hover { color: var(--cream); }
+  /* Bounded on BOTH axes, not just height: [Kids Ministry]' mark is portrait (a crown
+     above the wordmark) while [Youth Ministry]'s is a wide wordmark, so a single height
+     would leave one of them tiny. */
+  .mhero__logo { display: block; width: auto; height: auto;
+                 max-height: 96px; max-width: 250px; margin-bottom: 22px; }
+
+  .body-wrap { padding-block: clamp(56px,7vw,92px); }
+  .body { display: grid; grid-template-columns: minmax(0,1fr) 260px; gap: 66px; align-items: start; }
+  .body__copy :global(p) { margin: 0 0 18px; font-size: 18px; line-height: 1.8; color: var(--ink-soft); }
+  .body__copy :global(p:last-child) { margin-bottom: 0; }
+  .body__copy :global(em) { font-style: italic; }
+  .body__copy :global(a) { color: var(--red); text-decoration: underline; text-underline-offset: 3px; }
+  /* the real ministry copy uses subheads and lists, so they need styling —
+     kept in the same register as the sermon notes prose */
+  .body__copy :global(h2) { font-family: var(--font-display); font-weight: 400;
+                            font-size: clamp(24px,2.8vw,30px); line-height: 1.2;
+                            margin: 38px 0 14px; color: var(--ink); }
+  .body__copy :global(h2:first-child) { margin-top: 0; }
+  .body__copy :global(ul) { margin: 0 0 18px; padding-left: 0; list-style: none; }
+  .body__copy :global(li) { position: relative; margin-bottom: 12px; padding-left: 22px;
+                            font-size: 18px; line-height: 1.75; color: var(--ink-soft); }
+  /* the ministry's own color as the marker — the one place it earns a flash */
+  .body__copy :global(li)::before { content: ""; position: absolute; left: 0; top: .62em;
+                                    width: 9px; height: 3px; border-radius: 2px;
+                                    background: var(--ministry-accent, var(--red)); }
+  .body__copy :global(li strong) { color: var(--ink); font-weight: 700; }
+  .body__side { border-top: 2px solid var(--ink); padding-top: 18px; }
+  .side__l { color: var(--red); margin: 0 0 5px; }
+  .side__l:not(:first-child) { margin-top: 20px; }
+  .side__v { margin: 0; font-size: 16px; line-height: 1.6; }
+  .side__v a { color: var(--red); text-decoration: underline; text-underline-offset: 3px; }
+
+  .up-wrap { padding-block: 0 clamp(60px,7vw,96px); }
+  .up__head { display: flex; align-items: baseline; justify-content: space-between; gap: 20px;
+              border-top: 1px solid var(--hair); padding-top: 30px; margin-bottom: 6px; }
+  .up__h { color: var(--red); margin: 0; }
+  .up__all { font-size: 14px; font-weight: 700; color: var(--ink-soft); }
+  .up__all:hover { color: var(--red); }
+  .up__none { margin: 18px 0 0; max-width: 58ch; font-size: 17px; line-height: 1.75; color: var(--ink-soft); }
+  .up__list :global(.ev:first-of-type) { border-top: 0; }
+
+  .next-wrap { padding-block: 0 clamp(70px,8vw,110px); }
+  .next { display: flex; align-items: center; justify-content: space-between; gap: 24px;
+          background: var(--cream-deep); border-radius: var(--radius-lg);
+          padding: clamp(26px,3vw,38px); color: inherit;
+          border-bottom: 4px solid var(--ministry-accent, var(--red)); }
+  .next:hover { background: #e3dacb; color: inherit; }
+  .next__k { color: var(--red); margin: 0 0 6px; }
+  .next__n { margin: 0; font-size: clamp(24px,3vw,32px); line-height: 1.1; }
+  .next__arrow { font-size: 26px; color: var(--ink-soft); }
+
+  @media (max-width: 860px) {
+    .mhero { min-height: 54vh; }
+    .mhero__body { padding: 108px var(--pad) 44px; }
+    .mhero__logo { max-height: 72px; max-width: 190px; }
+    .body { grid-template-columns: 1fr; gap: 32px; }
+  }
+</style>

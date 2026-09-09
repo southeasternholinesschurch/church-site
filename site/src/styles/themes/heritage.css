@@ -1,0 +1,34 @@
+/* HERITAGE — formal, classical, established.
+ *
+ * Warm ivory, deep navy and an old-gold accent. A high-contrast display serif
+ * over a text serif, crisp corners, and no softness anywhere: it should read
+ * like a well-set order of service rather than a web page.
+ *
+ * Suits a historic or liturgical church, or an older congregation — anywhere
+ * the building itself is part of the welcome.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap');
+
+:root {
+  --ink: #14213d;
+  --ink-soft: #3d4a68;
+  --accent: #7a6019;
+  --accent-deep: #614c13;
+  --accent-tint: #e2c97e;
+  --paper: #f7f4ed;
+  --paper-deep: #ebe5d8;
+
+  --font-display: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --font-body: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --display-weight: 500;
+  --display-tracking: 0;
+
+  --radius: 2px;
+  --radius-lg: 2px;
+
+  --kids-a: #3f6ea8;  --kids-b: #9db8d6;
+  --youth-a: #5a4b8c; --youth-b: #8d7fb8;
+  --men-a: #24422f;   --men-b: #4f7059;
+  --women-a: #8c4a5e; --women-b: #c08b9a;
+  --seniors-a: #7a6019; --seniors-b: #b89a52;
+}

@@ -1,0 +1,400 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema } from '../../db';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { buildAudience, monthToDate } from '../../lib/recipients';
+import { isDemoInstance } from '../../lib/demo-instance';
+import { smsConfigured, COST_PER_SEGMENT_USD } from '../../lib/sms';
+import { getBirthdaySettings, setBirthdaySettings } from '../../lib/birthday-settings';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+/**
+ * Automatic birthday texts.
+ *
+ * A standing arrangement, not a schedule — which is why it is a switch here
+ * rather than an entry on the scheduling screen. Turn it on once and it runs;
+ * there is nothing to create each year and nothing to remember.
+ */
+let birthdayError: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  if (String(form.get('action')) === 'birthdays') {
+    birthdayError = await setBirthdaySettings(env, {
+      on: form.get('on') === '1',
+      time: String(form.get('time') ?? ''),
+      body: String(form.get('body') ?? ''),
+    }, user.email);
+    if (!birthdayError) return Astro.redirect('/messaging?birthdays=saved', 303);
+  }
+}
+const birthdays = await getBirthdaySettings(env);
+const birthdaysSaved = Astro.url.searchParams.get('birthdays') === 'saved';
+
+/** How many people the birthday text can actually reach today, and how many of
+ *  them have a date on file — stated plainly because a rule that silently
+ *  covers a fifth of the church looks identical to one that is broken. */
+const [bcover] = await db.select({
+  reachable: sql<number>`count(*)`,
+  withBirthday: sql<number>`sum(case when birthday is not null and birthday != '' then 1 else 0 end)`,
+}).from(schema.people)
+  .where(and(eq(schema.people.archived, false), eq(schema.people.smsConsent, 'opted_in'),
+             sql`phone_e164 is not null`));
+
+const configured = smsConfigured(env);
+const isDemo = isDemoInstance(env);
+const groups = await db.select().from(schema.groups).orderBy(schema.groups.name);
+const everyone = await buildAudience(env, null);
+
+/**
+ * The same counts, for every group, in one query — so the audience line can
+ * follow the dropdown without a round trip.
+ *
+ * This readout used to be rendered once for "everyone" and then never touched
+ * again. Picking a group left the whole church's phone count on screen, and
+ * the confirm dialog and cost estimate quoted that number too, so a group
+ * nobody had been added to looked identical to a full one right up until the
+ * send came back refused. (That is exactly how it failed on 2026-09-07: the
+ * group was empty, the line said 63 phones.)
+ *
+ * The predicates below mirror buildAudience exactly, including its treatment
+ * of an empty-string number as no number and its check of opted-out BEFORE
+ * opted-in. If that function's rules change, change these with it — a
+ * disagreement here shows up as a count that promises a send the API refuses.
+ */
+const P = schema.people;
+const hasNumber = sql`coalesce(${P.phoneE164}, '') != ''`;
+const live = sql`${P.archived} = 0`;
+const groupCounts = await db.select({
+  groupId: schema.peopleGroups.groupId,
+  // Handsets, not people: two people on one phone is one message.
+  handsets: sql<number>`count(distinct case when ${live} and ${hasNumber} and ${P.smsConsent} = 'opted_in' then ${P.phoneE164} end)`,
+  people: sql<number>`sum(case when ${live} and ${hasNumber} and ${P.smsConsent} = 'opted_in' then 1 else 0 end)`,
+  noNumber: sql<number>`sum(case when ${live} and not ${hasNumber} then 1 else 0 end)`,
+  optedOut: sql<number>`sum(case when ${live} and ${hasNumber} and ${P.smsConsent} = 'opted_out' then 1 else 0 end)`,
+  noConsent: sql<number>`sum(case when ${live} and ${hasNumber} and coalesce(${P.smsConsent}, 'unknown') not in ('opted_in', 'opted_out') then 1 else 0 end)`,
+}).from(schema.peopleGroups)
+  .innerJoin(P, eq(P.id, schema.peopleGroups.personId))
+  .groupBy(schema.peopleGroups.groupId);
+
+/** A group with no members returns no row at all. That is zero, not missing. */
+const EMPTY_GROUP = { handsets: 0, people: 0, noNumber: 0, optedOut: 0, noConsent: 0 };
+const byGroup = new Map(groupCounts.map((c) => [c.groupId, c]));
+const audienceFor = (id: number) => byGroup.get(id) ?? EMPTY_GROUP;
+const spend = await monthToDate(env);
+
+const recent = await db.select({
+  body: schema.messageLog.body,
+  createdAt: schema.messageLog.createdAt,
+  status: schema.messageLog.status,
+}).from(schema.messageLog).where(eq(schema.messageLog.direction, 'out'))
+  .orderBy(desc(schema.messageLog.id)).limit(60);
+
+// Collapse the per-person rows back into one line per send.
+const sends = [...recent.reduce((m, r) => {
+  const key = `${r.body}|${r.createdAt.slice(0, 16)}`;
+  const e = m.get(key) ?? { body: r.body, at: r.createdAt, count: 0, failed: 0 };
+  e.count++; if (r.status === 'failed') e.failed++;
+  return m.set(key, e);
+}, new Map<string, { body: string; at: string; count: number; failed: number }>()).values()].slice(0, 8);
+---
+<AppLayout title="Messaging" user={user}>
+  <h1>Messaging</h1>
+
+  {isDemo ? (
+    <p class="notice"><strong>This is the demo.</strong> Everything works exactly
+    as it does in the real app, except that no text is ever actually sent. The
+    people, numbers and history below are invented.</p>
+  ) : !configured && (
+    <p class="notice">
+      <strong>Texting is not connected yet.</strong> The Twilio auth token and phone
+      number still need adding. You can write and preview a message here, but Send
+      will not work until then.
+    </p>
+  )}
+
+  <div class="card" style="margin-bottom:20px;">
+    <h2 style="margin-top:0;">Automatic birthday texts</h2>
+    <p class="muted" style="margin:-6px 0 14px; max-width:62ch; font-size:15px;">
+      Turn this on once and it runs on its own — each person gets this message
+      on their own birthday, at the time you set. Nothing to schedule and
+      nothing to remember. Birthdays are read from the directory every morning,
+      so ones you add later start working by themselves.
+      {bcover && (
+        <> Right now <strong>{bcover.withBirthday ?? 0}</strong> of {bcover.reachable}
+        {' '}people who can be texted have a birthday on file.</>
+      )}
+    </p>
+    {birthdaysSaved && <p class="notice">Birthday settings saved.</p>}
+    {birthdayError && <p class="notice">{birthdayError}</p>}
+    <form method="POST">
+      <input type="hidden" name="action" value="birthdays" />
+      <div style="display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
+        <label class="field" style="margin:0;">
+          <span>Send them</span>
+          <select name="on">
+            <option value="0" selected={!birthdays.on}>Off</option>
+            <option value="1" selected={birthdays.on}>On</option>
+          </select>
+        </label>
+        <label class="field" style="margin:0;">
+          <span>Time of day</span>
+          <input type="time" name="time" value={birthdays.time} />
+        </label>
+      </div>
+      <label class="field">
+        <span>The message</span>
+        <textarea name="body" rows="3">{birthdays.body}</textarea>
+        <small class="muted">
+          <code>{'{first}'}</code> becomes their first name. Keep it to plain
+          straight quotes — a curly apostrophe triples what every birthday text
+          costs.
+        </small>
+      </label>
+      <button class="btn" type="submit">Save</button>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <form id="compose" data-configured={configured ? '1' : ''}>
+      <label class="field">
+        <span>Send to</span>
+        <select name="groupId" id="groupId">
+          <option value="" data-handsets={everyone.handsets.length}
+                  data-people={everyone.recipients.length}
+                  data-no-number={everyone.excluded.noNumber}
+                  data-opted-out={everyone.excluded.optedOut}
+                  data-no-consent={everyone.excluded.noConsent}>Everyone who has opted in</option>
+          {groups.map((g) => {
+            const c = audienceFor(g.id);
+            return (
+              <option value={g.id} data-handsets={c.handsets} data-people={c.people}
+                      data-no-number={c.noNumber} data-opted-out={c.optedOut}
+                      data-no-consent={c.noConsent}>{g.name}</option>
+            );
+          })}
+        </select>
+      </label>
+
+      <p class="muted" id="audience" style="margin:-8px 0 16px; font-size:15px;"
+         data-handsets={everyone.handsets.length}>
+        <strong>{everyone.handsets.length}</strong> {everyone.handsets.length === 1 ? 'phone' : 'phones'}
+        {everyone.recipients.length !== everyone.handsets.length
+          ? ` · ${everyone.recipients.length} people — some share a phone` : ''}
+        {everyone.excluded.noNumber > 0 ? ` · ${everyone.excluded.noNumber} with no number on file` : ''}
+        {everyone.excluded.optedOut > 0 ? ` · ${everyone.excluded.optedOut} opted out` : ''}
+        {everyone.excluded.noConsent > 0 ? ` · ${everyone.excluded.noConsent} not asked yet` : ''}
+      </p>
+
+      <label class="field">
+        <span>Message</span>
+        <textarea name="body" id="body" rows="5"
+                  placeholder="This is Pastor [Name] with [Your Church Name]…"></textarea>
+      </label>
+
+      {/* Guidance, not a hardcoded prefix. A2P rules want the sender
+          identifiable, but the wording is the church's to choose. */}
+      <p class="muted" style="margin:-8px 0 14px; font-size:14px;">
+        Say who you are somewhere in the message. Recipients see a number they do
+        not recognise, and identifying yourself is both courteous and what the
+        carriers expect.
+      </p>
+
+      <div id="meter" class="meter">
+        <span id="meter-chars">0 characters</span>
+        <span id="meter-seg">1 segment</span>
+        <span id="meter-enc" class="muted"></span>
+        <span id="meter-cost" class="muted" style="margin-left:auto;"></span>
+      </div>
+      <p id="meter-warn" class="notice" style="display:none; margin:12px 0 0;"></p>
+
+      <button class="btn" type="submit" id="send" disabled={!configured} style="margin-top:18px;">Send</button>
+      <span id="status" class="muted" style="margin-left:12px;"></span>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <h2>This month</h2>
+    <p style="margin:0; font-size:19px;">
+      <strong>{spend.messages}</strong> messages · {spend.segments} segments ·
+      about <strong>${spend.usd.toFixed(2)}</strong>
+    </p>
+    <p class="muted" style="margin:6px 0 0; font-size:14px;">
+      An estimate at about ${COST_PER_SEGMENT_USD.toFixed(4)} per segment including
+      carrier fees — not your actual Twilio invoice.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Recent sends</h2>
+    {sends.length === 0 ? (
+      <p class="muted" style="margin:0;">Nothing sent yet.</p>
+    ) : (
+      <ul style="margin:0; padding-left:18px;">
+        {sends.map((s) => (
+          <li style="margin-bottom:8px;">
+            <span class="muted" style="font-size:13px;">{s.at.slice(0, 16).replace('T', ' ')}</span><br />
+            {s.body.slice(0, 90)}{s.body.length > 90 ? '…' : ''}
+            <span class="muted"> — {s.count} sent{s.failed ? `, ${s.failed} failed` : ''}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+</AppLayout>
+
+<style>
+  .meter { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
+           font-size: 14px; padding: 10px 12px; background: var(--cream-deep);
+           border-radius: var(--radius); }
+  #meter-seg { font-weight: 700; }
+  .meter--split #meter-seg { color: var(--red); }
+</style>
+
+<script>
+  import { countSegments, COST_PER_SEGMENT_USD } from '../../lib/sms';
+
+  const body = document.getElementById('body') as HTMLTextAreaElement;
+  const meter = document.getElementById('meter')!;
+  const aud = document.getElementById('audience')!;
+  const warn = document.getElementById('meter-warn')!;
+  const statusEl = document.getElementById('status')!;
+  const sendBtn = document.getElementById('send') as HTMLButtonElement;
+  const handsets = () => Number(aud.dataset.handsets ?? 0);
+  // Cast via unknown, as the existing lookup below does — the DOM lib's
+  // HTMLElement and HTMLSelectElement do not overlap enough for a direct cast.
+  const groupSel = document.getElementById('groupId') as unknown as HTMLSelectElement;
+  const configured =
+    (document.getElementById('compose') as HTMLFormElement).dataset.configured === '1';
+
+  /**
+   * Keep the audience line, the cost estimate and the confirm dialog in step
+   * with the group that is actually selected.
+   *
+   * Every count is already on the <option> as a data attribute, so choosing a
+   * group costs no request. Before this, the line was rendered once for
+   * "everyone" and never updated — so a group with nobody in it displayed the
+   * whole church's phone count, the dialog asked to confirm sending to that
+   * many, and the only thing that knew better was the API, which refused the
+   * send after the fact with "Nobody in that group can be texted."
+   *
+   * Send is disabled outright at zero. There is nothing to confirm.
+   */
+  function renderAudience() {
+    const o = groupSel.selectedOptions[0];
+    const n = Number(o?.dataset.handsets ?? 0);
+    const people = Number(o?.dataset.people ?? 0);
+
+    const notes: string[] = [];
+    if (people !== n) notes.push(`${people} people — some share a phone`);
+    for (const [count, label] of [
+      [Number(o?.dataset.noNumber ?? 0), 'with no number on file'],
+      [Number(o?.dataset.optedOut ?? 0), 'opted out'],
+      [Number(o?.dataset.noConsent ?? 0), 'not asked yet'],
+    ] as [number, string][]) if (count) notes.push(`${count} ${label}`);
+
+    const strong = document.createElement('strong');
+    strong.textContent = String(n);
+    aud.replaceChildren(strong, ` ${n === 1 ? 'phone' : 'phones'}`);
+    if (n === 0) aud.append(' — nobody here can be texted, so there is nothing to send');
+    if (notes.length) aud.append(` · ${notes.join(' · ')}`);
+
+    aud.dataset.handsets = String(n);
+    sendBtn.disabled = !configured || n === 0;
+    paint();
+  }
+  groupSel.addEventListener('change', renderAudience);
+
+  function paint() {
+    const info = countSegments(body.value);
+    document.getElementById('meter-chars')!.textContent = `${info.characters} characters`;
+    document.getElementById('meter-seg')!.textContent =
+      `${info.segments} segment${info.segments === 1 ? '' : 's'}`;
+    document.getElementById('meter-enc')!.textContent =
+      `${info.encoding} · ${info.remainingInSegment} left in this segment`;
+    const cost = info.segments * handsets() * COST_PER_SEGMENT_USD;
+    document.getElementById('meter-cost')!.textContent =
+      handsets() ? `${info.segments * handsets()} segments · about $${cost.toFixed(2)}` : '';
+    meter.classList.toggle('meter--split', info.segments > 1);
+
+    // The commonest surprise: a curly apostrophe pasted from Word or Notes
+    // drops the budget from 160 characters to 70.
+    if (info.encoding === 'UCS-2') {
+      warn.style.display = 'block';
+      warn.textContent = 'This contains a character outside the plain text set — usually a '
+        + 'curly apostrophe or an emoji. That cuts each segment from 160 characters to 70, '
+        + 'so it costs more to send. Retyping the apostrophe normally fixes it.';
+    } else warn.style.display = 'none';
+  }
+
+  body.addEventListener('input', paint);
+  // Not paint(): a reload can restore a previously chosen group, and the line
+  // must describe THAT group rather than the server's initial "everyone".
+  renderAudience();
+
+  document.getElementById('compose')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = body.value.trim();
+    if (!text) return;
+    const groupId = (document.getElementById('groupId') as unknown as HTMLSelectElement).value || null;
+    const info = countSegments(text);
+    const n = handsets();
+    if (!confirm(`Send this to ${n} phone${n === 1 ? '' : 's'}?\n\n`
+      + `${info.segments} segment${info.segments === 1 ? '' : 's'} each — about $`
+      + `${(info.segments * n * COST_PER_SEGMENT_USD).toFixed(2)}.\n\nThis cannot be unsent.`)) return;
+
+    sendBtn.disabled = true;
+    statusEl.textContent = 'Sending…';
+    /*
+     * Keep calling until nobody is left.
+     *
+     * The endpoint sends a window at a time because a Worker may make only 50
+     * outbound requests per incoming request on this plan, and each text is
+     * one. Sending the whole group in a single call is what silently dropped
+     * everyone past the 51st person on three broadcasts.
+     *
+     * The loop is here rather than in the endpoint because no amount of
+     * cleverness inside one request raises that cap — it has to be more
+     * requests.
+     */
+    type SendReply = { error?: string; sent?: number; failed?: number;
+                       failures?: { name: string; reason: string }[];
+                       handsets?: number; nextOffset?: number | null };
+
+    let offset: number | null = 0;
+    let sent = 0, failed = 0, total = 0;
+    const failures: { name: string; reason: string }[] = [];
+
+    while (offset !== null) {
+      const res = await fetch('/api/sms/send', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: text, groupId, offset }),
+      });
+      const data = await res.json().catch(() => ({})) as SendReply;
+      if (!res.ok) {
+        // Say how far it got. "Send failed" after 40 have already gone is worse
+        // than useless — it invites a re-send that texts those people twice.
+        statusEl.textContent = sent
+          ? `${data.error ?? 'Send failed'} — ${sent} already sent before it stopped.`
+          : (data.error ?? 'Send failed.');
+        sendBtn.disabled = false;
+        return;
+      }
+      sent += data.sent ?? 0;
+      failed += data.failed ?? 0;
+      total = data.handsets ?? total;
+      if (data.failures) failures.push(...data.failures);
+      offset = data.nextOffset ?? null;
+      if (offset !== null) statusEl.textContent = `Sending… ${sent} of ${total}`;
+    }
+
+    statusEl.textContent = `Sent to ${sent}${failed ? `, ${failed} failed` : ''}.`;
+    if (failed && failures.length) {
+      alert('Some messages failed:\n\n' + failures.map((f) => `${f.name}: ${f.reason}`).join('\n'));
+    }
+    setTimeout(() => location.reload(), 1200);
+  });
+</script>

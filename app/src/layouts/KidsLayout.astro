@@ -1,0 +1,97 @@
+---
+import '../styles/kids.css';
+import { canAccess, isKidsRole, type Role } from '../lib/permissions';
+
+/**
+ * The children's-ministry chrome.
+ *
+ * A SEPARATE layout from AppLayout rather than a themed variant of it. The two
+ * have different navigation, a different palette and different audiences, and
+ * every conditional that tried to serve both would be a place where a staff
+ * link could leak into a volunteer's view. Access is enforced in the
+ * middleware regardless — but a layout that CANNOT render /people is one fewer
+ * thing to get wrong.
+ */
+interface Props {
+  title: string;
+  user: { email: string; name: string | null; role: Role };
+}
+const { title, user } = Astro.props;
+const path = Astro.url.pathname;
+
+/**
+ * Only pages that exist. Entries are added here as each one lands, so the bar
+ * never offers a volunteer a link to a 404 — the whole section is new and
+ * "it's broken" is a much worse first impression than "it's not here yet".
+ * The landing page lists what is still coming.
+ */
+const NAV: [string, string][] = [
+  ['/kids', 'Home'],
+  ['/kids/children', 'Children'],
+  ['/kids/register', 'Registers'],
+  // Filtered by canAccess below, so a teacher never sees it.
+  ['/kids/classes', 'Classes'],
+  ['/kids/kiosk', 'Kiosk'],
+  ['/kids/cards', 'Cards'],
+  // Any kids role may open it; the page refuses anyone without the capability,
+  // because a path allowlist cannot express a flag.
+  ['/kids/messaging', 'Texts'],
+  ['/kids/replies', 'Replies'],
+];
+const nav = NAV.filter(([href]) => canAccess(user.role, href));
+
+/** Staff came DOWN into this section and need the way back. A volunteer has no
+ *  such link, because there is nowhere for it to lead. */
+const showWayBack = !isKidsRole(user.role);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {/* The landing page is already called [Kids Ministry]; "[Kids Ministry] · [Kids Ministry]" in a tab
+        is noise. Every other page reads "Registers · [Kids Ministry]". */}
+    <title>{title === '[Kids Ministry]' ? '[Kids Ministry]' : `${title} · [Kids Ministry]`}</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/staff-icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/staff-icons/apple-touch-icon.png" />
+    {/* Navy, not the staff app's warm ink — the phone's own chrome should agree
+        with the page a volunteer is looking at. */}
+    <meta name="theme-color" content="#081334" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="[Kids Ministry]" />
+  </head>
+  <body class="kids">
+    <header class="k-bar">
+      <div class="k-bar__in">
+        {/* The real wordmark, not type pretending to be it. White because the
+            bar is navy; the source artwork is a pink-to-cyan gradient that
+            disappears against it. Trimmed and flattened from
+            site/src/assets/brand — see the note in kids.css. */}
+        <a href="/kids" class="k-bar__brand" aria-label="[Kids Ministry] — home">
+          <img src="/kids-logo-white.png" alt="[Kids Ministry]" width="450" height="220" />
+        </a>
+        <nav class="k-bar__nav">
+          {nav.map(([href, label]) => (
+            <a href={href} aria-current={path === href ? 'page' : undefined}>{label}</a>
+          ))}
+          {showWayBack && <a href="/" class="k-bar__up">← Staff dashboard</a>}
+          <span class="k-bar__who">{user.name ?? user.email}</span>
+          <form method="POST" action="/auth/logout" style="margin:0">
+            <button class="k-bar__nav" style="background:none;border:0;color:rgba(255,255,255,.78);font:inherit;font-size:15px;cursor:pointer;padding:0">Sign out</button>
+          </form>
+        </nav>
+      </div>
+    </header>
+
+    <div class="k-backdrop" aria-hidden="true"></div>
+
+    <main class="k-main">
+      <div class="k-wrap">
+        <slot />
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+-- Prayer requests on the bulletin.
+--
+-- Unlike announcements, these CARRY OVER to the next week. An announcement is
+-- stale by the following Sunday; a request for someone's health is not, and
+-- making the church retype the same names every week is how a name quietly
+-- stops being prayed for.
+--
+-- [{ text, since }] — `since` is the service date the request first appeared,
+-- so the editor can show how long it has been on the list. Nothing is ever
+-- removed automatically: dropping someone's prayer request is a decision for a
+-- person, not a rule.
+ALTER TABLE `bulletins` ADD `prayer_requests` text DEFAULT '[]' NOT NULL;

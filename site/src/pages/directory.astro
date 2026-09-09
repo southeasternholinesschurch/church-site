@@ -1,0 +1,156 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+/**
+ * Discreet — deliberately not in the main nav (brief §8).
+ *
+ * This page holds NO member data and never will. The directory itself lives
+ * in the member app behind personal-invite auth; everything here is public
+ * copy explaining what it is and a button that hands off to it. The button
+ * needs no cleverness: the app knows whether this device has been signed in,
+ * and shows either the list or its own locked page.
+ *
+ * The placeholder preview that used to sit at the bottom of this page has
+ * been removed now that the real directory exists — an invented example of
+ * a members-only list is exactly the kind of thing that ages into looking
+ * like real data.
+ */
+const DIRECTORY_URL = 'https://app.example.org/directory';
+---
+<BaseLayout
+  title="Member Directory"
+  description="A private contact list for the [Your Church Name] family — by personal invite only."
+>
+  <!-- ============ HEADER ============ -->
+  <section class="phead">
+    <div class="phead__body">
+      <p class="label load d1 phead__eyebrow">Members Only</p>
+      <h1 class="serif load d2">Directory</h1>
+      <p class="phead__lede load d3">
+        A private contact list for the church family — names, numbers and
+        addresses for the people you sit beside on a Sunday. It opens by
+        personal invitation, and it is never public.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ OPEN IT ============ -->
+  <section class="wrap open-wrap">
+    <div class="open reveal">
+      <h2 class="serif open__h">Open the directory</h2>
+      <p class="open__p">
+        If you have already tapped your invitation on this device, this takes
+        you straight in — there is no password to remember. If you have not,
+        it will tell you so and offer to get you a link.
+      </p>
+      <a href={DIRECTORY_URL} class="btn btn--ink open__btn">Open the directory</a>
+      <p class="open__note">
+        Not had an invitation yet? <a href="/contact?about=directory">Ask for a link</a>
+        and we will text you one.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ HOW ACCESS WORKS ============ -->
+  <section class="wrap rules-wrap">
+    <p class="label rules__h reveal">How Access Works</p>
+    <div class="rules">
+      <div class="rule reveal">
+        <svg class="rule__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.4 4.5"></path>
+          <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.4-1.4"></path>
+        </svg>
+        <h3 class="serif rule__t">One link, one person</h3>
+        <p class="rule__p">
+          Invites are sent individually — never a shared code. Tapping yours trusts that
+          device from then on, so there's no password to remember or lose.
+        </p>
+      </div>
+      <div class="rule reveal">
+        <svg class="rule__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+        <h3 class="serif rule__t">Adults only, opt in</h3>
+        <p class="rule__p">
+          Children never appear here at all. Adults are listed only if they've said yes
+          in person — nobody is added by default.
+        </p>
+      </div>
+      <div class="rule reveal">
+        <svg class="rule__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+        </svg>
+        <h3 class="serif rule__t">Removable at any time</h3>
+        <p class="rule__p">
+          Ask and you're off the list the same day. Staff can also revoke any device
+          instantly — a lost phone doesn't mean a lost directory.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHAT IS IN IT ============ -->
+  <section class="wrap in-wrap">
+    <div class="in__head reveal">
+      <p class="label in__h">What You'll Find</p>
+    </div>
+    <div class="in reveal">
+      <p class="in__p">
+        Each person's entry carries a photograph, a phone number, and — where
+        they have given them — an email address, a home address, and their
+        birthday and anniversary. Only the day and month of those are ever
+        shown, never the year. You can search by name, street, number or month,
+        or jump down the alphabet. Tapping a number calls it.
+      </p>
+      <p class="in__p">
+        You can keep your own details up to date from inside the directory —
+        phone, email, address, birthday and anniversary. Change them once and
+        everyone sees the correction. If you move house or change carriers,
+        that is all it takes.
+      </p>
+      <p class="in__p">
+        Names and photographs are looked after by the office, as is whether you
+        appear here at all. Ask any Sunday and it is done the same day.
+      </p>
+    </div>
+  </section>
+
+</BaseLayout>
+
+<style>
+  .phead { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .phead__body { position: relative; z-index: 3; padding: 150px var(--pad) 86px; }
+  .phead__eyebrow { color: rgba(244,239,231,.6); margin: 0 0 20px; }
+  .phead h1 { margin: 0; font-size: clamp(46px,6vw,88px); line-height: 1; letter-spacing: -.02em; }
+  .phead__lede { margin: 22px 0 0; max-width: 52ch; font-size: 18px; line-height: 1.68; color: rgba(244,239,231,.78); }
+
+  .rules-wrap { padding-block: clamp(64px,7vw,100px); }
+  .rules__h { color: var(--red); margin: 0 0 34px; }
+  .rules { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 34px; }
+  .rule__i { width: 34px; height: 34px; margin-bottom: 16px; color: var(--red); }
+  .rule__t { margin: 0 0 10px; font-size: clamp(21px,2.3vw,26px); line-height: 1.18; }
+  .rule__p { margin: 0; font-size: 16px; line-height: 1.75; color: var(--ink-soft); }
+
+  .open-wrap { padding-block: clamp(60px,7vw,96px) 0; }
+  .open { max-width: 560px; margin-inline: auto; text-align: center; }
+  .open__h { margin: 0 0 14px; font-size: clamp(28px,3.6vw,40px); line-height: 1.1; }
+  .open__p { margin: 0; font-size: 17px; line-height: 1.76; color: var(--ink-soft); }
+  .open__btn { margin-top: 28px; }
+  .open__note { margin: 22px 0 0; font-size: 14px; line-height: 1.7; color: var(--ink-soft); }
+  .open__note a { color: var(--red); text-decoration: underline; text-underline-offset: 3px; }
+
+  .in-wrap { padding-block: 0 clamp(80px,9vw,130px); }
+  .in__head { border-top: 1px solid var(--hair); padding-top: 34px; }
+  .in__h { color: var(--red); margin: 0 0 22px; }
+  .in { max-width: 68ch; }
+  .in__p { margin: 0 0 16px; font-size: 17px; line-height: 1.78; color: var(--ink-soft); }
+  .in__p:last-child { margin-bottom: 0; }
+
+  @media (max-width: 860px) {
+    .phead__body { padding: 110px var(--pad) 52px; }
+    .rules { grid-template-columns: 1fr; gap: 28px; }
+    .open__btn { width: 100%; }
+  }
+</style>

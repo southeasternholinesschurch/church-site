@@ -1,0 +1,20 @@
+{
+  "name": "SHC Staff",
+  "short_name": "SHC Staff",
+  "description": "[Your Church Name] — people, attendance and messaging.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4efe7",
+  "theme_color": "#1a1512",
+  "icons": [
+    { "src": "/staff-icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/staff-icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/staff-icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Attendance", "url": "/attendance" },
+    { "name": "People", "url": "/people" }
+  ]
+}

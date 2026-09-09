@@ -1,0 +1,431 @@
+---
+import { isDemoInstance } from '../../lib/demo-instance';
+
+/**
+ * The check-in screen. A tablet on a stand in the hallway.
+ *
+ * NO staff session behind it — the middleware's kiosk branch gave it a
+ * principal that can do exactly one thing. There is no navigation here, no
+ * route to a child's profile, and nothing to edit. A child can scan their card;
+ * a passer-by can look at it.
+ *
+ * NEVER NAVIGATES. Web NFC needs a user gesture to start scanning, and that
+ * permission is spent on a page load — so a page that reloaded after each scan
+ * would ask a child to press "start" every time. Scans go by fetch and the
+ * confirmation is drawn in place.
+ *
+ * No photographs: the pastor's call, 2026-09-08. The child's own first name is shown
+ * as large as the screen allows instead, which is the only remaining signal
+ * that somebody has scanned the wrong card.
+ */
+const kiosk = Astro.locals.kiosk!;
+/* The demo gets a pretend tap on any key press — see the note in kiosk/scan.ts
+ * for why that branch cannot exist on the real thing. */
+const demo = isDemoInstance(Astro.locals.runtime.env);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>[Kids Ministry] check-in</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#081334" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  </head>
+  <body>
+    <!-- waiting -->
+    <main id="wait" class="screen">
+      <img class="mark" src="/kids-logo-white.png" alt="[Kids Ministry]" />
+      <h1>Tap your card</h1>
+      <p class="sub" id="sub">Hold it on the tablet to check in</p>
+      <button id="start" class="start" hidden>Start check-in</button>
+      {demo && (
+        <p class="demo-hint">This is the demo — press any key to pretend a card was tapped</p>
+      )}
+    </main>
+
+    <!-- the answer, drawn over the top -->
+    <main id="hello" class="screen" hidden>
+      {/* Painted behind the name, cleared between scans. Canvas rather than a
+          hundred DOM nodes: a foyer tablet is not a fast machine and the whole
+          point is that this feels instant. */}
+      <canvas id="burst" aria-hidden="true"></canvas>
+      <div class="hello__in">
+        <img class="crown" src="/kids-crown-white.png" alt="" aria-hidden="true" />
+        <p class="hi">Hi</p>
+        <h1 id="name"></h1>
+        <p class="detail" id="detail"></p>
+        <p class="bucks" id="bucks" hidden><span id="bucksN">0</span> <small>SE bucks</small></p>
+      </div>
+    </main>
+
+    <main id="nope" class="screen" hidden>
+      <h1 id="nope-title">Try again</h1>
+      <p class="sub" id="nope-sub"></p>
+    </main>
+
+    <p class="who">{kiosk.name}</p>
+
+    {/* A reader or QR scanner in keyboard mode types into this and presses
+        Enter. Off-screen rather than display:none — a hidden field cannot hold
+        focus, and without focus nothing is typed anywhere. */}
+    <form id="typed" autocomplete="off"><input id="typedInput" aria-label="Card" /></form>
+
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      /*
+       * `hidden` must actually hide — and this page cannot borrow the rule from
+       * kids.css, because it deliberately loads no shared stylesheet so that no
+       * navigation can arrive here by inheritance. The cost of that isolation is
+       * that its own resets have to be stated.
+       *
+       * Without this, .screen's `display: grid` beats the browser's own
+       * `[hidden] { display: none }` — which sits at the lowest specificity
+       * there is — and all three screens stack, with the last one winning. The
+       * kiosk showed "Try again" before anybody had scanned anything.
+       */
+      [hidden] { display: none !important; }
+      body {
+        margin: 0; min-height: 100vh; background: #0d1b45; color: #fff;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        /* A hallway tablet gets tapped, dragged and leaned on. */
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+        overscroll-behavior: none; overflow: hidden;
+      }
+      .screen { position: fixed; inset: 0; display: grid; place-content: center;
+                text-align: center; padding: 24px; }
+      /* The real wordmark. This is the screen a whole church walks past. */
+      .mark { height: clamp(44px, 8vw, 76px); width: auto; display: block;
+              margin: 0 auto 30px; }
+      h1 { font-size: clamp(44px, 11vw, 108px); margin: 0 0 12px; line-height: 1.02;
+           letter-spacing: -0.02em; overflow-wrap: anywhere; }
+      .sub { font-size: clamp(18px, 3.2vw, 28px); color: #9ebae8; margin: 0; }
+      .hi { font-size: clamp(24px, 4vw, 40px); color: #9ebae8; margin: 0 0 6px; }
+      .detail { font-size: clamp(20px, 3.4vw, 32px); color: #5ed0e0; margin: 14px 0 0; font-weight: 700; }
+      #hello { background: #0d1b45; }
+      /* The burst sits behind everything and never takes a tap. */
+      #burst { position: absolute; inset: 0; width: 100%; height: 100%;
+               pointer-events: none; }
+      .hello__in { position: relative; z-index: 1; }
+      .crown { height: clamp(38px, 7vw, 66px); width: auto; margin: 0 auto 10px; display: block; }
+
+      .bucks { margin: 22px 0 0; font-size: clamp(20px, 3.2vw, 30px); color: #fff; font-weight: 800; }
+      .bucks small { font-size: .5em; font-weight: 700; letter-spacing: .14em;
+                     text-transform: uppercase; color: #9ebae8; }
+
+      /* The name arrives with weight behind it — overshoot then settle, which
+         reads as a greeting rather than a page load. */
+      @keyframes land {
+        0%   { opacity: 0; transform: translateY(26px) scale(.86); }
+        55%  { opacity: 1; transform: translateY(0)    scale(1.06); }
+        100% { opacity: 1; transform: translateY(0)    scale(1); }
+      }
+      @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+      @keyframes crownIn {
+        0%   { opacity: 0; transform: translateY(-18px) rotate(-12deg) scale(.7); }
+        60%  { opacity: 1; transform: translateY(0)     rotate(4deg)   scale(1.08); }
+        100% { opacity: 1; transform: translateY(0)     rotate(0)      scale(1); }
+      }
+      .is-hello .crown  { animation: crownIn .52s cubic-bezier(.2,1.4,.4,1) both; }
+      .is-hello .hi     { animation: rise .34s ease-out .06s both; }
+      .is-hello #name   { animation: land .54s cubic-bezier(.2,1.5,.4,1) .10s both; }
+      .is-hello .detail { animation: rise .38s ease-out .30s both; }
+      .is-hello .bucks  { animation: rise .38s ease-out .40s both; }
+
+      /* Children who find motion difficult, and tablets set to reduce it, get
+         the same information with none of the movement. */
+      @media (prefers-reduced-motion: reduce) {
+        .is-hello .crown, .is-hello .hi, .is-hello #name,
+        .is-hello .detail, .is-hello .bucks { animation: none; }
+        #burst { display: none; }
+      }
+      #nope { background: #0d1b45; }
+      #nope h1 { color: #ffb37a; }
+      .who { position: fixed; bottom: 14px; right: 18px; margin: 0;
+             font-size: 13px; color: rgba(158,186,232,.55); }
+      /* Only ever rendered on the demo. Quiet enough not to look like part of
+         the real screen, loud enough that a visitor finds it. */
+      .demo-hint { margin: 34px 0 0; font-size: clamp(14px, 2vw, 17px);
+                   color: #5ed0e0; border: 1px dashed rgba(94,208,224,.45);
+                   border-radius: 999px; padding: 10px 18px; display: inline-block; }
+      /* Big, because it is pressed once by an adult setting the tablet up. */
+      .start { margin-top: 30px; font: inherit; font-size: 22px; font-weight: 700;
+               padding: 16px 34px; border: 0; border-radius: 12px;
+               background: #fa6601; color: #fff; }
+      #typed { position: fixed; opacity: 0; pointer-events: none; left: -9999px; top: 0; }
+    </style>
+
+    <script is:inline>
+      (function () {
+        var wait = document.getElementById('wait');
+        var hello = document.getElementById('hello');
+        var nope = document.getElementById('nope');
+        var nameEl = document.getElementById('name');
+        var detail = document.getElementById('detail');
+        var nopeTitle = document.getElementById('nope-title');
+        var nopeSub = document.getElementById('nope-sub');
+        var sub = document.getElementById('sub');
+        var startBtn = document.getElementById('start');
+        var typedInput = document.getElementById('typedInput');
+        var burst = document.getElementById('burst');
+        var bucksEl = document.getElementById('bucks');
+        var reduceMotion = window.matchMedia
+          && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var busy = false, timer = null;
+
+        function show(el) {
+          [wait, hello, nope].forEach(function (s) { s.hidden = s !== el; });
+        }
+        function backToWaiting() {
+          show(wait);
+          hello.classList.remove('is-hello');
+          stopBurst();
+          focusTyped();
+        }
+
+        /* ---- the moment a child sees ------------------------------------
+         *
+         * A seven-year-old holds a card to a tablet and something has to
+         * happen. The name landing with weight, a crown, and a burst in the
+         * [Kids Ministry] colours — enough that it is worth doing again next week,
+         * which is the whole behaviour the bucks are meant to encourage.
+         *
+         * Everything here is cheap: one canvas, ~70 particles, no library and
+         * nothing loaded from the network. A foyer tablet is not a fast
+         * machine and this has to feel instant.
+         */
+        var COLOURS = ['#fa6601', '#5ed0e0', '#c0c2fe', '#e8bddb', '#ffffff'];
+        var raf = null;
+        function stopBurst() {
+          if (raf) { cancelAnimationFrame(raf); raf = null; }
+          var c = burst.getContext('2d');
+          if (c) c.clearRect(0, 0, burst.width, burst.height);
+        }
+        function celebrate(bucks, already) {
+          hello.classList.remove('is-hello');
+          void hello.offsetWidth;          // restart the CSS animations
+          hello.classList.add('is-hello');
+
+          if (typeof bucks === 'number') {
+            bucksEl.hidden = false;
+            countTo(bucksEl.querySelector('#bucksN'), bucks);
+          } else {
+            bucksEl.hidden = true;
+          }
+          if (!reduceMotion) fireBurst(already ? 34 : 78);
+        }
+
+        /* Counts up rather than appearing. A number that climbs is read as
+         * something earned; the same number printed is just a fact. */
+        function countTo(el, n) {
+          /*
+           * THE TRUE NUMBER FIRST, then the animation over the top.
+           *
+           * requestAnimationFrame does not run when a tab is backgrounded or
+           * throttled, and it was caught doing exactly that — the counter sat
+           * at 0 while the child's real balance was 24. A kiosk showing a
+           * wrong number is worse than one showing no animation, so the value
+           * is correct before a single frame is asked for.
+           */
+          el.textContent = n;
+          if (reduceMotion) return;
+          var t0 = performance.now(), dur = 620;
+          requestAnimationFrame(function step(t) {
+            var k = Math.min(1, (t - t0) / dur);
+            el.textContent = Math.round(n * (1 - Math.pow(1 - k, 3)));
+            if (k < 1) requestAnimationFrame(step);
+          });
+        }
+
+        function fireBurst(count) {
+          var ctx = burst.getContext('2d');
+          if (!ctx) return;
+          var dpr = Math.min(window.devicePixelRatio || 1, 2);
+          burst.width = burst.clientWidth * dpr;
+          burst.height = burst.clientHeight * dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          var w = burst.clientWidth, h = burst.clientHeight;
+          var cx = w / 2, cy = h * 0.42;
+
+          var bits = [];
+          for (var i = 0; i < count; i++) {
+            var ang = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+            var speed = 3.2 + Math.random() * 5.4;
+            bits.push({
+              x: cx, y: cy,
+              vx: Math.cos(ang) * speed,
+              vy: Math.sin(ang) * speed - 2.2,
+              r: 3 + Math.random() * 6,
+              c: COLOURS[(Math.random() * COLOURS.length) | 0],
+              spin: (Math.random() - 0.5) * 0.3,
+              a: 0,
+              life: 0,
+            });
+          }
+          var start = performance.now();
+          stopBurst();
+          (function frame(t) {
+            var el = t - start;
+            ctx.clearRect(0, 0, w, h);
+            var alive = false;
+            for (var i = 0; i < bits.length; i++) {
+              var b = bits[i];
+              b.life = el / 1500;
+              if (b.life >= 1) continue;
+              alive = true;
+              b.x += b.vx; b.y += b.vy;
+              b.vy += 0.16;                 // gravity, so they arc and fall
+              b.vx *= 0.992;
+              b.a += b.spin;
+              ctx.globalAlpha = Math.max(0, 1 - b.life * b.life);
+              ctx.fillStyle = b.c;
+              ctx.save();
+              ctx.translate(b.x, b.y);
+              ctx.rotate(b.a);
+              ctx.fillRect(-b.r / 2, -b.r / 2, b.r, b.r * 1.6);
+              ctx.restore();
+            }
+            ctx.globalAlpha = 1;
+            raf = alive ? requestAnimationFrame(frame) : null;
+          })(start);
+        }
+        /* Two seconds is long enough to read a name and short enough that the
+           next child is not left staring at somebody else's. */
+        function flash(el, ms) {
+          show(el);
+          clearTimeout(timer);
+          timer = setTimeout(backToWaiting, ms || 2600);
+        }
+        /* The typed-input fallback only works while it holds focus, and a
+           hallway tablet loses focus to every stray tap. */
+        function focusTyped() { try { typedInput.focus({ preventScroll: true }); } catch (e) {} }
+        document.addEventListener('click', focusTyped);
+        setInterval(focusTyped, 2000);
+
+        function send(input) { if (input) post({ input: input }); }
+        function sendDemo() { post({ demo: true }); }
+
+        function post(payload) {
+          if (busy) return;
+          busy = true;
+          fetch('/kiosk/scan', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d && d.ok) {
+                nameEl.textContent = d.firstName;
+                detail.textContent = d.already
+                  ? 'You are already checked in'
+                  : (d.className || 'Welcome!');
+                /* SHOW first, then celebrate. fireBurst sizes the canvas from
+                 * its own clientWidth, and a hidden element measures 0 — so
+                 * called the other way round the confetti drew into a 0x0
+                 * buffer and nothing appeared. */
+                flash(hello, 3400);
+                celebrate(d.bucks, d.already);
+              } else {
+                /* Deliberately vague about WHY. A screen in a hallway saying
+                   "that card was revoked" tells whoever is holding it something
+                   about a child they may have no business knowing. */
+                nopeTitle.textContent = d && d.reason === 'no-meeting'
+                  ? 'No [Kids Ministry] today' : 'Try again';
+                nopeSub.textContent = d && d.reason === 'no-meeting'
+                  ? 'Check-in opens on Sunday and Wednesday'
+                  : 'Ask a helper if it keeps happening';
+                flash(nope, 2200);
+              }
+            })
+            .catch(function () {
+              nopeTitle.textContent = 'Try again';
+              nopeSub.textContent = 'Ask a helper if it keeps happening';
+              flash(nope, 2200);
+            })
+            .then(function () { busy = false; });
+        }
+
+        // --- a reader or QR scanner typing into the hidden field ------------
+        document.getElementById('typed').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var v = typedInput.value;
+          typedInput.value = '';
+          send(v);
+        });
+
+        // --- Web NFC: the child taps the tablet itself ----------------------
+        // Chrome on Android. Needs a secure context and a user gesture the
+        // first time, which is what the Start button is for; after that it
+        // scans for as long as the page is open, which is why this page never
+        // navigates.
+        if ('NDEFReader' in window) {
+          var reader = new NDEFReader();
+          var scanning = false;
+          function beginScan() {
+            if (scanning) return Promise.resolve();
+            return reader.scan().then(function () {
+              scanning = true;
+              startBtn.hidden = true;
+              sub.textContent = 'Hold it on the tablet to check in';
+              reader.onreading = function (ev) {
+                // Prefer the URL WE wrote to the tag over the chip's serial:
+                // the token is ours and revocable, the serial is neither.
+                var found = null;
+                var msg = ev.message;
+                for (var i = 0; msg && i < msg.records.length; i++) {
+                  var rec = msg.records[i];
+                  if (rec.recordType === 'url' || rec.recordType === 'text') {
+                    try {
+                      found = new TextDecoder(rec.encoding || 'utf-8').decode(rec.data);
+                      break;
+                    } catch (e) {}
+                  }
+                }
+                send(found || ev.serialNumber || '');
+              };
+            });
+          }
+          // Try without a gesture first — if the permission was already granted
+          // on this tablet, the kiosk comes up scanning after a power cut with
+          // nobody there to press anything.
+          beginScan().catch(function () {
+            startBtn.hidden = false;
+            sub.textContent = 'Press the button below to switch check-in on';
+          });
+          startBtn.addEventListener('click', function () {
+            beginScan().catch(function () {
+              sub.textContent = 'This tablet cannot read cards. Use a reader instead.';
+              startBtn.hidden = true;
+            });
+          });
+        } else {
+          // No Web NFC — an iPad, or a desktop. The typed fallback still works,
+          // so say nothing alarming: a reader plugged into it behaves normally.
+          sub.textContent = 'Hold a card to the reader to check in';
+        }
+
+        /* The demo's pretend tap. The server picks an invented child and runs
+           the real path; nothing about this exists on the church's kiosk. */
+        if (document.querySelector('.demo-hint')) {
+          window.addEventListener('keydown', function (e) {
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            e.preventDefault();
+            if (busy) return;
+            sendDemo();
+          });
+          // A tap works too, for anybody looking at this on a phone.
+          document.getElementById('wait').addEventListener('click', function () {
+            if (!busy) sendDemo();
+          });
+        }
+
+        focusTyped();
+      })();
+    </script>
+  </body>
+</html>

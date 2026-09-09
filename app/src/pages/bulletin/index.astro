@@ -1,0 +1,95 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { desc, eq } from 'drizzle-orm';
+import { nextSunday, formatServiceDate } from '../../lib/bulletin';
+
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const date = String(form.get('serviceDate') ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const existing = await db.select({ id: schema.bulletins.id }).from(schema.bulletins)
+      .where(eq(schema.bulletins.serviceDate, date)).limit(1);
+    if (existing[0]) return Astro.redirect(`/bulletin/${existing[0].id}`, 303);
+
+    // Start from the most recent one. Week to week almost nothing changes but
+    // the hymns and a name or two — the pastor's ask, and it means the blank-page
+    // problem never happens.
+    const [previous] = await db.select().from(schema.bulletins)
+      .orderBy(desc(schema.bulletins.serviceDate)).limit(1);
+
+    const made = await db.insert(schema.bulletins).values({
+      serviceDate: date,
+      title: previous?.title ?? 'Morning Worship',
+      // The preacher carries over because it is usually the same person; the
+      // week it is not, it is one field to change.
+      preacher: previous?.preacher ?? null,
+      // Announcements are NOT carried over. An order of service repeats every
+      // week; last week's announcements are stale by definition, and quietly
+      // republishing them is worse than starting empty.
+      announcements: '[]',
+      // Prayer requests ARE carried over — the opposite, and deliberately so.
+      // An announcement expires; a request for someone's health does not, and
+      // making the church retype the same names every week is exactly how a
+      // name quietly stops being prayed for. Each keeps the `since` date it
+      // first appeared, so the editor can show how long it has been carried
+      // and somebody can decide, rather than the software deciding.
+      prayerRequests: previous?.prayerRequests ?? '[]',
+      scripture: null, scriptureRef: null,
+      status: 'draft',
+      createdAt: nowIso(), updatedAt: nowIso(),
+    }).returning({ id: schema.bulletins.id });
+    return Astro.redirect(`/bulletin/${made[0]!.id}`, 303);
+  }
+}
+
+const all = await db.select().from(schema.bulletins)
+  .orderBy(desc(schema.bulletins.serviceDate)).limit(20);
+const sunday = nextSunday();
+const haveThisWeek = all.some((b) => b.serviceDate === sunday);
+---
+<AppLayout title="Bulletin" user={user}>
+  <h1>Bulletin</h1>
+
+  <div class="card" style="margin-bottom:24px;">
+    <h2>{haveThisWeek ? 'Another week' : `Start ${formatServiceDate(sunday)}`}</h2>
+    <p class="muted" style="margin:0 0 14px; max-width:58ch;">
+      A new bulletin starts from the last one, so you only change what is
+      different. Announcements start empty — last week's are stale. Prayer
+      requests carry over, so nobody is dropped from the list by accident.
+    </p>
+    <form method="POST" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+      <label class="field" style="margin:0; min-width:190px;">
+        <span>Service date</span>
+        <input type="date" name="serviceDate" value={sunday} required />
+      </label>
+      <button class="btn" type="submit">Start it</button>
+    </form>
+  </div>
+
+  <div class="card" style="padding:0; overflow-x:auto;" class:list={['card','t-wrap']}>
+    <table class="t-stack">
+      <thead><tr><th>Sunday</th><th>Service</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {all.length === 0 ? (
+          <tr><td colspan="4" class="muted" style="padding:22px;">None yet.</td></tr>
+        ) : all.map((b) => (
+          <tr>
+            <td>{formatServiceDate(b.serviceDate)}</td>
+            <td data-label="Service">{b.title}</td>
+            <td data-label="Status">
+              {b.status === 'published'
+                ? <span class="chip">published</span>
+                : <span class="chip chip--warn">draft</span>}
+            </td>
+            <td data-label=""><a href={`/bulletin/${b.id}`}>Edit</a></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>

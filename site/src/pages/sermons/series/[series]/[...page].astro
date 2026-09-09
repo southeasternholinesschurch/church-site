@@ -1,0 +1,85 @@
+---
+import type { GetStaticPaths } from 'astro';
+import BaseLayout from '../../../../layouts/BaseLayout.astro';
+import SermonCard from '../../../../components/SermonCard.astro';
+import { getCollection } from 'astro:content';
+import { slugify } from '../../../../lib/slugify';
+import { isVisibleSermon } from '../../../../lib/content';
+
+export const getStaticPaths = (async ({ paginate }) => {
+  const sermons = await getCollection('sermons', ({ data }) => isVisibleSermon(data));
+  const seriesList = [...new Set(sermons.map((s) => s.data.series).filter(Boolean))] as string[];
+
+  return seriesList.flatMap((series) => {
+    const filtered = sermons
+      .filter((s) => s.data.series === series)
+      // oldest first: a series is meant to be followed from the beginning
+      .sort((a, b) => a.data.date.getTime() - b.data.date.getTime());
+    return paginate(filtered, {
+      pageSize: 12,
+      params: { series: slugify(series) },
+      props: { seriesName: series, total: filtered.length, span: {
+        from: filtered[0].data.date, to: filtered[filtered.length - 1].data.date,
+      } },
+    });
+  });
+}) satisfies GetStaticPaths;
+
+const { page, seriesName, total, span } = Astro.props;
+const fmt = (d: Date) =>
+  d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const spanLabel = fmt(span.from) === fmt(span.to) ? fmt(span.from) : `${fmt(span.from)} – ${fmt(span.to)}`;
+---
+<BaseLayout
+  title={`${seriesName} — Sermons`}
+  description={`Every message in the ${seriesName} series from [Your Church Name].`}
+>
+  <section class="phead">
+    <div class="phead__body">
+      <a href="/sermons" class="phead__back load d1">← All sermons</a>
+      <p class="label load d1 phead__eyebrow">Series</p>
+      <h1 class="serif load d2">{seriesName}</h1>
+      <p class="phead__lede load d3">
+        {total} service{total === 1 ? '' : 's'} · {spanLabel} · in order, from the beginning
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap grid-wrap">
+    <div class="grid">
+      {page.data.map((sermon) => <SermonCard sermon={sermon} />)}
+    </div>
+
+    {page.lastPage > 1 && (
+      <nav class="pager reveal" aria-label="Pagination">
+        {page.url.prev ? <a href={page.url.prev}>← Earlier</a> : <span class="pager__off">← Earlier</span>}
+        <span class="pager__now">{page.currentPage} / {page.lastPage}</span>
+        {page.url.next ? <a href={page.url.next}>Later →</a> : <span class="pager__off">Later →</span>}
+      </nav>
+    )}
+  </section>
+</BaseLayout>
+
+<style>
+  .phead { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .phead__body { position: relative; z-index: 3; padding: 128px var(--pad) 82px; }
+  .phead__back { display: inline-block; font-size: 14px; font-weight: 700;
+                 color: rgba(244,239,231,.66); margin-bottom: 34px; }
+  .phead__back:hover { color: var(--cream); }
+  .phead__eyebrow { color: var(--red-tint); margin: 0 0 18px; }
+  .phead h1 { margin: 0; font-size: clamp(40px,5.6vw,80px); line-height: 1.02; letter-spacing: -.02em; }
+  .phead__lede { margin: 20px 0 0; font-size: 17px; line-height: 1.6; color: rgba(244,239,231,.74); }
+
+  .grid-wrap { padding-block: clamp(60px,7vw,96px) clamp(80px,9vw,130px); }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 44px 34px; }
+
+  .pager { display: flex; align-items: center; justify-content: center; gap: 22px; margin-top: 66px; font-size: 15px; }
+  .pager a { color: var(--red); font-weight: 700; }
+  .pager__off { color: rgba(74,64,56,.4); }
+  .pager__now { color: var(--ink-soft); }
+
+  @media (max-width: 860px) {
+    .phead__body { padding: 104px var(--pad) 50px; }
+    .grid { grid-template-columns: 1fr; gap: 34px; }
+  }
+</style>

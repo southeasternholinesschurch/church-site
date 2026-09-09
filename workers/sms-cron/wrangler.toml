@@ -1,0 +1,28 @@
+name = "sms-cron"
+main = "src/index.ts"
+compatibility_date = "2026-08-28"
+
+# Two schedules, doing different amounts of work.
+#
+# Every 5 minutes drives the message queue: scheduled and birthday texts are
+# expanded and sent. Frequent because it decides for itself what is due, so a
+# missed run costs five minutes rather than a whole occurrence — and because a
+# large audience drains 40 per run under the Workers subrequest limit, so ticks
+# are how a 90-person send finishes promptly.
+#
+# The hourly one additionally passes ?roster=1 for the Monday singing reminder,
+# which reads a Google Sheet. Gated so raising the frequency did not turn 24
+# sheet fetches a day into 288.
+[triggers]
+crons = ["*/5 * * * *", "0 * * * *"]
+
+# Declared HERE, not only in the dashboard.
+#
+# A dashboard-set plain var is REPLACED by whatever `wrangler deploy` uploads,
+# and this file used to declare none — so deploying wiped APP_URL and every
+# tick failed with "Invalid URL: undefined/api/sms/run-due", taking the Monday
+# singing reminder down with it. Secrets (SMS_CRON_SECRET) are not affected;
+# they survive a deploy. Vars do not. Keeping it in the file means the deploy
+# that would erase it is the same deploy that restores it.
+[vars]
+APP_URL = "https://app.example.org"

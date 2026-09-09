@@ -1,0 +1,88 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { isKidsRole } from '../../lib/permissions';
+
+/**
+ * [Kids Ministry] — the landing page.
+ *
+ * The permission model and this chrome are real; the sections below are not
+ * built yet. They are listed rather than hidden so a volunteer signing in for
+ * the first time can see what the section will hold, and so "not here yet"
+ * never reads as "broken".
+ *
+ * Each tile becomes a link as its page lands.
+ */
+const user = Astro.locals.user!;
+const volunteer = isKidsRole(user.role);
+const director = user.role === 'kids-director';
+
+const SECTIONS: { name: string; note: string; href?: string; directorOnly?: boolean }[] = [
+  { name: 'Children',  note: 'Every child, their class, allergies and guardians.',
+    href: '/kids/children' },
+  { name: 'Registers', note: 'Take the register for your class on your phone.',
+    href: '/kids/register' },
+  { name: 'Classes',   note: 'The age groups, who teaches them, and the bus routes.',
+    href: '/kids/classes', directorOnly: true },
+
+  { name: '[Kids Currency]',  note: 'Award, spend and the running balance — on each child’s page.',
+    href: '/kids/children' },
+  { name: 'Messaging', note: 'Pickup times, delays and cancellations.',
+    href: '/kids/messaging' },
+  { name: 'Replies',   note: 'What families have texted back.', href: '/kids/replies' },
+];
+const visible = SECTIONS.filter((s) => !(s.directorOnly && user.role === 'kids'));
+---
+<KidsLayout title="[Kids Ministry]" user={user}>
+  {/* The wordmark IS the heading here. The h1 keeps the text for screen
+      readers and for anything that cannot load the image. */}
+  <h1 class="k-hero">
+    <img src="/kids-logo-white.png" alt="[Kids Ministry]" width="450" height="220" />
+  </h1>
+  <p class="k-muted" style="margin:-4px 0 26px; font-size:17px;">
+    {volunteer
+      ? 'Children’s ministry — classes and the bus ministry.'
+      : 'Children’s ministry. You are here as staff; volunteers see only this section.'}
+  </p>
+
+  <div class="k-card" style="max-width:620px; margin-bottom:30px;">
+    <div class="k-label" style="color:var(--k-ink-soft);">Signed in</div>
+    <p style="margin:6px 0 0; font-size:18px;">
+      <strong>{user.name ?? user.email}</strong>
+      <span class="k-chip k-chip--quiet" style="margin-left:8px; color:var(--k-ink-soft); border-color:rgba(13,27,69,.2);">
+        {user.role === 'kids' ? 'volunteer' : user.role === 'kids-director' ? 'director' : user.role}
+      </span>
+    </p>
+    <p class="k-muted" style="margin:10px 0 0;">
+      {volunteer
+        ? 'This is your section of the app, and the only part you can reach.'
+        : 'You can move between this section and the rest of the dashboard.'}
+    </p>
+  </div>
+
+  {/* Built sections are links; the rest are listed rather than hidden, so a
+      volunteer signing in for the first time can see what is coming and "not
+      here yet" never reads as "broken". Each becomes a link as it lands. */}
+  <div class="k-tiles">
+    {visible.map((s) => {
+      const Tag = s.href ? 'a' : 'div';
+      return (
+        <Tag class:list={['k-tile', !s.href && 'k-tile--soon']} href={s.href}>
+          <div class="k-tile__name">
+            {s.name}
+            {s.directorOnly && director && (
+              <span class="k-chip k-chip--quiet" style="margin-left:8px;">director</span>
+            )}
+            {!s.href && <span class="k-chip k-chip--quiet" style="margin-left:8px;">soon</span>}
+          </div>
+          <div class="k-tile__note">{s.note}</div>
+        </Tag>
+      );
+    })}
+  </div>
+</KidsLayout>
+
+<style>
+  /* Bigger than the header's, and capped so it does not dominate a phone. */
+  .k-hero { margin: 0 0 16px; }
+  .k-hero img { height: clamp(52px, 11vw, 84px); width: auto; display: block; }
+</style>

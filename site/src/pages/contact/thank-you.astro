@@ -1,0 +1,34 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<BaseLayout title="Thank You" description="Your message has been sent to [Your Church Name].">
+  <section class="ty">
+    <div class="ty__body">
+      <p class="label load d1 ty__eyebrow">Sent</p>
+      <h1 class="serif load d2">Thank you.</h1>
+      <p class="ty__p load d3">
+        Your message is in the church inbox. Someone reads it — usually within a day
+        or two. If it was a prayer request, it goes to the pastors.
+      </p>
+      <div class="ty__acts load d4">
+        <a href="/" class="btn btn--solid">Back to home</a>
+        <a href="/about" class="btn btn--ghost">Plan a visit</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* Full-height so the page doesn't sit as a thin strip above the footer. */
+  .ty { background: var(--ink); color: var(--cream); min-height: 78vh;
+        display: flex; align-items: center; }
+  .ty__body { padding: 130px var(--pad) clamp(70px,8vw,110px); max-width: 720px; }
+  .ty__eyebrow { color: var(--red-tint); margin: 0 0 20px; }
+  .ty h1 { margin: 0; font-size: clamp(44px,6.4vw,92px); line-height: 1; letter-spacing: -.02em; }
+  .ty__p { margin: 24px 0 0; font-size: 18px; line-height: 1.72; color: rgba(244,239,231,.78); max-width: 46ch; }
+  .ty__acts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+
+  @media (max-width: 860px) {
+    .ty__body { padding: 110px var(--pad) 60px; }
+  }
+</style>

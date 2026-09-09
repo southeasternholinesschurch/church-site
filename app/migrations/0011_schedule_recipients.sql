@@ -1,0 +1,11 @@
+-- Scheduling a text to named individuals, not only to everyone or a group.
+--
+-- A JSON array of person ids. Stored as text because D1 is SQLite and this is
+-- a short list read as a whole — there is nothing to join on and nothing to
+-- query by, so a second table would be machinery without a purpose.
+--
+-- The three audiences are mutually exclusive and read in this order:
+--   recipient_ids set  -> exactly those people
+--   group_id set       -> that group
+--   neither            -> everyone who can be texted
+ALTER TABLE `message_schedules` ADD `recipient_ids` text;
