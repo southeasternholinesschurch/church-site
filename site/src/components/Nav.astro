@@ -34,7 +34,7 @@ const current = Astro.url.pathname;
           densities 1-3 because the old mark was emitted at exactly its 30px
           display size, which is what made it look soft on any retina screen. */}
       <Image src={wordmark} alt="Fairhaven Community Church"
-             width={210} densities={[1, 2, 3]} class="nav__wordmark" />
+             width={260} densities={[1, 2, 3]} class="nav__wordmark" />
     </a>
 
     <nav class="nav__links" aria-label="Primary">
@@ -68,7 +68,7 @@ const current = Astro.url.pathname;
   .nav__brand { display: flex; align-items: center; color: inherit; }
   /* Height-driven so the two versions can never disagree; width follows the
      6.18:1 artwork. */
-  .nav__brand :global(.nav__wordmark) { height: 34px; width: auto; display: block; }
+  .nav__brand :global(.nav__wordmark) { height: 42px; width: auto; display: block; }
 
   .nav__links { display: flex; align-items: center; gap: 34px; }
   .nav__links a { color: rgba(244,239,231,.74); font-size: 14px; }
