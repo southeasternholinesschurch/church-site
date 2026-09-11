@@ -59,7 +59,7 @@ const INSTALL = {
 
 const {
   title,
-  description = 'Fairhaven Community Church — a family in Fairhaven. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
+  description = 'Fairhaven Community Church — a family in Indianapolis. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
   navTheme = 'dark',
   noindex = false,
   installAs = 'site',
@@ -170,7 +170,26 @@ const settings = settingsEntry.data;
               }
             }
           },
-          { threshold: 0.1, rootMargin: '0px 0px -6% 0px' }
+          /*
+           * threshold 0, NOT a fraction of the element.
+           *
+           * A fractional threshold asks for a percentage of the ELEMENT to be
+           * on screen, which is impossible once the element is taller than the
+           * viewport. The sermon pages made that real: a published transcript
+           * makes the notes block 42,909px tall, so the old 0.1 demanded
+           * 4,291px of it be visible at once. The observer never fired, the
+           * element stayed at opacity 0, and the page showed a screen-and-a-half
+           * of nothing where the sermon should be — with all four thousand
+           * words present in the DOM the whole time.
+           *
+           * Nothing was wrong until content arrived: every sermon body was
+           * empty before, so the block was short and the reveal worked.
+           *
+           * The bottom margin is what keeps it from firing too early, and it
+           * behaves the same whether the element is a small card or a whole
+           * sermon.
+           */
+          { threshold: 0, rootMargin: '0px 0px -10% 0px' }
         );
         document.querySelectorAll('.reveal, .fade, .growx').forEach((el) => io.observe(el));
 
