@@ -205,6 +205,24 @@ const settings = defineCollection({
   }),
 });
 
+/**
+ * The words on each page, so they are content rather than code.
+ *
+ * One file per page. Most of the site's prose was written straight into the
+ * .astro files while it was being built, which meant changing a sentence was a
+ * developer's job — the same trap the staff photographs were in.
+ *
+ * The shape is deliberately loose: every page has different sections, and a
+ * strict schema here would mean editing TypeScript to add a sentence, which is
+ * the very thing this removes. What keeps it safe is the READER, not the
+ * schema — lib/copy.ts falls back to the text written in the page, so a missing
+ * or misspelt key shows the original words rather than a hole.
+ */
+const copy = defineCollection({
+  type: 'data',
+  schema: z.record(z.any()),
+});
+
 const livestreamOverride = defineCollection({
   type: 'data',
   schema: z.object({
@@ -234,4 +252,4 @@ const banner = defineCollection({
 });
 
 export const collections = {
-  beliefs, staff, sermons, series, ministries, settings, livestreamOverride, banner };
+  beliefs, staff, sermons, series, ministries, settings, copy, livestreamOverride, banner };

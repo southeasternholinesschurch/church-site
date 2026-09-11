@@ -1,0 +1,34 @@
+# The words on the home page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+hero:
+  eyebrow: "Welcome · Worship · Word"
+  headline: "A place to"
+  headlineEmphasis: "call home"
+  primaryButton: "Plan Your Visit"
+  secondaryButton: "Get Directions"
+gather:
+  eyebrow: "We Gather"
+mission:
+  eyebrow: "Why We're Here"
+expect:
+  welcome:
+    title: "A warm welcome"
+  worship:
+    title: "Heartfelt worship"
+  preaching:
+    title: "Preaching for real life"
+events:
+  eyebrow: "What's Happening"
+  link: "See all events →"
+  error: "Couldn't reach the calendar just now. It'll retry on the next rebuild."
+  empty: "Nothing on the calendar in the next few weeks — check back soon."
+ministries:
+  eyebrow: "Ministries"
+  sub: "Something for every season of life"

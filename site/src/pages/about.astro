@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { clockText } from '../lib/format';
@@ -18,6 +19,9 @@ const staff = (await getCollection('staff')).sort((a, b) => a.data.order - b.dat
 
 const [settingsEntry] = await getCollection('settings');
 const settings = settingsEntry.data;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('about');
 ---
 <BaseLayout
   title="About"
@@ -39,18 +43,17 @@ const settings = settingsEntry.data;
     <div class="ahero__grade"></div>
 
     <div class="ahero__body par-fg" data-par="-30">
-      <p class="label load d1 ahero__eyebrow">About</p>
-      <h1 class="serif load d2">More than a <em>congregation</em>.</h1>
+      <p class="label load d1 ahero__eyebrow">{t('hero.eyebrow', 'About')}</p>
+      <h1 class="serif load d2">{t('hero.headline', 'More than a')} <em>{t('hero.headlineEmphasis', 'congregation')}</em>.</h1>
       <p class="ahero__lede load d3">
-        A family where hearts are mended, hope is restored, and lives are changed —
-        on Meadowbrook Road since 1968.
+        {t('hero.lede', 'A family where hearts are mended, hope is restored, and lives are changed — on Meadowbrook Road since 1968.')}
       </p>
     </div>
   </section>
 
   <!-- ============ MISSION ============ -->
   <section class="mission wrap">
-    <p class="label reveal mission__h">Our Mission</p>
+    <p class="label reveal mission__h">{t('mission.eyebrow', 'Our Mission')}</p>
     <p class="serif reveal mission__stmt">
       We exist to glorify God by making Christ known, nurturing believers, and
       serving our community with <em>love and truth</em>.
@@ -66,18 +69,17 @@ const settings = settingsEntry.data;
                widths={[600, 1024, 1600]} sizes="(max-width: 760px) 100vw, 50vw" />
       </div>
       <div>
-        <p class="label split__h">What We Believe</p>
-        <h2 class="serif split__title">Historic Christian truth, lived out.</h2>
+        <p class="label split__h">{t('beliefs.eyebrow', 'What We Believe')}</p>
+        <h2 class="serif split__title">{t('beliefs.title', 'Historic Christian truth, lived out.')}</h2>
         <p class="split__p">
-          We hold to the authority of Scripture, the power of prayer, and the necessity
-          of a personal relationship with Jesus.
+          {t('beliefs.body1', 'We hold to the authority of Scripture, the power of prayer, and the necessity of a personal relationship with Jesus.')}
         </p>
         <p class="split__p">
           We are committed to holiness — to walking in the Spirit and reflecting Christ's
           character in everyday life, shaped by surrender to God's will rather than by
           whatever happens to be fashionable.
         </p>
-        <a href="/about/beliefs" class="split__more">Read what we believe →</a>
+        <a href="/about/beliefs" class="split__more">{t('beliefs.link', 'Read what we believe →')}</a>
       </div>
     </div>
   </section>
@@ -85,9 +87,9 @@ const settings = settingsEntry.data;
   <!-- ============ WHAT TO EXPECT ============ -->
   <section class="wrap sect">
     <div class="sect__head reveal">
-      <p class="label sect__h">What To Expect</p>
-      <p class="sect__sub">Your first Sunday, roughly</p>
-        <a href="/about/im-new" class="split__more">New here? Start here →</a>
+      <p class="label sect__h">{t('expect.eyebrow', 'What To Expect')}</p>
+      <p class="sect__sub">{t('expect.sub', 'Your first Sunday, roughly')}</p>
+        <a href="/about/im-new" class="split__more">{t('expect.link', 'New here? Start here →')}</a>
     </div>
     <div class="beats3">
       <div class="beat reveal">
@@ -95,7 +97,7 @@ const settings = settingsEntry.data;
           <Image src={welcomeImg} alt="Being greeted at the door before the service"
                  widths={[500, 900, 1400]} sizes="(max-width: 760px) 100vw, 33vw" />
         </div>
-        <h3 class="serif">A warm welcome</h3>
+        <h3 class="serif">{t('expect.welcome.title', 'A warm welcome')}</h3>
         <p>You'll be greeted, not processed. Come as you are — there's no dress code, and
            no expectation that you already know anyone.</p>
       </div>
@@ -104,7 +106,7 @@ const settings = settingsEntry.data;
           <Image src={worshipImg} alt="The congregation with hands raised in worship"
                  widths={[500, 900, 1400]} sizes="(max-width: 760px) 100vw, 33vw" />
         </div>
-        <h3 class="serif">Heartfelt worship</h3>
+        <h3 class="serif">{t('expect.worship.title', 'Heartfelt worship')}</h3>
         <p>Hymns sung together, from the book. Reverence and joy in the same room —
            tradition held with authenticity.</p>
       </div>
@@ -113,7 +115,7 @@ const settings = settingsEntry.data;
           <Image src={preachingImg} alt="Assistant Pastor the assistant pastor preaching"
                  widths={[500, 900, 1400]} sizes="(max-width: 760px) 100vw, 33vw" />
         </div>
-        <h3 class="serif">Preaching for real life</h3>
+        <h3 class="serif">{t('expect.preaching.title', 'Preaching for real life')}</h3>
         <p>Biblical and direct, grounded in the week you actually just had — conviction
            carried with compassion.</p>
       </div>
@@ -124,14 +126,14 @@ const settings = settingsEntry.data;
   <section class="wrap sect">
     <div class="lead reveal">
       <div class="lead__intro">
-        <p class="label lead__h">Our Leadership</p>
-        <h2 class="serif lead__title">The people who serve here.</h2>
+        <p class="label lead__h">{t('leadership.eyebrow', 'Our Leadership')}</p>
+        <h2 class="serif lead__title">{t('leadership.title', 'The people who serve here.')}</h2>
         <p class="lead__p">
           Around 150 of us gather each week — families who've been at Fairhaven for
           decades alongside people who first walked in last month. These are the people
           who look after them.
         </p>
-        <a href="/about/staff" class="btn btn--ink lead__btn">Meet the staff</a>
+        <a href="/about/staff" class="btn btn--ink lead__btn">{t('leadership.button', 'Meet the staff')}</a>
       </div>
 
       <ul class="lead__people">
@@ -166,8 +168,8 @@ const settings = settingsEntry.data;
              widths={[900, 1400, 2000]} sizes="100vw" />
       <div class="visit__grade"></div>
       <div class="visit__body">
-        <p class="label visit__eyebrow">Plan Your Visit</p>
-        <h2 class="serif visit__title">Come this Sunday.</h2>
+        <p class="label visit__eyebrow">{t('visit.eyebrow', 'Plan Your Visit')}</p>
+        <h2 class="serif visit__title">{t('visit.title', 'Come this Sunday.')}</h2>
         <div class="visit__rows">
           {settings.serviceTimes.map((s) => (
             <div class="visit__row">
@@ -178,8 +180,8 @@ const settings = settingsEntry.data;
         </div>
         <p class="visit__addr">412 Meadowbrook Road<br />Fairhaven 46203</p>
         <div class="visit__acts">
-          <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--solid">Get directions</a>
-          <a href="/livestream" class="btn btn--ghost">Watch a service first</a>
+          <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--solid">{t('visit.directionsButton', 'Get directions')}</a>
+          <a href="/livestream" class="btn btn--ghost">{t('visit.watchButton', 'Watch a service first')}</a>
         </div>
       </div>
     </div>

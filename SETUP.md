@@ -132,6 +132,10 @@ is not the same as checking it did what you meant.
 reasoning, and every trap that cost real time. When this file says "and here is
 why", that is where it is.
 
+**`docs/PAGE-TEXT.md`** covers the words on the pages — where they live, how
+the staff app edits them, and the check that a field in that editor actually
+changes something.
+
 ---
 
 # Part 1 — The public website

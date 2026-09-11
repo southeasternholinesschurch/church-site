@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { getNextService } from '../lib/time';
@@ -12,6 +13,9 @@ const [overrideEntry] = await getCollection('livestreamOverride');
 const override = overrideEntry.data;
 
 const nextService = getNextService(settings.serviceTimes);
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('livestream');
 ---
 <BaseLayout
   title="Watch Live"
@@ -26,8 +30,8 @@ const nextService = getNextService(settings.serviceTimes);
     <div class="stage__scrim" aria-hidden="true"></div>
 
     <div class="stage__body">
-      <p class="label load d1 stage__eyebrow">Wherever You Are</p>
-      <h1 class="serif load d2">Watch Live</h1>
+      <p class="label load d1 stage__eyebrow">{t('stage.eyebrow', 'Wherever You Are')}</p>
+      <h1 class="serif load d2">{t('stage.headline', 'Watch Live')}</h1>
 
       <!-- Behaviour is unchanged from the working implementation: manual
            override wins, then auto-detect, then countdown. Only the markup
@@ -41,12 +45,12 @@ const nextService = getNextService(settings.serviceTimes);
         data-next-service-label={nextService?.label ?? ''}
         data-channel-url={settings.socials.youtubeUrl}
       >
-        <p class="ls__loading">Checking stream status…</p>
+        <p class="ls__loading">{t('player.checking', 'Checking stream status…')}</p>
       </div>
 
       <template id="tpl-live">
         <div class="ls__player">
-          <p class="ls__badge ls__badge--live"><span class="ls__dot"></span>We're live now</p>
+          <p class="ls__badge ls__badge--live"><span class="ls__dot"></span>{t('player.liveBadge', "We're live now")}</p>
           <div class="ls__embed">
             <iframe
               src=""
@@ -60,16 +64,16 @@ const nextService = getNextService(settings.serviceTimes);
 
       <template id="tpl-countdown">
         <div class="ls__countdown">
-          <p class="ls__badge">Not live right now</p>
+          <p class="ls__badge">{t('player.offlineBadge', 'Not live right now')}</p>
           <p class="ls__next"></p>
           <div class="ls__timer" role="timer" aria-live="polite">
-            <div class="ls__unit"><span class="d"></span><small>days</small></div>
-            <div class="ls__unit"><span class="h"></span><small>hrs</small></div>
-            <div class="ls__unit"><span class="m"></span><small>min</small></div>
-            <div class="ls__unit"><span class="s"></span><small>sec</small></div>
+            <div class="ls__unit"><span class="d"></span><small>{t('player.daysUnit', 'days')}</small></div>
+            <div class="ls__unit"><span class="h"></span><small>{t('player.hoursUnit', 'hrs')}</small></div>
+            <div class="ls__unit"><span class="m"></span><small>{t('player.minutesUnit', 'min')}</small></div>
+            <div class="ls__unit"><span class="s"></span><small>{t('player.secondsUnit', 'sec')}</small></div>
           </div>
           <a class="btn btn--ghost channel-link" href="" target="_blank" rel="noreferrer">
-            Visit our YouTube channel ↗
+            {t('player.channelButton', 'Visit our YouTube channel ↗')}
           </a>
         </div>
       </template>
@@ -80,13 +84,13 @@ const nextService = getNextService(settings.serviceTimes);
   <section class="wrap when-wrap">
     <div class="when reveal">
       <div>
-        <p class="label when__h">When We Stream</p>
-        <h2 class="serif when__title">Every service, live.</h2>
+        <p class="label when__h">{t('schedule.eyebrow', 'When We Stream')}</p>
+        <h2 class="serif when__title">{t('schedule.title', 'Every service, live.')}</h2>
         <p class="when__p">
           Our services go out live on YouTube. If you miss one it stays on the
           channel — and the recent archive is here on the site.
         </p>
-        <a href="/sermons" class="when__link">Browse past messages →</a>
+        <a href="/sermons" class="when__link">{t('schedule.link', 'Browse past messages →')}</a>
       </div>
       <ul class="when__list">
         {settings.serviceTimes.map((s) => (

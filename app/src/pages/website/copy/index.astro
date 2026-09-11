@@ -1,0 +1,52 @@
+---
+import AppLayout from '../../../layouts/AppLayout.astro';
+import { siteEditingConfigured } from '../../../lib/site-content';
+import { listCopyPages } from '../../../lib/site-copy';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const configured = siteEditingConfigured(env);
+
+let pages: { page: string; label: string }[] = [];
+let error: string | null = null;
+if (configured) {
+  try { pages = await listCopyPages(env); }
+  catch (err) { error = err instanceof Error ? err.message : String(err); }
+}
+---
+<AppLayout title="Page text" user={user}>
+  <p style="margin:0 0 6px;"><a href="/website" class="muted">← The website</a></p>
+  <h1>Page text</h1>
+  <p class="muted" style="max-width:62ch; margin:-4px 0 22px;">
+    The words on each page — headings, paragraphs, button labels. Grouped by the
+    page they appear on, and within that by the section, so you can find a
+    sentence by remembering where you saw it.
+  </p>
+
+  {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong></p>}
+  {error && <p class="notice">Could not read the website's files: {error}</p>}
+
+  {configured && pages.length === 0 && (
+    <p class="notice">
+      No pages have been moved across yet. Text still written into a page keeps
+      working — it is simply not editable here until that page is done.
+    </p>
+  )}
+
+  {pages.length > 0 && (
+    <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+      <table class="t-stack">
+        <thead><tr><th>Page</th><th></th></tr></thead>
+        <tbody>
+          {pages.map((p) => (
+            <tr>
+              <td data-label="Page"><strong>{p.label}</strong></td>
+              <td data-label=""><a class="btn btn--ghost" style="min-height:36px; padding:6px 12px;"
+                 href={`/website/copy/${p.page}`}>Edit the words</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AppLayout>

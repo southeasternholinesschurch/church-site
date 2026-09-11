@@ -1,0 +1,40 @@
+# The words on the about page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+hero:
+  eyebrow: "About"
+  headline: "More than a"
+  headlineEmphasis: "congregation"
+  lede: "A family where hearts are mended, hope is restored, and lives are changed — on Meadowbrook Road since 1968."
+mission:
+  eyebrow: "Our Mission"
+beliefs:
+  eyebrow: "What We Believe"
+  title: "Historic Christian truth, lived out."
+  body1: "We hold to the authority of Scripture, the power of prayer, and the necessity of a personal relationship with Jesus."
+  link: "Read what we believe →"
+expect:
+  eyebrow: "What To Expect"
+  sub: "Your first Sunday, roughly"
+  link: "New here? Start here →"
+  welcome:
+    title: "A warm welcome"
+  worship:
+    title: "Heartfelt worship"
+  preaching:
+    title: "Preaching for real life"
+leadership:
+  eyebrow: "Our Leadership"
+  title: "The people who serve here."
+  button: "Meet the staff"
+visit:
+  eyebrow: "Plan Your Visit"
+  title: "Come this Sunday."
+  directionsButton: "Get directions"
+  watchButton: "Watch a service first"

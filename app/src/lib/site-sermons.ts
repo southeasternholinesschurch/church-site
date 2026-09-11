@@ -14,6 +14,7 @@
  */
 import {
   readFile, listDir, writeFile, deleteFile, commitMessage, type GitEnv,
+  YAML_OUT,
 } from './site-content';
 import { parseDocument } from 'yaml';
 
@@ -136,7 +137,7 @@ export async function saveSermon(
     else if (doc.has(key)) doc.delete(key);
   }
 
-  const text = `---\n${String(doc).trimEnd()}\n---\n\n${body.trim()}\n`;
+  const text = `---\n${YAML_OUT(doc).trimEnd()}\n---\n\n${body.trim()}\n`;
   await writeFile(env, {
     path, content: text, sha: sha ?? existing?.sha,
     message: commitMessage(`Sermon: ${values.title || slug}`, who),

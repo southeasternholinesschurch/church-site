@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { copyFor } from '../../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { MINISTRY_PHOTOS, MINISTRY_LOGOS, MINISTRY_PHOTO_ALT } from '../../lib/ministry-assets';
@@ -10,6 +11,9 @@ import { MINISTRY_PHOTOS, MINISTRY_LOGOS, MINISTRY_PHOTO_ALT } from '../../lib/m
  * events; this page's job is to show what exists and get you there.
  */
 const ministries = (await getCollection('ministries')).sort((a, b) => a.data.order - b.data.order);
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('ministries');
 ---
 <BaseLayout
   title="Ministries"
@@ -18,11 +22,10 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
   <!-- ============ HEADER ============ -->
   <section class="phead">
     <div class="phead__body">
-      <p class="label load d1 phead__eyebrow">Get Involved</p>
-      <h1 class="serif load d2">Ministries</h1>
+      <p class="label load d1 phead__eyebrow">{t('header.eyebrow', 'Get Involved')}</p>
+      <h1 class="serif load d2">{t('header.headline', 'Ministries')}</h1>
       <p class="phead__lede load d3">
-        Something for every season of life — from four-year-olds to the people who
-        have been here longest.
+        {t('header.lede', 'Something for every season of life — from four-year-olds to the people who have been here longest.')}
       </p>
     </div>
   </section>
@@ -55,7 +58,7 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
               <h2 class="serif card__name">{m.data.name}</h2>
               {m.data.ageRange && <span class="card__age">{m.data.ageRange}</span>}
               <p class="card__sum">{m.data.summary}</p>
-              <span class="card__more">Learn more →</span>
+              <span class="card__more">{t('grid.cardLink', 'Learn more →')}</span>
             </div>
           </a>
         );
@@ -67,13 +70,13 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
   <section class="wrap cta-wrap">
     <div class="cta reveal">
       <div>
-        <h2 class="serif cta__title">Not sure where you'd fit?</h2>
+        <h2 class="serif cta__title">{t('cta.title', "Not sure where you'd fit?")}</h2>
         <p class="cta__p">
           Come on a Sunday and ask anyone. Nobody here expects you to have picked a
           group before you've met people.
         </p>
       </div>
-      <a href="/about" class="btn btn--solid cta__btn">Plan your visit</a>
+      <a href="/about" class="btn btn--solid cta__btn">{t('cta.button', 'Plan your visit')}</a>
     </div>
   </section>
 </BaseLayout>

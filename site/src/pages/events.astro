@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 import EventCard from '../components/EventCard.astro';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
@@ -31,6 +32,9 @@ for (const e of events) {
   if (last && last.label === label) last.items.push(e);
   else months.push({ label, items: [e] });
 }
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('events');
 ---
 <BaseLayout
   title="Events"
@@ -39,11 +43,10 @@ for (const e of events) {
   <!-- ============ HEADER ============ -->
   <section class="phead">
     <div class="phead__body">
-      <p class="label load d1 phead__eyebrow">What's Happening</p>
-      <h1 class="serif load d2">Events</h1>
+      <p class="label load d1 phead__eyebrow">{t('header.eyebrow', "What's Happening")}</p>
+      <h1 class="serif load d2">{t('header.headline', 'Events')}</h1>
       <p class="phead__lede load d3">
-        Special services, revivals and gatherings. The weekly rhythm below runs
-        whether or not anything special is on the calendar.
+        {t('header.lede', 'Special services, revivals and gatherings. The weekly rhythm below runs whether or not anything special is on the calendar.')}
       </p>
     </div>
   </section>
@@ -52,7 +55,7 @@ for (const e of events) {
   <section class="wrap week-wrap">
     <div class="week reveal">
       <div class="week__head">
-        <p class="label week__h">Every Week</p>
+        <p class="label week__h">{t('weekly.eyebrow', 'Every Week')}</p>
         <p class="week__sub">412 Meadowbrook Road</p>
       </div>
       <ul class="week__list">
@@ -70,7 +73,7 @@ for (const e of events) {
   <!-- ============ CALENDAR ============ -->
   <section class="wrap cal-wrap">
     <div class="cal__head reveal">
-      <p class="label cal__h">On the Calendar</p>
+      <p class="label cal__h">{t('calendar.eyebrow', 'On the Calendar')}</p>
       {events.length > 0 && (
         <p class="cal__sub">Next {events.length === 1 ? 'event' : `${events.length} events`}</p>
       )}
@@ -114,13 +117,13 @@ for (const e of events) {
     </div>
     <div class="band__scrim" aria-hidden="true"></div>
     <div class="band__body par-fg" data-par="-32">
-      <p class="label band__eyebrow">Come Along</p>
-      <h2 class="serif band__title">You don't need an invitation to any of it.</h2>
+      <p class="label band__eyebrow">{t('band.eyebrow', 'Come Along')}</p>
+      <h2 class="serif band__title">{t('band.title', "You don't need an invitation to any of it.")}</h2>
       <p class="band__p">
         Every service and event on this page is open. Turn up, sit anywhere, leave when
         you need to.
       </p>
-      <a href="/about" class="btn btn--solid band__btn">Plan your visit</a>
+      <a href="/about" class="btn btn--solid band__btn">{t('band.button', 'Plan your visit')}</a>
     </div>
   </section>
 </BaseLayout>

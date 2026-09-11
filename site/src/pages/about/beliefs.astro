@@ -1,11 +1,15 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { copyFor } from '../../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import heroImg from '../../assets/photos/hymnal.jpg';
 
 const beliefs = (await getCollection('beliefs')).sort((a, b) => a.data.order - b.data.order);
 const rendered = await Promise.all(beliefs.map((b) => b.render()));
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('beliefs');
 ---
 <BaseLayout
   title="What We Believe"
@@ -19,12 +23,12 @@ const rendered = await Promise.all(beliefs.map((b) => b.render()));
     </div>
     <div class="bhero__grade" aria-hidden="true"></div>
     <div class="bhero__body par-fg" data-par="-24">
-      <a href="/about" class="bhero__back load d1">← About</a>
-      <p class="label load d1 bhero__eyebrow">What We Believe</p>
-      <h1 class="serif load d2">Earnestly contend for the faith.</h1>
+      <a href="/about" class="bhero__back load d1">{t('hero.back', '← About')}</a>
+      <p class="label load d1 bhero__eyebrow">{t('hero.eyebrow', 'What We Believe')}</p>
+      <h1 class="serif load d2">{t('hero.headline', 'Earnestly contend for the faith.')}</h1>
       <blockquote class="bhero__verse load d3">
-        <p>“…earnestly contend for the faith which was once delivered unto the saints.”</p>
-        <cite>Jude 3</cite>
+        <p>“{t('hero.verse', '…earnestly contend for the faith which was once delivered unto the saints.')}”</p>
+        <cite>{t('hero.verseReference', 'Jude 3')}</cite>
       </blockquote>
     </div>
   </section>
@@ -32,9 +36,7 @@ const rendered = await Promise.all(beliefs.map((b) => b.render()));
   <!-- ============ INTRO ============ -->
   <section class="wrap intro-wrap">
     <p class="intro reveal">
-      At Fairhaven Community Church, our beliefs are rooted in the timeless truth of
-      God's Word and shaped by a passion for holy living. Here's a simple overview of
-      what we hold dear.
+      {t('intro.body', "At Fairhaven Community Church, our beliefs are rooted in the timeless truth of God's Word and shaped by a passion for holy living. Here's a simple overview of what we hold dear.")}
     </p>
   </section>
 
@@ -60,13 +62,13 @@ const rendered = await Promise.all(beliefs.map((b) => b.render()));
   <section class="wrap cta-wrap">
     <div class="cta reveal">
       <div>
-        <h2 class="serif cta__title">Questions about any of this?</h2>
+        <h2 class="serif cta__title">{t('cta.title', 'Questions about any of this?')}</h2>
         <p class="cta__p">
           Ask. Nobody here minds a hard question, and you don't have to agree with
           everything to come and sit with us on a Sunday.
         </p>
       </div>
-      <a href="/contact" class="btn btn--solid cta__btn">Get in touch</a>
+      <a href="/contact" class="btn btn--solid cta__btn">{t('cta.button', 'Get in touch')}</a>
     </div>
   </section>
 </BaseLayout>

@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 
 /**
  * Discreet — deliberately not in the main nav (brief §8).
@@ -16,6 +17,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
  * like real data.
  */
 const DIRECTORY_URL = 'https://app.yourchurch.org/directory';
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('directory');
 ---
 <BaseLayout
   title="Member Directory"
@@ -24,12 +28,10 @@ const DIRECTORY_URL = 'https://app.yourchurch.org/directory';
   <!-- ============ HEADER ============ -->
   <section class="phead">
     <div class="phead__body">
-      <p class="label load d1 phead__eyebrow">Members Only</p>
-      <h1 class="serif load d2">Directory</h1>
+      <p class="label load d1 phead__eyebrow">{t('header.eyebrow', 'Members Only')}</p>
+      <h1 class="serif load d2">{t('header.headline', 'Directory')}</h1>
       <p class="phead__lede load d3">
-        A private contact list for the church family — names, numbers and
-        addresses for the people you sit beside on a Sunday. It opens by
-        personal invitation, and it is never public.
+        {t('header.lede', 'A private contact list for the church family — names, numbers and addresses for the people you sit beside on a Sunday. It opens by personal invitation, and it is never public.')}
       </p>
     </div>
   </section>
@@ -37,33 +39,32 @@ const DIRECTORY_URL = 'https://app.yourchurch.org/directory';
   <!-- ============ OPEN IT ============ -->
   <section class="wrap open-wrap">
     <div class="open reveal">
-      <h2 class="serif open__h">Open the directory</h2>
+      <h2 class="serif open__h">{t('open.title', 'Open the directory')}</h2>
       <p class="open__p">
         If you have already tapped your invitation on this device, this takes
         you straight in — there is no password to remember. If you have not,
         it will tell you so and offer to get you a link.
       </p>
-      <a href={DIRECTORY_URL} class="btn btn--ink open__btn">Open the directory</a>
+      <a href={DIRECTORY_URL} class="btn btn--ink open__btn">{t('open.button', 'Open the directory')}</a>
       <p class="open__note">
-        Not had an invitation yet? <a href="/contact?about=directory">Ask for a link</a>
-        and we will text you one.
+        {t('open.noInvite', 'Not had an invitation yet?')} <a href="/contact?about=directory">{t('open.askLink', 'Ask for a link')}</a>
+        {t('open.noInviteTail', 'and we will text you one.')}
       </p>
     </div>
   </section>
 
   <!-- ============ HOW ACCESS WORKS ============ -->
   <section class="wrap rules-wrap">
-    <p class="label rules__h reveal">How Access Works</p>
+    <p class="label rules__h reveal">{t('rules.eyebrow', 'How Access Works')}</p>
     <div class="rules">
       <div class="rule reveal">
         <svg class="rule__i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
           <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.4 4.5"></path>
           <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.4-1.4"></path>
         </svg>
-        <h3 class="serif rule__t">One link, one person</h3>
+        <h3 class="serif rule__t">{t('rules.one.title', 'One link, one person')}</h3>
         <p class="rule__p">
-          Invites are sent individually — never a shared code. Tapping yours trusts that
-          device from then on, so there's no password to remember or lose.
+          {t('rules.one.body', "Invites are sent individually — never a shared code. Tapping yours trusts that device from then on, so there's no password to remember or lose.")}
         </p>
       </div>
       <div class="rule reveal">
@@ -71,10 +72,9 @@ const DIRECTORY_URL = 'https://app.yourchurch.org/directory';
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
           <circle cx="12" cy="7" r="4"></circle>
         </svg>
-        <h3 class="serif rule__t">Adults only, opt in</h3>
+        <h3 class="serif rule__t">{t('rules.two.title', 'Adults only, opt in')}</h3>
         <p class="rule__p">
-          Children never appear here at all. Adults are listed only if they've said yes
-          in person — nobody is added by default.
+          {t('rules.two.body', "Children never appear here at all. Adults are listed only if they've said yes in person — nobody is added by default.")}
         </p>
       </div>
       <div class="rule reveal">
@@ -82,10 +82,9 @@ const DIRECTORY_URL = 'https://app.yourchurch.org/directory';
           <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
           <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
         </svg>
-        <h3 class="serif rule__t">Removable at any time</h3>
+        <h3 class="serif rule__t">{t('rules.three.title', 'Removable at any time')}</h3>
         <p class="rule__p">
-          Ask and you're off the list the same day. Staff can also revoke any device
-          instantly — a lost phone doesn't mean a lost directory.
+          {t('rules.three.body', "Ask and you're off the list the same day. Staff can also revoke any device instantly — a lost phone doesn't mean a lost directory.")}
         </p>
       </div>
     </div>
@@ -94,25 +93,17 @@ const DIRECTORY_URL = 'https://app.yourchurch.org/directory';
   <!-- ============ WHAT IS IN IT ============ -->
   <section class="wrap in-wrap">
     <div class="in__head reveal">
-      <p class="label in__h">What You'll Find</p>
+      <p class="label in__h">{t('contents.eyebrow', "What You'll Find")}</p>
     </div>
     <div class="in reveal">
       <p class="in__p">
-        Each person's entry carries a photograph, a phone number, and — where
-        they have given them — an email address, a home address, and their
-        birthday and anniversary. Only the day and month of those are ever
-        shown, never the year. You can search by name, street, number or month,
-        or jump down the alphabet. Tapping a number calls it.
+        {t('contents.body1', "Each person's entry carries a photograph, a phone number, and — where they have given them — an email address, a home address, and their birthday and anniversary. Only the day and month of those are ever shown, never the year. You can search by name, street, number or month, or jump down the alphabet. Tapping a number calls it.")}
       </p>
       <p class="in__p">
-        You can keep your own details up to date from inside the directory —
-        phone, email, address, birthday and anniversary. Change them once and
-        everyone sees the correction. If you move house or change carriers,
-        that is all it takes.
+        {t('contents.body2', 'You can keep your own details up to date from inside the directory — phone, email, address, birthday and anniversary. Change them once and everyone sees the correction. If you move house or change carriers, that is all it takes.')}
       </p>
       <p class="in__p">
-        Names and photographs are looked after by the office, as is whether you
-        appear here at all. Ask any Sunday and it is done the same day.
+        {t('contents.body3', 'Names and photographs are looked after by the office, as is whether you appear here at all. Ask any Sunday and it is done the same day.')}
       </p>
     </div>
   </section>

@@ -1,0 +1,25 @@
+# The words on the livestream page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+stage:
+  eyebrow: "Wherever You Are"
+  headline: "Watch Live"
+player:
+  checking: "Checking stream status…"
+  liveBadge: "We're live now"
+  offlineBadge: "Not live right now"
+  daysUnit: "days"
+  hoursUnit: "hrs"
+  minutesUnit: "min"
+  secondsUnit: "sec"
+  channelButton: "Visit our YouTube channel ↗"
+schedule:
+  eyebrow: "When We Stream"
+  title: "Every service, live."
+  link: "Browse past messages →"

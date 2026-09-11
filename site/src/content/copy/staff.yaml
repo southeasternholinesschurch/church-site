@@ -1,0 +1,17 @@
+# The words on the staff page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+header:
+  back: "← About"
+  eyebrow: "Who We Are"
+  headline: "Staff & Leadership"
+  lede: "The people who serve here week to week. Any of them are glad to talk on a Sunday."
+cta:
+  title: "Want to talk to someone?"
+  button: "Get in touch"

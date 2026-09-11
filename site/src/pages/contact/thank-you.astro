@@ -1,18 +1,22 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { copyFor } from '../../lib/copy';
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('thank-you');
 ---
 <BaseLayout title="Thank You" description="Your message has been sent to Fairhaven Community Church.">
   <section class="ty">
     <div class="ty__body">
-      <p class="label load d1 ty__eyebrow">Sent</p>
-      <h1 class="serif load d2">Thank you.</h1>
+      <p class="label load d1 ty__eyebrow">{t('eyebrow', 'Sent')}</p>
+      <h1 class="serif load d2">{t('headline', 'Thank you.')}</h1>
       <p class="ty__p load d3">
         Your message is in the church inbox. Someone reads it — usually within a day
         or two. If it was a prayer request, it goes to the pastors.
       </p>
       <div class="ty__acts load d4">
-        <a href="/" class="btn btn--solid">Back to home</a>
-        <a href="/about" class="btn btn--ghost">Plan a visit</a>
+        <a href="/" class="btn btn--solid">{t('homeButton', 'Back to home')}</a>
+        <a href="/about" class="btn btn--ghost">{t('visitButton', 'Plan a visit')}</a>
       </div>
     </div>
   </section>

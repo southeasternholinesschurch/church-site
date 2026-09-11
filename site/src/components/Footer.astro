@@ -1,16 +1,20 @@
 ---
 import type { CollectionEntry } from 'astro:content';
+import { copyFor } from '../lib/copy';
 
 interface Props {
   settings: CollectionEntry<'settings'>['data'];
 }
 const { settings } = Astro.props;
 const year = new Date().getFullYear();
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('navigation');
 ---
 <footer class="foot">
   <div class="foot__grid">
     <div>
-      <h2 class="serif foot__wordmark">Come home.</h2>
+      <h2 class="serif foot__wordmark">{t('footer.wordmark', 'Come home.')}</h2>
       <p class="foot__addr">
         <a href={settings.mapsUrl} target="_blank" rel="noreferrer">
           {settings.address}
@@ -19,14 +23,14 @@ const year = new Date().getFullYear();
     </div>
 
     <div>
-      <p class="label foot__h">Visit</p>
+      <p class="label foot__h">{t('footer.visitHeading', 'Visit')}</p>
       <p class="foot__list">
         {settings.serviceTimes.map((s) => <>{s.label} — {s.day}s<br /></>)}
       </p>
     </div>
 
     <div>
-      <p class="label foot__h">Connect</p>
+      <p class="label foot__h">{t('footer.connectHeading', 'Connect')}</p>
       <p class="foot__list">
         {settings.socials.facebook && <><a href={settings.socials.facebook} target="_blank" rel="noreferrer">Facebook</a><br /></>}
         {settings.socials.instagram && <><a href={settings.socials.instagram} target="_blank" rel="noreferrer">Instagram</a><br /></>}
@@ -36,19 +40,19 @@ const year = new Date().getFullYear();
     </div>
 
     <div>
-      <p class="label foot__h">More</p>
+      <p class="label foot__h">{t('footer.moreHeading', 'More')}</p>
       <p class="foot__list">
-        <a href="/contact">Contact</a><br />
-        <a href="/give">Give</a><br />
-        <a href="/bulletin">Bulletin</a><br />
-        <a href="/directory">Directory</a>
+        <a href="/contact">{t('footer.contactLink', 'Contact')}</a><br />
+        <a href="/give">{t('footer.giveLink', 'Give')}</a><br />
+        <a href="/bulletin">{t('footer.bulletinLink', 'Bulletin')}</a><br />
+        <a href="/directory">{t('footer.directoryLink', 'Directory')}</a>
       </p>
     </div>
   </div>
 
   <div class="foot__base">
     <span>© {year} {settings.churchName}</span>
-    <span>Fairhaven</span>
+    <span>{t('footer.city', 'Fairhaven')}</span>
   </div>
 </footer>
 

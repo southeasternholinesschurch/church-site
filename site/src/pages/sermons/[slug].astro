@@ -1,5 +1,6 @@
 ---
 import type { GetStaticPaths } from 'astro';
+import { copyFor } from '../../lib/copy';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import SermonCard from '../../components/SermonCard.astro';
 import { getCollection, getEntry } from 'astro:content';
@@ -67,6 +68,9 @@ const metaDescription = [
   `${SERVICE_TYPE_LABELS[serviceType]}, ${dateLabel}`,
   `${settingsEntry.data.churchName}, Fairhaven.`,
 ].filter(Boolean).join(' · ');
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('sermons');
 ---
 {/*
  * VideoObject is what turns a sermon page into a video result in Google —
@@ -111,7 +115,7 @@ const metaDescription = [
     </div>
     <div class="stage__scrim" aria-hidden="true"></div>
     <div class="stage__body">
-      <a href="/sermons" class="stage__back load d1">← All sermons</a>
+      <a href="/sermons" class="stage__back load d1">{t('page.back', '← All sermons')}</a>
       <div class="stage__head">
         <div class="stage__title">
           {seriesEntry
@@ -140,14 +144,14 @@ const metaDescription = [
   <section class="wrap notes-wrap">
     <div class="notes reveal">
       <aside class="notes__side">
-        <p class="label notes__l">Service</p>
+        <p class="label notes__l">{t('page.serviceLabel', 'Service')}</p>
         <p class="notes__v">{service}</p>
-        {speaker && (<><p class="label notes__l">Speaker</p><p class="notes__v">{speaker}</p></>)}
-        <p class="label notes__l">Date</p>
+        {speaker && (<><p class="label notes__l">{t('page.speakerLabel', 'Speaker')}</p><p class="notes__v">{speaker}</p></>)}
+        <p class="label notes__l">{t('page.dateLabel', 'Date')}</p>
         <p class="notes__v">{dateLabel}</p>
-        {scripture && (<><p class="label notes__l">Scripture</p><p class="notes__v">{scripture}</p></>)}
+        {scripture && (<><p class="label notes__l">{t('page.scriptureLabel', 'Scripture')}</p><p class="notes__v">{scripture}</p></>)}
         <a href={`https://www.youtube.com/watch?v=${youtubeId}`} target="_blank" rel="noreferrer" class="notes__yt">
-          Watch on YouTube ↗
+          {t('page.youtubeLink', 'Watch on YouTube ↗')}
         </a>
       </aside>
       <div class="notes__body">
@@ -165,13 +169,13 @@ const metaDescription = [
       <nav class="run reveal" aria-label={`Navigate ${seriesName}`}>
         {prevInSeries ? (
           <a href={`/sermons/${prevInSeries.slug}`} class="run__link run__link--prev">
-            <span class="label run__l">← Previous in {seriesName}</span>
+            <span class="label run__l">{t('page.previousIn', '← Previous in')} {seriesName}</span>
             <span class="run__t">{prevInSeries.data.title?.trim() || prevInSeries.data.service}</span>
           </a>
         ) : <span />}
         {nextInSeries && (
           <a href={`/sermons/${nextInSeries.slug}`} class="run__link run__link--next">
-            <span class="label run__l">Next in {seriesName} →</span>
+            <span class="label run__l">{t('page.nextIn', 'Next in')} {seriesName} →</span>
             <span class="run__t">{nextInSeries.data.title?.trim() || nextInSeries.data.service}</span>
           </a>
         )}
@@ -184,7 +188,7 @@ const metaDescription = [
     <section class="wrap more-wrap">
       <div class="more__head reveal">
         <h2 class="label more__h">{moreLabel}</h2>
-        <a href="/sermons" class="more__all">All messages →</a>
+        <a href="/sermons" class="more__all">{t('page.allMessages', 'All messages →')}</a>
       </div>
       <div class="more__grid">
         {more.map((s) => <SermonCard sermon={s} />)}

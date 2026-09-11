@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 import EventCard from '../components/EventCard.astro';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
@@ -33,6 +34,9 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
  */
 const ministryImages = MINISTRY_PHOTOS;
 
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('home');
 ---
 <BaseLayout title="Home">
   <!-- ============ HERO ============ -->
@@ -61,22 +65,22 @@ const ministryImages = MINISTRY_PHOTOS;
 
     <div class="hero__body">
       <div class="hero__lead par-fg" data-par="-34">
-        <p class="label load d1 hero__eyebrow">Welcome · Worship · Word</p>
-        <h1 class="serif load d2">A place to <em>call home</em></h1>
+        <p class="label load d1 hero__eyebrow">{t('hero.eyebrow', 'Welcome · Worship · Word')}</p>
+        <h1 class="serif load d2">{t('hero.headline', 'A place to')} <em>{t('hero.headlineEmphasis', 'call home')}</em></h1>
         <p class="hero__lede load d3">
           More than a congregation — a family where hearts are mended, hope is
           restored, and lives are changed.
         </p>
         <div class="hero__acts load d4">
-          <a href="/about" class="btn btn--solid">Plan Your Visit</a>
-          <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--ghost">Get Directions</a>
+          <a href="/about" class="btn btn--solid">{t('hero.primaryButton', 'Plan Your Visit')}</a>
+          <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--ghost">{t('hero.secondaryButton', 'Get Directions')}</a>
         </div>
       </div>
 
       <!-- editorial gathering-times column -->
       <div class="times load d5">
         <div class="times__rule growx"></div>
-        <p class="label times__h">We Gather</p>
+        <p class="label times__h">{t('gather.eyebrow', 'We Gather')}</p>
         {settings.serviceTimes.map((s) => {
           const t = clockLabel(s.time);
           return (
@@ -100,7 +104,7 @@ const ministryImages = MINISTRY_PHOTOS;
        version ever was. The hero keeps only the invitation. -->
   <section class="gather grain">
     <div class="wrap gather__inner">
-      <p class="label gather__h reveal">We Gather</p>
+      <p class="label gather__h reveal">{t('gather.eyebrow', 'We Gather')}</p>
       <dl class="gather__list">
         {settings.serviceTimes.map((s) => {
           const t = clockLabel(s.time);
@@ -118,7 +122,7 @@ const ministryImages = MINISTRY_PHOTOS;
 
   <!-- ============ MISSION ============ -->
   <section class="mission wrap">
-    <h2 class="label reveal mission__h">Why We're Here</h2>
+    <h2 class="label reveal mission__h">{t('mission.eyebrow', "Why We're Here")}</h2>
     <p class="serif reveal mission__stmt">
       We exist to glorify God by making Christ known, nurturing believers, and
       serving our community with <em>love and truth</em>.
@@ -131,21 +135,21 @@ const ministryImages = MINISTRY_PHOTOS;
     <div class="beat reveal">
       <div class="serif beat__n">01</div>
       <div class="beat__rule"></div>
-      <h3 class="serif">A warm welcome</h3>
+      <h3 class="serif">{t('expect.welcome.title', 'A warm welcome')}</h3>
       <p>You'll be greeted, not processed. Come as you are — no dress code, and no
          expectation that you already know anyone.</p>
     </div>
     <div class="beat reveal">
       <div class="serif beat__n">02</div>
       <div class="beat__rule"></div>
-      <h3 class="serif">Heartfelt worship</h3>
+      <h3 class="serif">{t('expect.worship.title', 'Heartfelt worship')}</h3>
       <p>Hymns sung together, from the book. Reverence and joy in the same room —
          tradition held with authenticity.</p>
     </div>
     <div class="beat reveal">
       <div class="serif beat__n">03</div>
       <div class="beat__rule"></div>
-      <h3 class="serif">Preaching for real life</h3>
+      <h3 class="serif">{t('expect.preaching.title', 'Preaching for real life')}</h3>
       <p>Biblical and direct, grounded in the week you actually just had —
          conviction carried with compassion.</p>
     </div>
@@ -175,8 +179,8 @@ const ministryImages = MINISTRY_PHOTOS;
   <!-- ============ EVENTS ============ -->
   <section class="events wrap">
     <div class="events__head reveal">
-      <h2 class="label events__h">What's Happening</h2>
-      <a href="/events" class="events__all">See all events →</a>
+      <h2 class="label events__h">{t('events.eyebrow', "What's Happening")}</h2>
+      <a href="/events" class="events__all">{t('events.link', 'See all events →')}</a>
     </div>
 
     {!settings.calendarFeedUrl && (
@@ -185,20 +189,20 @@ const ministryImages = MINISTRY_PHOTOS;
         <code>src/content/settings/site.yaml</code>.
       </p>
     )}
-    {eventsError && <p class="events__empty">Couldn't reach the calendar just now. It'll retry on the next rebuild.</p>}
+    {eventsError && <p class="events__empty">{t('events.error', "Couldn't reach the calendar just now. It'll retry on the next rebuild.")}</p>}
     {upcoming.length > 0 && (
       <div class="events__grid">{upcoming.map((event) => <EventCard event={event} />)}</div>
     )}
     {settings.calendarFeedUrl && !eventsError && upcoming.length === 0 && (
-      <p class="events__empty">Nothing on the calendar in the next few weeks — check back soon.</p>
+      <p class="events__empty">{t('events.empty', 'Nothing on the calendar in the next few weeks — check back soon.')}</p>
     )}
   </section>
 
   <!-- ============ MINISTRIES ============ -->
   <section class="mins wrap">
     <div class="mins__head reveal">
-      <h2 class="label mins__h">Ministries</h2>
-      <p class="mins__sub">Something for every season of life</p>
+      <h2 class="label mins__h">{t('ministries.eyebrow', 'Ministries')}</h2>
+      <p class="mins__sub">{t('ministries.sub', 'Something for every season of life')}</p>
     </div>
     <div class="mins__grid">
       {ministries.map((m) => (

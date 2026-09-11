@@ -1,0 +1,45 @@
+# The words on the give page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+hero:
+  eyebrow: "Give"
+  headline: "Every gift stays"
+  headlineEmphasis: "close to home"
+  lede: "Giving keeps the lights on, the doors open, and this church serving the neighborhood it sits in."
+ways:
+  eyebrow: "Ways To Give"
+  online:
+    kicker: "Online"
+    title: "Give through Zeffy"
+    body: "Card or bank transfer, one-off or recurring. Zeffy passes on 100% of your gift — they charge the church nothing and take no cut."
+    button: "Give now ↗"
+  inPerson:
+    kicker: "In Person"
+    title: "On a Sunday"
+    body: "The offering is received during both Sunday services — no envelope or arrangement needed, just bring it along."
+  other:
+    kicker: "Other Ways"
+    title: "Additional digital giving"
+    body: "A few other ways to give online, all gathered in one place."
+    button: "See the options ↗"
+  note: "This website never handles or stores payment details — the Give button hands you straight to Zeffy, who process everything."
+uses:
+  eyebrow: "Where It Goes"
+  one:
+    title: "Keeping the doors open"
+    body: "The building, the utilities, and the ordinary running costs of being a church that's here every week."
+  two:
+    title: "Ministry to families"
+    body: "Fairhaven Kids, Fairhaven Youth and the rest — materials, leaders, and the things that make a Sunday work for a four-year-old."
+  three:
+    title: "Our neighbors"
+    body: "Our church reaches out weekly into our community to pick up children for church, provide meals to them bi-weekly, and be the hands and feet of Jesus on the southeast side of Indy. Please partner with us!"
+verse:
+  text: "Each of you should give what you have decided in your heart to give."
+  reference: "2 Corinthians 9:7"

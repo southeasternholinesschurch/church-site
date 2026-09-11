@@ -1,11 +1,15 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { copyFor } from '../../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { STAFF_PHOTOS } from '../../lib/staff-assets';
 
 const staff = (await getCollection('staff')).sort((a, b) => a.data.order - b.data.order);
 const rendered = await Promise.all(staff.map((s) => s.render()));
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('staff');
 ---
 <BaseLayout
   title="Staff & Leadership"
@@ -13,11 +17,11 @@ const rendered = await Promise.all(staff.map((s) => s.render()));
 >
   <section class="phead">
     <div class="phead__body">
-      <a href="/about" class="phead__back load d1">← About</a>
-      <p class="label load d1 phead__eyebrow">Who We Are</p>
-      <h1 class="serif load d2">Staff &amp; Leadership</h1>
+      <a href="/about" class="phead__back load d1">{t('header.back', '← About')}</a>
+      <p class="label load d1 phead__eyebrow">{t('header.eyebrow', 'Who We Are')}</p>
+      <h1 class="serif load d2">{t('header.headline', 'Staff & Leadership')}</h1>
       <p class="phead__lede load d3">
-        The people who serve here week to week. Any of them are glad to talk on a Sunday.
+        {t('header.lede', 'The people who serve here week to week. Any of them are glad to talk on a Sunday.')}
       </p>
     </div>
   </section>
@@ -60,13 +64,13 @@ const rendered = await Promise.all(staff.map((s) => s.render()));
   <section class="wrap cta-wrap">
     <div class="cta reveal">
       <div>
-        <h2 class="serif cta__title">Want to talk to someone?</h2>
+        <h2 class="serif cta__title">{t('cta.title', 'Want to talk to someone?')}</h2>
         <p class="cta__p">
           Come on a Sunday and introduce yourself, or send a message and we'll put you
           in touch with the right person.
         </p>
       </div>
-      <a href="/contact" class="btn btn--solid cta__btn">Get in touch</a>
+      <a href="/contact" class="btn btn--solid cta__btn">{t('cta.button', 'Get in touch')}</a>
     </div>
   </section>
 </BaseLayout>

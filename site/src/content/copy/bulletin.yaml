@@ -1,0 +1,33 @@
+# The words on the bulletin page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+masthead:
+  kicker: "This Week"
+  headline: "Bulletin"
+  lede: "Everything for this Sunday, in one place. Add it to your home screen and it works without signal."
+sections:
+  text: "Today's Text"
+  announcements: "Announcements"
+  prayer: "Prayer"
+  singing: "Singing"
+  celebrations: "Celebrations"
+  thisWeek: "This Week"
+  comingUp: "Coming Up"
+  missed: "Missed Last Week?"
+text:
+  preachingPrefix: "Preaching"
+singing:
+  nextPrefix: "Next Sunday,"
+celebrations:
+  birthdays: "Birthdays"
+  anniversaries: "Anniversaries"
+comingUp:
+  note: "Dates to keep in mind over the next few months."
+missed:
+  button: "Watch"

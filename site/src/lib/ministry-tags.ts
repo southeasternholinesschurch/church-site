@@ -7,13 +7,12 @@
  * event — the same place the schedule detail already goes.
  *
  * The tag vocabulary is the ministries' own `accent` values, so it cannot drift
- * out of step with the content collection: #sent, #kids, #youth,
- * #seladies, #seseniors.
+ * out of step with the content collection: #men, #kids, #youth,
+ * #women, #seniors.
  *
- * #sent is the one tag that is also an ordinary English word. It still needs
- * the hash, so prose is unaffected, but it is worth knowing that writing
- * "#sent" in an event's Notes to mean "the email went out" would file that
- * event under the Fairhaven Men ministry.
+ * Watch for a tag that is also an ordinary English word — writing it in an
+ * event's Notes for its everyday meaning would file that event under the
+ * ministry of the same name.
  *
  * Two behaviours worth stating, because both are deliberate:
  *
@@ -68,11 +67,11 @@ export function extractMinistryTags(notes?: string): TaggedNotes {
 
 /** Display name for a tag. Kept here so it matches the tag vocabulary. */
 export const MINISTRY_TAG_LABELS: Record<MinistryTag, string> = {
-  sent: 'Fairhaven Men',
+  men: 'Fairhaven Men',
   kids: 'Fairhaven Kids',
   youth: 'Fairhaven Youth',
-  seladies: 'Fairhaven Ladies',
-  seseniors: 'Fairhaven Seniors',
+  women: 'Fairhaven Ladies',
+  seniors: 'Fairhaven Seniors',
 };
 
 /** Where a tagged event links to — each ministry has its own page. */

@@ -1,5 +1,6 @@
 ---
 import type { GetStaticPaths } from 'astro';
+import { copyFor } from '../../lib/copy';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import SermonCard from '../../components/SermonCard.astro';
 import { getCollection } from 'astro:content';
@@ -69,6 +70,9 @@ const index = all.map((s) => ({
 
 const featured = page.currentPage === 1 ? page.data[0] : null;
 const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('sermons');
 ---
 <BaseLayout
   title="Sermons"
@@ -76,8 +80,8 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
 >
   <section class="phead">
     <div class="phead__body">
-      <p class="label load d1 phead__eyebrow">The Archive</p>
-      <h1 class="serif load d2">Sermons</h1>
+      <p class="label load d1 phead__eyebrow">{t('header.eyebrow', 'The Archive')}</p>
+      <h1 class="serif load d2">{t('header.headline', 'Sermons')}</h1>
       <p class="phead__lede load d3">
         The last {SERMON_WINDOW_MONTHS} months of services, searchable. Everything
         older lives on our YouTube channel.
@@ -91,9 +95,7 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
          docs/README.md → "Sermons". Keep the copy below visitor-facing. -->
     <section class="wrap empty">
       <p class="empty__p">
-        The sermon archive is still being brought across from YouTube — every message
-        will be searchable here once it lands. In the meantime, every service is on
-        our channel.
+        {t('empty.body', 'The sermon archive is still being brought across from YouTube — every message will be searchable here once it lands. In the meantime, every service is on our channel.')}
       </p>
       <a href="https://www.youtube.com/@yourchurchchurch" target="_blank" rel="noreferrer" class="btn btn--ink">
         Watch on YouTube
@@ -105,28 +107,28 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
       <section class="wrap tools-wrap">
         <form class="tools reveal" data-filter role="search" onsubmit="return false">
           <div class="fld fld--search">
-            <label class="label fld__l" for="q">Search</label>
+            <label class="label fld__l" for="q">{t('filters.searchLabel', 'Search')}</label>
             <div class="fld__c">
-              <input id="q" name="q" type="search" placeholder="Service, date, speaker, or scripture…" autocomplete="off" />
+              <input id="q" name="q" type="search" placeholder={t('filters.searchPlaceholder', '"Service, date, speaker, or scripture…"')} autocomplete="off" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" width="17" height="17" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path>
               </svg>
             </div>
           </div>
           <div class="fld">
-            <label class="label fld__l" for="service">Service</label>
+            <label class="label fld__l" for="service">{t('filters.serviceLabel', 'Service')}</label>
             <div class="fld__c">
               <select id="service" name="service">
-                <option value="">All services</option>
+                <option value="">{t('filters.allServices', 'All services')}</option>
                 {presentTypes.map((t) => <option value={t}>{SERVICE_TYPE_LABELS[t]}</option>)}
               </select>
             </div>
           </div>
           <div class="fld">
-            <label class="label fld__l" for="year">Year</label>
+            <label class="label fld__l" for="year">{t('filters.yearLabel', 'Year')}</label>
             <div class="fld__c">
               <select id="year" name="year">
-                <option value="">All years</option>
+                <option value="">{t('filters.allYears', 'All years')}</option>
                 {years.map((y) => <option value={y}>{y}</option>)}
               </select>
             </div>
@@ -135,7 +137,7 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
 
         {seriesList.length > 0 && (
           <nav class="chips reveal" aria-label="Filter by series">
-            <a class="chip chip--on" href="/sermons">All</a>
+            <a class="chip chip--on" href="/sermons">{t('filters.allSeries', 'All')}</a>
             {seriesList.map((x) => <a class="chip" href={`/sermons/series/${x.slug}`}>{x.data.name}</a>)}
           </nav>
         )}
@@ -144,25 +146,25 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
       <!-- ============ RESULTS (client-side, replaces the grid when filtering) ============ -->
       <section class="wrap results-wrap" data-results hidden>
         <div class="sect__head">
-          <h2 class="label sect__h">Results</h2>
+          <h2 class="label sect__h">{t('results.heading', 'Results')}</h2>
           <p class="sect__sub" data-results-count></p>
         </div>
         <div class="grid" data-results-grid></div>
-        <p class="empty__p" data-results-empty hidden>Nothing matched. Try fewer words.</p>
+        <p class="empty__p" data-results-empty hidden>{t('results.none', 'Nothing matched. Try fewer words.')}</p>
       </section>
 
       <!-- ============ THE ARCHIVE ============ -->
       <div data-archive>
         {featured && (
           <section class="wrap featured-wrap">
-            <h2 class="label reveal sect__h">Most Recent</h2>
+            <h2 class="label reveal sect__h">{t('archive.mostRecent', 'Most Recent')}</h2>
             <SermonCard sermon={featured} featured />
           </section>
         )}
 
         <section class="wrap grid-wrap">
           <div class="sect__head reveal">
-            <h2 class="label sect__h">All Services</h2>
+            <h2 class="label sect__h">{t('archive.allServices', 'All Services')}</h2>
             <p class="sect__sub">
               Page {page.currentPage} of {page.lastPage} · {all.length} service{all.length === 1 ? '' : 's'}
             </p>
@@ -183,15 +185,15 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
                plainly rather than letting someone conclude it isn't there. -->
           <aside class="archive reveal">
             <div>
-              <p class="label archive__k">Looking further back?</p>
-              <h2 class="serif archive__h">Don't see the service you're after?</h2>
+              <p class="label archive__k">{t('archive.eyebrow', 'Looking further back?')}</p>
+              <h2 class="serif archive__h">{t('archive.title', "Don't see the service you're after?")}</h2>
               <p class="archive__p">
                 This page keeps the last {SERMON_WINDOW_MONTHS} months. Every service we've
                 ever streamed is on our YouTube channel.
               </p>
             </div>
             <a href={YOUTUBE_ARCHIVE} target="_blank" rel="noreferrer" class="btn btn--solid archive__btn">
-              Full service archive ↗
+              {t('archive.button', 'Full service archive ↗')}
             </a>
           </aside>
         </section>

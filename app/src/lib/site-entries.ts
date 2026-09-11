@@ -10,6 +10,7 @@
 import { parseDocument } from 'yaml';
 import {
   readFile, writeFile, deleteFile, listDir, commitMessage, type GitEnv,
+  YAML_OUT,
 } from './site-content';
 
 export type CollectionId = 'staff' | 'ministries' | 'beliefs';
@@ -135,7 +136,7 @@ export async function saveEntry(
     doc.set(field.name, field.kind === 'number' ? Number(raw) : raw);
   }
 
-  const text = `---\n${String(doc).trimEnd()}\n---\n\n${body.trim()}\n`;
+  const text = `---\n${YAML_OUT(doc).trimEnd()}\n---\n\n${body.trim()}\n`;
   await writeFile(env, {
     path, content: text, sha: sha ?? existing?.sha,
     message: commitMessage(

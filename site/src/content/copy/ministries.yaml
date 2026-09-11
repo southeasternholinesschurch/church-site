@@ -1,0 +1,28 @@
+# The words on the ministries page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+page:
+  back: "← All ministries"
+  meetsLabel: "Meets"
+  whereLabel: "Where"
+  questionsLabel: "Questions?"
+  questionsBody: "Ask any Sunday, or"
+  questionsLink: "send us a message"
+  comingUp: "Coming Up"
+  allEventsLink: "All church events →"
+  nextLabel: "Next Ministry"
+header:
+  eyebrow: "Get Involved"
+  headline: "Ministries"
+  lede: "Something for every season of life — from four-year-olds to the people who have been here longest."
+grid:
+  cardLink: "Learn more →"
+cta:
+  title: "Not sure where you'd fit?"
+  button: "Plan your visit"

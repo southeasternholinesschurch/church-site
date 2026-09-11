@@ -1,0 +1,46 @@
+# The words on the sermons page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+header:
+  eyebrow: "The Archive"
+  headline: "Sermons"
+empty:
+  body: "The sermon archive is still being brought across from YouTube — every message will be searchable here once it lands. In the meantime, every service is on our channel."
+filters:
+  searchLabel: "Search"
+  searchPlaceholder: "\"Service, date, speaker, or scripture…\""
+  serviceLabel: "Service"
+  allServices: "All services"
+  yearLabel: "Year"
+  allYears: "All years"
+  allSeries: "All"
+results:
+  heading: "Results"
+  none: "Nothing matched. Try fewer words."
+archive:
+  mostRecent: "Most Recent"
+  allServices: "All Services"
+  eyebrow: "Looking further back?"
+  title: "Don't see the service you're after?"
+  button: "Full service archive ↗"
+page:
+  back: "← All sermons"
+  serviceLabel: "Service"
+  speakerLabel: "Speaker"
+  dateLabel: "Date"
+  scriptureLabel: "Scripture"
+  youtubeLink: "Watch on YouTube ↗"
+  previousIn: "← Previous in"
+  nextIn: "Next in"
+  allMessages: "All messages →"
+series:
+  eyebrow: "Series"
+  countTail: "in order, from the beginning"
+  earlier: "← Earlier"
+  later: "Later →"

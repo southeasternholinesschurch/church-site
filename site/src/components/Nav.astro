@@ -1,5 +1,6 @@
 ---
 import { Image } from 'astro:assets';
+import { copyFor } from '../lib/copy';
 import type { CollectionEntry } from 'astro:content';
 // Two versions of the same wordmark, named by WHERE they go rather than what
 // colour they are — picking the wrong one is the easy mistake. Both are
@@ -25,6 +26,9 @@ const links = [
   { href: '/give', label: 'Give' },
 ];
 const current = Astro.url.pathname;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('navigation');
 ---
 <header data-site-header class:list={['nav', theme === 'light' && 'nav--light']}>
   <div class="nav__inner">
@@ -41,7 +45,7 @@ const current = Astro.url.pathname;
       {links.map((l) => (
         <a href={l.href} aria-current={current.startsWith(l.href) ? 'page' : undefined}>{l.label}</a>
       ))}
-      <a href="/livestream" class="label nav__cta">Watch Live</a>
+      <a href="/livestream" class="label nav__cta">{t('nav.watchLive', 'Watch Live')}</a>
     </nav>
 
     <button class="nav__burger" type="button" aria-expanded="false" aria-controls="mobile-nav" data-burger>

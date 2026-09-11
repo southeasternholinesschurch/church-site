@@ -211,3 +211,15 @@ export async function deleteFile(env: GitEnv, path: string, sha: string, message
  */
 export const commitMessage = (what: string, who: { email: string }) =>
   `${what}\n\nEdited in the staff dashboard by ${who.email}.`;
+
+/**
+ * Serialize an edited YAML document back to text.
+ *
+ * The `yaml` package wraps long strings at 80 columns by default, which means
+ * changing one word in a sentence rewrites every line of that paragraph. The
+ * diff the pastor sees on GitHub should be the sentence he changed, not a reflow, so
+ * wrapping is off: one key, one line, however long.
+ */
+export function YAML_OUT(doc: { toString: (opts?: object) => string }): string {
+  return doc.toString({ lineWidth: 0 });
+}

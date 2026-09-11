@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { copyFor } from '../../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { clockText } from '../../lib/format';
@@ -14,6 +15,9 @@ const groups = [
   { label: 'Sunday Evening', times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time >= '12:00') },
   { label: 'Wednesday Night', times: settings.serviceTimes.filter((s) => s.day === 'Wednesday') },
 ].filter((g) => g.times.length);
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('im-new');
 ---
 <BaseLayout
   title="I'm New"
@@ -27,14 +31,11 @@ const groups = [
     </div>
     <div class="nhero__grade" aria-hidden="true"></div>
     <div class="nhero__body par-fg" data-par="-26">
-      <a href="/about" class="nhero__back load d1">← About</a>
-      <p class="label load d1 nhero__eyebrow">I'm New</p>
-      <h1 class="serif load d2">We're so glad you're here.</h1>
+      <a href="/about" class="nhero__back load d1">{t('hero.back', '← About')}</a>
+      <p class="label load d1 nhero__eyebrow">{t('hero.eyebrow', "I'm New")}</p>
+      <h1 class="serif load d2">{t('hero.headline', "We're so glad you're here.")}</h1>
       <p class="nhero__lede load d3">
-        Whether you're exploring faith, looking for a church home, or just visiting the
-        area — there's a place for you at Fairhaven Community Church. We're a friendly,
-        Bible-centered church on the southeast side of Fairhaven, five minutes off
-        I-465 at the Meadowbrook Road exit.
+        {t('hero.lede', "Whether you're exploring faith, looking for a church home, or just visiting the area — there's a place for you at Fairhaven Community Church. We're a friendly, Bible-centered church on the southeast side of Fairhaven, five minutes off I-465 at the Meadowbrook Road exit.")}
       </p>
     </div>
   </section>
@@ -43,17 +44,15 @@ const groups = [
   <section class="wrap expect-wrap">
     <div class="expect reveal">
       <div>
-        <h2 class="label expect__h">What To Expect</h2>
-        <p class="expect__lead serif">There's no dress code. Come as you are.</p>
+        <h2 class="label expect__h">{t('expect.eyebrow', 'What To Expect')}</h2>
+        <p class="expect__lead serif">{t('expect.lead', "There's no dress code. Come as you are.")}</p>
       </div>
       <div class="expect__body">
         <p>
-          From the moment you pull into the parking lot you'll find smiling faces and a
-          warm atmosphere. Our worship is heartfelt and Spirit-led, with preaching rooted
-          in God's Word and centered on real-life transformation.
+          {t('expect.body1', "From the moment you pull into the parking lot you'll find smiling faces and a warm atmosphere. Our worship is heartfelt and Spirit-led, with preaching rooted in God's Word and centered on real-life transformation.")}
         </p>
         <p>
-          Whether you're in jeans or your Sunday best, you'll be welcomed the same.
+          {t('expect.body2', "Whether you're in jeans or your Sunday best, you'll be welcomed the same.")}
         </p>
       </div>
     </div>
@@ -61,7 +60,7 @@ const groups = [
 
   <!-- ============ SERVICE TIMES ============ -->
   <section class="wrap times-wrap">
-    <h2 class="label times__h reveal">Service Times</h2>
+    <h2 class="label times__h reveal">{t('times.eyebrow', 'Service Times')}</h2>
     <div class="times">
       {groups.map((g) => (
         <div class="tgroup reveal">
@@ -80,32 +79,31 @@ const groups = [
   <section class="wrap plan-wrap">
     <div class="plan reveal">
       <div>
-        <h2 class="label plan__h">Plan Your Visit</h2>
-        <p class="plan__lead serif">We'd love to know you're coming.</p>
+        <h2 class="label plan__h">{t('plan.eyebrow', 'Plan Your Visit')}</h2>
+        <p class="plan__lead serif">{t('plan.lead', "We'd love to know you're coming.")}</p>
         <p class="plan__p">
-          Message us on Facebook or give us a call, so we can look out for you, answer
-          any questions, and help you feel at home from the start.
+          {t('plan.body', 'Message us on Facebook or give us a call, so we can look out for you, answer any questions, and help you feel at home from the start.')}
         </p>
         <div class="plan__acts">
           {settings.phone && (
             <a href={`tel:${settings.phone.replace(/[^\d+]/g, '')}`} class="btn btn--ink">
-              Call {settings.phone}
+              {t('plan.callPrefix', 'Call')} {settings.phone}
             </a>
           )}
           <a href={settings.socials.facebook} target="_blank" rel="noreferrer" class="btn btn--line">
-            Message us on Facebook ↗
+            {t('plan.facebookButton', 'Message us on Facebook ↗')}
           </a>
         </div>
       </div>
       <aside class="plan__side">
-        <p class="label plan__sl">Get Connected</p>
+        <p class="label plan__sl">{t('connect.eyebrow', 'Get Connected')}</p>
         <p class="plan__sp">
           The best way to get plugged in is to show up and say hello. You can also
           follow us on <a href={settings.socials.facebook} target="_blank" rel="noreferrer">Facebook</a>
           to stay in the loop, or talk to a greeter or pastor after any service —
           we're here to serve.
         </p>
-        <a href="/ministries" class="plan__link">See what's on for your family →</a>
+        <a href="/ministries" class="plan__link">{t('connect.link', "See what's on for your family →")}</a>
       </aside>
     </div>
   </section>
@@ -114,12 +112,12 @@ const groups = [
   <section class="wrap cta-wrap">
     <div class="cta reveal">
       <div>
-        <h2 class="serif cta__title">Come this Sunday.</h2>
+        <h2 class="serif cta__title">{t('cta.title', 'Come this Sunday.')}</h2>
         <p class="cta__p">
           {settings.address}. Nobody expects you to have it figured out before you walk in.
         </p>
       </div>
-      <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--solid cta__btn">Get directions ↗</a>
+      <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--solid cta__btn">{t('cta.button', 'Get directions ↗')}</a>
     </div>
   </section>
 </BaseLayout>

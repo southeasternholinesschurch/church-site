@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 import { getCollection } from 'astro:content';
 import { getUpcomingEvents } from '../lib/ical';
 import { clockText, eventWhen } from '../lib/format';
@@ -137,6 +138,9 @@ const dateLabel = bulletin
   ? new Date(`${bulletin.serviceDate}T12:00:00Z`).toLocaleDateString('en-US',
       { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   : null;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('bulletin');
 ---
 <BaseLayout
   title="This Week's Bulletin"
@@ -149,11 +153,10 @@ const dateLabel = bulletin
     <div class="bull">
       <!-- ============ MASTHEAD ============ -->
       <header class="bull__head">
-        <p class="bull__kicker load d1">This Week</p>
-        <h1 class="serif load d2">Bulletin</h1>
+        <p class="bull__kicker load d1">{t('masthead.kicker', 'This Week')}</p>
+        <h1 class="serif load d2">{t('masthead.headline', 'Bulletin')}</h1>
         <p class="bull__lede load d3">
-          Everything for this Sunday, in one place. Add it to your home screen and it
-          works without signal.
+          {t('masthead.lede', 'Everything for this Sunday, in one place. Add it to your home screen and it works without signal.')}
         </p>
       </header>
 
@@ -179,19 +182,19 @@ const dateLabel = bulletin
 
       <!-- ============ TEXT ============ -->
       <section class="sec reveal">
-        <div class="sec__h"><h3>Today's Text</h3><div></div></div>
+        <div class="sec__h"><h3>{t('sections.text', "Today's Text")}</h3><div></div></div>
         <blockquote class="text">
           <p class="serif">
             “{bulletin?.scripture ?? '[The passage the message is drawn from.]'}”
           </p>
           <cite class="text__ref">{bulletin?.scriptureRef ?? '[Scripture reference]'}</cite>
-          {bulletin?.preacher && <p class="text__by">Preaching · {bulletin.preacher}</p>}
+          {bulletin?.preacher && <p class="text__by">{t('text.preachingPrefix', 'Preaching')} · {bulletin.preacher}</p>}
         </blockquote>
       </section>
 
       <!-- ============ ANNOUNCEMENTS ============ -->
       <section class="sec reveal">
-        <div class="sec__h"><h3>Announcements</h3><div></div></div>
+        <div class="sec__h"><h3>{t('sections.announcements', 'Announcements')}</h3><div></div></div>
         {announcements.length === 0 ? (
           <div class="ann">
             <span class="ann__when">Ongoing</span>
@@ -210,7 +213,7 @@ const dateLabel = bulletin
       <!-- ============ PRAYER ============ -->
       {prayers.length > 0 && (
         <section class="sec reveal">
-          <div class="sec__h"><h3>Prayer</h3><div></div></div>
+          <div class="sec__h"><h3>{t('sections.prayer', 'Prayer')}</h3><div></div></div>
           <ul class="pray">
             {prayers.map((p) => <li>{p}</li>)}
           </ul>
@@ -220,7 +223,7 @@ const dateLabel = bulletin
       <!-- ============ SINGING (from the singing schedule) ============ -->
       {(singing || singingNext) && (
         <section class="sec reveal">
-          <div class="sec__h"><h3>Singing</h3><div></div></div>
+          <div class="sec__h"><h3>{t('sections.singing', 'Singing')}</h3><div></div></div>
           {singing && (
             <ul class="sing__list">
               {singing.slots.map((s) => (
@@ -233,7 +236,7 @@ const dateLabel = bulletin
           )}
           {singingNext && (
             <p class="sing__next">
-              <strong>Next Sunday, {nextSundayLabel}:</strong>{' '}
+              <strong>{t('singing.nextPrefix', 'Next Sunday,')} {nextSundayLabel}:</strong>{' '}
               {singingNext.slots.map((s) => `${s.label} — ${slotText(s)}`).join(' · ')}
             </p>
           )}
@@ -243,11 +246,11 @@ const dateLabel = bulletin
       <!-- ============ CELEBRATIONS (from the directory) ============ -->
       {celebrations && (
         <section class="sec reveal">
-          <div class="sec__h"><h3>{celebrations.month} Celebrations</h3><div></div></div>
+          <div class="sec__h"><h3>{celebrations.month} {t('sections.celebrations', 'Celebrations')}</h3><div></div></div>
           <div class="cel">
             {celebrations.birthdays.length > 0 && (
               <div class="cel__col">
-                <p class="cel__k">Birthdays</p>
+                <p class="cel__k">{t('celebrations.birthdays', 'Birthdays')}</p>
                 <ul class="cel__list">
                   {celebrations.birthdays.map((c) => (
                     <li><span class="cel__d">{c.day}</span><span class="cel__n">{c.name}</span></li>
@@ -257,7 +260,7 @@ const dateLabel = bulletin
             )}
             {celebrations.anniversaries.length > 0 && (
               <div class="cel__col">
-                <p class="cel__k">Anniversaries</p>
+                <p class="cel__k">{t('celebrations.anniversaries', 'Anniversaries')}</p>
                 <ul class="cel__list">
                   {celebrations.anniversaries.map((c) => (
                     <li><span class="cel__d">{c.day}</span><span class="cel__n">{c.name}</span></li>
@@ -271,7 +274,7 @@ const dateLabel = bulletin
 
       <!-- ============ THIS WEEK (live) ============ -->
       <section class="sec reveal">
-        <div class="sec__h"><h3>This Week</h3><div></div></div>
+        <div class="sec__h"><h3>{t('sections.thisWeek', 'This Week')}</h3><div></div></div>
         <dl class="order">
           {settings.serviceTimes.map((s) => (
             <>
@@ -291,8 +294,8 @@ const dateLabel = bulletin
       <!-- ============ COMING UP ============ -->
       {comingUp.length > 0 && (
         <section class="sec reveal">
-          <div class="sec__h"><h3>Coming Up</h3><div></div></div>
-          <p class="sec__note">Dates to keep in mind over the next few months.</p>
+          <div class="sec__h"><h3>{t('sections.comingUp', 'Coming Up')}</h3><div></div></div>
+          <p class="sec__note">{t('comingUp.note', 'Dates to keep in mind over the next few months.')}</p>
           <dl class="order">
             {comingUp.map((e) => (
               <>
@@ -306,7 +309,7 @@ const dateLabel = bulletin
 
       <!-- ============ MISSED LAST WEEK ============ -->
       <section class="sec reveal">
-        <div class="sec__h"><h3>Missed Last Week?</h3><div></div></div>
+        <div class="sec__h"><h3>{t('sections.missed', 'Missed Last Week?')}</h3><div></div></div>
         <div class="missed">
           <div>
             <p class="missed__t serif">{lastSermon?.data.title ?? lastSermon?.data.service ?? 'Recent services'}</p>
@@ -318,7 +321,7 @@ const dateLabel = bulletin
                 : 'Every service is on our YouTube channel'}
             </p>
           </div>
-          <a href={lastSermon ? `/sermons/${lastSermon.slug}` : '/sermons'} class="btn btn--ink">Watch</a>
+          <a href={lastSermon ? `/sermons/${lastSermon.slug}` : '/sermons'} class="btn btn--ink">{t('missed.button', 'Watch')}</a>
         </div>
       </section>
 

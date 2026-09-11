@@ -1,5 +1,6 @@
 ---
 import type { GetStaticPaths } from 'astro';
+import { copyFor } from '../../lib/copy';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import EventCard from '../../components/EventCard.astro';
 import { Image } from 'astro:assets';
@@ -39,6 +40,9 @@ try {
 const siblings = (await getCollection('ministries')).sort((a, b) => a.data.order - b.data.order);
 const idx = siblings.findIndex((m) => m.slug === ministry.slug);
 const next = siblings[(idx + 1) % siblings.length];
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('ministries');
 ---
 <BaseLayout title={name} description={summary}>
   <!-- ============ HERO ============ -->
@@ -52,7 +56,7 @@ const next = siblings[(idx + 1) % siblings.length];
     )}
     <div class="mhero__grade" aria-hidden="true"></div>
     <div class="mhero__body par-fg" data-par="-26">
-      <a href="/ministries" class="mhero__back load d1">← All ministries</a>
+      <a href="/ministries" class="mhero__back load d1">{t('page.back', '← All ministries')}</a>
       {/* No "branding pending" note here. A ministry without a logo
           simply shows none — nothing looks broken, so a marker would only
           advertise an internal to-do to visitors. Tracked in docs/README.md. */}
@@ -76,13 +80,13 @@ const next = siblings[(idx + 1) % siblings.length];
       <aside class="body__side">
         {(meets || where) && (
           <>
-            {meets && (<><p class="label side__l">Meets</p><p class="side__v">{meets}</p></>)}
-            {where && (<><p class="label side__l">Where</p><p class="side__v">{where}</p></>)}
+            {meets && (<><p class="label side__l">{t('page.meetsLabel', 'Meets')}</p><p class="side__v">{meets}</p></>)}
+            {where && (<><p class="label side__l">{t('page.whereLabel', 'Where')}</p><p class="side__v">{where}</p></>)}
           </>
         )}
-        <p class="label side__l">Questions?</p>
+        <p class="label side__l">{t('page.questionsLabel', 'Questions?')}</p>
         <p class="side__v">
-          Ask any Sunday, or <a href="/contact">send us a message</a>.
+          {t('page.questionsBody', 'Ask any Sunday, or')} <a href="/contact">{t('page.questionsLink', 'send us a message')}</a>.
         </p>
       </aside>
     </div>
@@ -91,8 +95,8 @@ const next = siblings[(idx + 1) % siblings.length];
   <!-- ============ COMING UP ============ -->
   <section class="wrap up-wrap" data-ministry={accent}>
     <div class="up__head reveal">
-      <h2 class="label up__h">Coming Up</h2>
-      <a href="/events" class="up__all">All church events →</a>
+      <h2 class="label up__h">{t('page.comingUp', 'Coming Up')}</h2>
+      <a href="/events" class="up__all">{t('page.allEventsLink', 'All church events →')}</a>
     </div>
     {events.length > 0 ? (
       <div class="up__list">
@@ -112,7 +116,7 @@ const next = siblings[(idx + 1) % siblings.length];
   <section class="wrap next-wrap">
     <a href={`/ministries/${next.slug}`} class="next reveal" data-ministry={next.data.accent}>
       <div>
-        <p class="label next__k">Next Ministry</p>
+        <p class="label next__k">{t('page.nextLabel', 'Next Ministry')}</p>
         <p class="serif next__n">{next.data.name}</p>
       </div>
       <span class="next__arrow" aria-hidden="true">→</span>

@@ -1,0 +1,44 @@
+# The words on the contact page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+header:
+  eyebrow: "Say Hello"
+  headline: "Get in touch"
+  lede: "A question, a prayer request, or just wanting to know what a Sunday is like — all of it reaches the same inbox, and someone reads it."
+details:
+  addressLabel: "Address"
+  emailLabel: "Email"
+  phoneLabel: "Phone"
+  timesLabel: "Service Times"
+  findUsLabel: "Find Us"
+message:
+  kicker: "General"
+  title: "Send us a message"
+  lede: "Questions about the church, the schedule, or anything else."
+  nameLabel: "Name"
+  emailLabel: "Email"
+  messageLabel: "Message"
+  button: "Send message"
+prayer:
+  kicker: "Prayer"
+  title: "Ask us to pray"
+  lede: "It goes to the same inbox and is read by the pastors. Leave the email blank if you'd rather not be contacted back."
+  nameLabel: "Name"
+  emailLabel: "Email"
+  optionalWord: "optional"
+  messageLabel: "Your request"
+  button: "Send prayer request"
+texts:
+  kicker: "Church Texts"
+  title: "Get church news by text"
+  body: "Service changes, weather cancellations, ministry reminders and the occasional prayer request — sent to your phone, only when there is something worth telling you."
+band:
+  eyebrow: "Or Just Come"
+  title: "You can also skip all of this and turn up."
+  button: "What to expect"

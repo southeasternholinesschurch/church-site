@@ -1,5 +1,6 @@
 ---
 import type { GetStaticPaths } from 'astro';
+import { copyFor } from '../../../../lib/copy';
 import BaseLayout from '../../../../layouts/BaseLayout.astro';
 import SermonCard from '../../../../components/SermonCard.astro';
 import { getCollection } from 'astro:content';
@@ -36,6 +37,9 @@ const art = artwork ? SERIES_ARTWORK[artwork] : undefined;
 const fmt = (d: Date) =>
   d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const spanLabel = fmt(span.from) === fmt(span.to) ? fmt(span.from) : `${fmt(span.from)} – ${fmt(span.to)}`;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('sermons');
 ---
 {/* CollectionPage rather than VideoObject: this page is the index of a run,
     and the individual sermons carry the video markup. */}
@@ -60,12 +64,12 @@ const spanLabel = fmt(span.from) === fmt(span.to) ? fmt(span.from) : `${fmt(span
       </div>
     )}
     <div class="phead__body">
-      <a href="/sermons" class="phead__back load d1">← All sermons</a>
-      <p class="label load d1 phead__eyebrow">Series{scripture ? ` · ${scripture}` : ''}</p>
+      <a href="/sermons" class="phead__back load d1">{t('page.back', '← All sermons')}</a>
+      <p class="label load d1 phead__eyebrow">{t('series.eyebrow', 'Series')}{scripture ? ` · ${scripture}` : ''}</p>
       <h1 class="serif load d2">{seriesName}</h1>
       {summary && <p class="phead__lede load d3">{summary}</p>}
       <p class="phead__count load d3">
-        {total} service{total === 1 ? '' : 's'} · {spanLabel} · in order, from the beginning
+        {total} service{total === 1 ? '' : 's'} · {spanLabel} · {t('series.countTail', 'in order, from the beginning')}
       </p>
     </div>
   </section>
@@ -77,9 +81,9 @@ const spanLabel = fmt(span.from) === fmt(span.to) ? fmt(span.from) : `${fmt(span
 
     {page.lastPage > 1 && (
       <nav class="pager reveal" aria-label="Pagination">
-        {page.url.prev ? <a href={page.url.prev}>← Earlier</a> : <span class="pager__off">← Earlier</span>}
+        {page.url.prev ? <a href={page.url.prev}>{t('series.earlier', '← Earlier')}</a> : <span class="pager__off">{t('series.earlier', '← Earlier')}</span>}
         <span class="pager__now">{page.currentPage} / {page.lastPage}</span>
-        {page.url.next ? <a href={page.url.next}>Later →</a> : <span class="pager__off">Later →</span>}
+        {page.url.next ? <a href={page.url.next}>{t('series.later', 'Later →')}</a> : <span class="pager__off">{t('series.later', 'Later →')}</span>}
       </nav>
     )}
   </section>

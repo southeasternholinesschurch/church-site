@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import { copyFor } from '../lib/copy';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import { getCollection } from 'astro:content';
@@ -71,6 +72,9 @@ const app = INSTALL[installAs];
 
 const [settingsEntry] = await getCollection('settings');
 const settings = settingsEntry.data;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('navigation');
 ---
 <!doctype html>
 <html lang="en">
@@ -139,7 +143,7 @@ const settings = settingsEntry.data;
     )}
   </head>
   <body>
-    <a class="visually-hidden" href="#main">Skip to content</a>
+    <a class="visually-hidden" href="#main">{t('nav.skipToContent', 'Skip to content')}</a>
     <Nav settings={settings} theme={navTheme} />
     <main id="main">
       <slot />

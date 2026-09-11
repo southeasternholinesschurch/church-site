@@ -1,0 +1,20 @@
+# The words on the beliefs page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+hero:
+  back: "← About"
+  eyebrow: "What We Believe"
+  headline: "Earnestly contend for the faith."
+  verse: "…earnestly contend for the faith which was once delivered unto the saints."
+  verseReference: "Jude 3"
+intro:
+  body: "At Fairhaven Community Church, our beliefs are rooted in the timeless truth of God's Word and shaped by a passion for holy living. Here's a simple overview of what we hold dear."
+cta:
+  title: "Questions about any of this?"
+  button: "Get in touch"

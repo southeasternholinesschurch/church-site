@@ -1,0 +1,35 @@
+# The words on the directory page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+header:
+  eyebrow: "Members Only"
+  headline: "Directory"
+  lede: "A private contact list for the church family — names, numbers and addresses for the people you sit beside on a Sunday. It opens by personal invitation, and it is never public."
+open:
+  title: "Open the directory"
+  button: "Open the directory"
+  noInvite: "Not had an invitation yet?"
+  askLink: "Ask for a link"
+  noInviteTail: "and we will text you one."
+rules:
+  eyebrow: "How Access Works"
+  one:
+    title: "One link, one person"
+    body: "Invites are sent individually — never a shared code. Tapping yours trusts that device from then on, so there's no password to remember or lose."
+  two:
+    title: "Adults only, opt in"
+    body: "Children never appear here at all. Adults are listed only if they've said yes in person — nobody is added by default."
+  three:
+    title: "Removable at any time"
+    body: "Ask and you're off the list the same day. Staff can also revoke any device instantly — a lost phone doesn't mean a lost directory."
+contents:
+  eyebrow: "What You'll Find"
+  body1: "Each person's entry carries a photograph, a phone number, and — where they have given them — an email address, a home address, and their birthday and anniversary. Only the day and month of those are ever shown, never the year. You can search by name, street, number or month, or jump down the alphabet. Tapping a number calls it."
+  body2: "You can keep your own details up to date from inside the directory — phone, email, address, birthday and anniversary. Change them once and everyone sees the correction. If you move house or change carriers, that is all it takes."
+  body3: "Names and photographs are looked after by the office, as is whether you appear here at all. Ask any Sunday and it is done the same day."

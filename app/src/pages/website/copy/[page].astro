@@ -1,0 +1,76 @@
+---
+import AppLayout from '../../../layouts/AppLayout.astro';
+import { readForm } from '../../../lib/form';
+import { siteEditingConfigured, GitConflict } from '../../../lib/site-content';
+import { readCopyPage, saveCopyPage, PAGE_LABELS, type CopyField } from '../../../lib/site-copy';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const configured = siteEditingConfigured(env);
+const page = Astro.params.page!;
+
+let error: string | null = null;
+
+if (Astro.request.method === 'POST' && configured) {
+  const form = await readForm(Astro.request);
+  const values: Record<string, string> = {};
+  for (const [k, v] of form.entries()) {
+    if (k === 'sha') continue;
+    values[k] = String(v);
+  }
+  try {
+    await saveCopyPage(env, page, values, String(form.get('sha') ?? '') || undefined, user);
+    return Astro.redirect(`/website/copy/${page}?saved=1`, 303);
+  } catch (err) {
+    error = err instanceof GitConflict
+      ? 'Somebody else saved this at the same moment. Reload and reapply your change — nothing was lost.'
+      : `Could not save: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const loaded = configured ? await readCopyPage(env, page) : null;
+if (configured && !loaded) return Astro.redirect('/website/copy', 302);
+
+/** Grouped in the order the sections appear on the page, not alphabetically. */
+const groups: { name: string; fields: CopyField[] }[] = [];
+for (const f of loaded?.fields ?? []) {
+  const last = groups[groups.length - 1];
+  if (last && last.name === f.group) last.fields.push(f);
+  else groups.push({ name: f.group, fields: [f] });
+}
+const label = PAGE_LABELS[page] ?? page;
+/** A long sentence wants a box you can see all of. */
+const rows = (v: string) => (v.length > 160 ? 4 : v.length > 70 ? 2 : 1);
+---
+<AppLayout title={`${label} — page text`} user={user}>
+  <p style="margin:0 0 6px;"><a href="/website/copy" class="muted">← Page text</a></p>
+  <h1>{label}</h1>
+  <p class="muted" style="max-width:62ch; margin:-4px 0 20px;">
+    Every word on that page. <a href={page === 'home' ? '/' : `/${page}`} target="_blank" rel="noreferrer">Open the page</a> in
+    another tab to see where each one sits.
+  </p>
+
+  {saved && <p class="notice">Saved. The website rebuilds itself; the change is live in a couple of minutes.</p>}
+  {error && <p class="notice">{error}</p>}
+
+  {loaded && (
+    <form method="POST">
+      <input type="hidden" name="sha" value={loaded.sha} />
+      {groups.map((g) => (
+        <div class="card" style="margin-bottom:18px;">
+          <h2 style="margin-top:0;">{g.name}</h2>
+          {g.fields.map((f) => (
+            <label class="field">
+              <span>{f.label}</span>
+              {rows(f.value) > 1
+                ? <textarea name={f.path} rows={rows(f.value)}>{f.value}</textarea>
+                : <input name={f.path} value={f.value} />}
+            </label>
+          ))}
+        </div>
+      ))}
+      <button class="btn" type="submit">Save</button>
+    </form>
+  )}
+</AppLayout>

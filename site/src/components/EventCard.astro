@@ -1,5 +1,6 @@
 ---
 import type { ChurchEvent } from '../lib/ical';
+import { copyFor } from '../lib/copy';
 import { eventWhen, eventDateBlock } from '../lib/format';
 import { MINISTRY_TAG_LABELS, ministryHref, type MinistryTag } from '../lib/ministry-tags';
 
@@ -26,6 +27,9 @@ const when = eventWhen(event);
 // Apple Calendar can't express "7pm nightly" — that detail lives in the
 // event's Notes. Shown on the Events page, where there's room for it.
 const notes = event.description?.trim();
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('events');
 ---
 <article class:list={['ev', variant === 'row' && 'ev--row', 'reveal']}>
   <div class="ev__date">
@@ -49,7 +53,7 @@ const notes = event.description?.trim();
         ))}
       </p>
     )}
-    {event.url && <a href={event.url} class="ev__link">More info →</a>}
+    {event.url && <a href={event.url} class="ev__link">{t('card.moreInfo', 'More info →')}</a>}
   </div>
 </article>
 

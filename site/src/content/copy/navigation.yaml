@@ -1,0 +1,22 @@
+# The words on the navigation page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+footer:
+  wordmark: "Come home."
+  visitHeading: "Visit"
+  connectHeading: "Connect"
+  moreHeading: "More"
+  contactLink: "Contact"
+  giveLink: "Give"
+  bulletinLink: "Bulletin"
+  directoryLink: "Directory"
+  city: "Fairhaven"
+nav:
+  watchLive: "Watch Live"
+  skipToContent: "Skip to content"

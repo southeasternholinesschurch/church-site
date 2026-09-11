@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { copyFor } from '../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { clockText } from '../lib/format';
@@ -30,6 +31,9 @@ const redirectUrl = `${Astro.site}contact/thank-you/`;
 // message. Typing the word themselves is a cleaner consent record anyway.
 const smsDigits = (settingsEntry.data.smsNumber ?? '').replace(/\D/g, '');
 const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('contact');
 ---
 <BaseLayout
   title="Contact"
@@ -38,11 +42,10 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
   <!-- ============ HEADER ============ -->
   <section class="phead">
     <div class="phead__body">
-      <p class="label load d1 phead__eyebrow">Say Hello</p>
-      <h1 class="serif load d2">Get in touch</h1>
+      <p class="label load d1 phead__eyebrow">{t('header.eyebrow', 'Say Hello')}</p>
+      <h1 class="serif load d2">{t('header.headline', 'Get in touch')}</h1>
       <p class="phead__lede load d3">
-        A question, a prayer request, or just wanting to know what a Sunday is like —
-        all of it reaches the same inbox, and someone reads it.
+        {t('header.lede', 'A question, a prayer request, or just wanting to know what a Sunday is like — all of it reaches the same inbox, and someone reads it.')}
       </p>
     </div>
   </section>
@@ -51,23 +54,23 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
   <section class="wrap facts-wrap">
     <div class="facts reveal">
       <div class="fact">
-        <p class="label fact__l">Address</p>
+        <p class="label fact__l">{t('details.addressLabel', 'Address')}</p>
         <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="fact__v fact__v--link">
           412 Meadowbrook Road<br />Fairhaven, IN 46140
         </a>
       </div>
       <div class="fact">
-        <p class="label fact__l">Email</p>
+        <p class="label fact__l">{t('details.emailLabel', 'Email')}</p>
         <a href={`mailto:${settings.email}`} class="fact__v fact__v--link">{settings.email}</a>
       </div>
       {settings.phone && (
         <div class="fact">
-          <p class="label fact__l">Phone</p>
+          <p class="label fact__l">{t('details.phoneLabel', 'Phone')}</p>
           <a href={`tel:${settings.phone.replace(/[^\d+]/g, '')}`} class="fact__v fact__v--link">{settings.phone}</a>
         </div>
       )}
       <div class="fact">
-        <p class="label fact__l">Service Times</p>
+        <p class="label fact__l">{t('details.timesLabel', 'Service Times')}</p>
         <ul class="fact__times">
           {settings.serviceTimes.map((s) => (
             <li><span>{s.day}</span> {clockText(s.time)}</li>
@@ -75,7 +78,7 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
         </ul>
       </div>
       <div class="fact">
-        <p class="label fact__l">Find Us</p>
+        <p class="label fact__l">{t('details.findUsLabel', 'Find Us')}</p>
         <div class="fact__socials">
           <a href={settings.socials.facebook} target="_blank" rel="noreferrer">Facebook ↗</a>
           <a href={settings.socials.instagram} target="_blank" rel="noreferrer">Instagram ↗</a>
@@ -102,19 +105,19 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
 
     <div class="forms">
       <form class="fm reveal" action="https://api.web3forms.com/submit" method="POST">
-        <p class="label fm__kicker">General</p>
-        <h2 class="serif fm__h">Send us a message</h2>
-        <p class="fm__p">Questions about the church, the schedule, or anything else.</p>
+        <p class="label fm__kicker">{t('message.kicker', 'General')}</p>
+        <h2 class="serif fm__h">{t('message.title', 'Send us a message')}</h2>
+        <p class="fm__p">{t('message.lede', 'Questions about the church, the schedule, or anything else.')}</p>
 
         <input type="hidden" name="access_key" value={WEB3FORMS_ACCESS_KEY} />
         <input type="hidden" name="subject" value="New message from yourchurch.org contact form" />
         <input type="hidden" name="redirect" value={redirectUrl} />
         <input type="checkbox" name="botcheck" class="visually-hidden" tabindex="-1" autocomplete="off" />
 
-        <label class="f"><span class="f__l">Name</span><input type="text" name="name" required /></label>
-        <label class="f"><span class="f__l">Email</span><input type="email" name="email" required /></label>
-        <label class="f"><span class="f__l">Message</span><textarea name="message" rows="5" required></textarea></label>
-        <button type="submit" class="btn btn--ink fm__btn">Send message</button>
+        <label class="f"><span class="f__l">{t('message.nameLabel', 'Name')}</span><input type="text" name="name" required /></label>
+        <label class="f"><span class="f__l">{t('message.emailLabel', 'Email')}</span><input type="email" name="email" required /></label>
+        <label class="f"><span class="f__l">{t('message.messageLabel', 'Message')}</span><textarea name="message" rows="5" required></textarea></label>
+        <button type="submit" class="btn btn--ink fm__btn">{t('message.button', 'Send message')}</button>
       </form>
 
       {/* Someone sent here from the directory's locked page arrives with
@@ -148,11 +151,10 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
       </script>
 
       <form class="fm fm--prayer reveal" action="https://api.web3forms.com/submit" method="POST">
-        <p class="label fm__kicker">Prayer</p>
-        <h2 class="serif fm__h">Ask us to pray</h2>
+        <p class="label fm__kicker">{t('prayer.kicker', 'Prayer')}</p>
+        <h2 class="serif fm__h">{t('prayer.title', 'Ask us to pray')}</h2>
         <p class="fm__p">
-          It goes to the same inbox and is read by the pastors. Leave the email blank
-          if you'd rather not be contacted back.
+          {t('prayer.lede', "It goes to the same inbox and is read by the pastors. Leave the email blank if you'd rather not be contacted back.")}
         </p>
 
         <input type="hidden" name="access_key" value={WEB3FORMS_ACCESS_KEY} />
@@ -160,10 +162,10 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
         <input type="hidden" name="redirect" value={redirectUrl} />
         <input type="checkbox" name="botcheck" class="visually-hidden" tabindex="-1" autocomplete="off" />
 
-        <label class="f"><span class="f__l">Name</span><input type="text" name="name" required /></label>
-        <label class="f"><span class="f__l">Email <em>optional</em></span><input type="email" name="email" /></label>
-        <label class="f"><span class="f__l">Your request</span><textarea name="message" rows="5" required></textarea></label>
-        <button type="submit" class="btn btn--ink fm__btn">Send prayer request</button>
+        <label class="f"><span class="f__l">{t('prayer.nameLabel', 'Name')}</span><input type="text" name="name" required /></label>
+        <label class="f"><span class="f__l">{t('prayer.emailLabel', 'Email')} <em>{t('prayer.optionalWord', 'optional')}</em></span><input type="email" name="email" /></label>
+        <label class="f"><span class="f__l">{t('prayer.messageLabel', 'Your request')}</span><textarea name="message" rows="5" required></textarea></label>
+        <button type="submit" class="btn btn--ink fm__btn">{t('prayer.button', 'Send prayer request')}</button>
       </form>
     </div>
   </section>
@@ -182,12 +184,10 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
     <section class="wrap optin-wrap">
       <div class="optin reveal">
         <div class="optin__body">
-          <p class="label optin__k">Church Texts</p>
-          <h2 class="serif optin__h">Get church news by text</h2>
+          <p class="label optin__k">{t('texts.kicker', 'Church Texts')}</p>
+          <h2 class="serif optin__h">{t('texts.title', 'Get church news by text')}</h2>
           <p class="optin__p">
-            Service changes, weather cancellations, ministry reminders and the
-            occasional prayer request — sent to your phone, only when there is
-            something worth telling you.
+            {t('texts.body', 'Service changes, weather cancellations, ministry reminders and the occasional prayer request — sent to your phone, only when there is something worth telling you.')}
           </p>
         </div>
 
@@ -217,12 +217,12 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
     </div>
     <div class="band__scrim" aria-hidden="true"></div>
     <div class="band__body par-fg" data-par="-32">
-      <p class="label band__eyebrow">Or Just Come</p>
-      <h2 class="serif band__title">You can also skip all of this and turn up.</h2>
+      <p class="label band__eyebrow">{t('band.eyebrow', 'Or Just Come')}</p>
+      <h2 class="serif band__title">{t('band.title', 'You can also skip all of this and turn up.')}</h2>
       <p class="band__p">
         Sunday at 10. No form to fill in, nobody expecting you, nothing you need to bring.
       </p>
-      <a href="/about" class="btn btn--solid band__btn">What to expect</a>
+      <a href="/about" class="btn btn--solid band__btn">{t('band.button', 'What to expect')}</a>
     </div>
   </section>
 </BaseLayout>

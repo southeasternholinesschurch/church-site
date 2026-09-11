@@ -10,7 +10,7 @@
  * every one of them the first time somebody changed a phone number.
  */
 import { parseDocument } from 'yaml';
-import { readFile, writeFile, commitMessage, type GitEnv } from './site-content';
+import { readFile, writeFile, commitMessage, YAML_OUT, type GitEnv } from './site-content';
 
 export const SETTINGS_PATH = 'site/src/content/settings/site.yaml';
 
@@ -152,7 +152,7 @@ export async function saveSettings(
 
   await writeFile(env, {
     path: SETTINGS_PATH,
-    content: String(doc),
+    content: YAML_OUT(doc),
     sha: sha ?? file?.sha,
     message: commitMessage('Site settings updated', who),
   });

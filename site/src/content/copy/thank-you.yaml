@@ -1,0 +1,13 @@
+# The words on the thank-you page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+eyebrow: "Sent"
+headline: "Thank you."
+homeButton: "Back to home"
+visitButton: "Plan a visit"

@@ -1,0 +1,23 @@
+# The words on the events page.
+#
+# Edited in the staff app at /website/copy, one file per page. Every key here
+# is read by the page; if one goes missing the page shows the sentence written
+# into it instead, so a mistake never leaves a heading blank.
+#
+# Names, times, addresses and links are NOT here — they come from Settings, so
+# one edit fixes them everywhere.
+
+card:
+  moreInfo: "More info →"
+header:
+  eyebrow: "What's Happening"
+  headline: "Events"
+  lede: "Special services, revivals and gatherings. The weekly rhythm below runs whether or not anything special is on the calendar."
+weekly:
+  eyebrow: "Every Week"
+calendar:
+  eyebrow: "On the Calendar"
+band:
+  eyebrow: "Come Along"
+  title: "You don't need an invitation to any of it."
+  button: "Plan your visit"
