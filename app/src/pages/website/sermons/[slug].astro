@@ -1,0 +1,130 @@
+---
+import AppLayout from '../../../layouts/AppLayout.astro';
+import { readForm } from '../../../lib/form';
+import { siteEditingConfigured, GitConflict } from '../../../lib/site-content';
+import { readSermon, saveSermon, listSeries, publishDraft, fromSlug } from '../../../lib/site-sermons';
+
+/**
+ * One sermon: its details, and the review step for a cleaned transcript.
+ *
+ * The Approve button is the point. Until now publishing a draft meant running
+ * publish-draft.mjs from a terminal, which is not a thing a pastor should have
+ * to do to put his own sermon on his own website.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const configured = siteEditingConfigured(env);
+const slug = Astro.params.slug!;
+
+let error: string | null = null;
+let published: number | null = null;
+
+if (Astro.request.method === 'POST' && configured) {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? 'save');
+  try {
+    if (action === 'publish') {
+      const { words } = await publishDraft(env, slug, user, String(form.get('draft') ?? '') || undefined);
+      return Astro.redirect(`/website/sermons/${slug}?published=${words}`, 303);
+    }
+    await saveSermon(env, slug, {
+      title: String(form.get('title') ?? ''),
+      speaker: String(form.get('speaker') ?? ''),
+      scripture: String(form.get('scripture') ?? ''),
+      series: String(form.get('series') ?? ''),
+      image: String(form.get('image') ?? ''),
+    }, String(form.get('body') ?? ''), String(form.get('sha') ?? '') || undefined, user);
+    return Astro.redirect(`/website/sermons/${slug}?saved=1`, 303);
+  } catch (err) {
+    error = err instanceof GitConflict
+      ? 'Somebody else saved this at the same moment. Reload and reapply your change — nothing was lost.'
+      : (err instanceof Error ? err.message : String(err));
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const publishedWords = Astro.url.searchParams.get('published');
+
+const sermon = configured ? await readSermon(env, slug) : null;
+if (configured && !sermon) return Astro.redirect('/website/sermons', 302);
+const series = configured ? await listSeries(env) : [];
+const meta = fromSlug(slug);
+const v = (k: string) => String(sermon?.data[k] ?? '');
+const youtubeId = v('youtubeId');
+const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean).length : 0;
+---
+<AppLayout title={v('title') || slug} user={user}>
+  <p style="margin:0 0 6px;"><a href="/website/sermons" class="muted">← Sermons</a></p>
+  <h1>{v('title') || meta.date}</h1>
+  <p class="muted" style="margin:-6px 0 22px;">
+    {meta.date} · {meta.serviceType.replace(/-/g, ' ')}
+    {youtubeId && <> · <a href={`https://www.youtube.com/watch?v=${youtubeId}`} target="_blank" rel="noreferrer">watch on YouTube</a></>}
+  </p>
+
+  {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong></p>}
+  {saved && <p class="notice">Saved. Live in a couple of minutes.</p>}
+  {publishedWords && <p class="notice"><strong>Published — {Number(publishedWords).toLocaleString()} words are now on the sermon's page.</strong></p>}
+  {error && <p class="notice">{error}</p>}
+
+  {sermon?.draft && !sermon.body.trim() && (
+    <form method="POST" class="card" style="margin-bottom:22px; border:2px solid var(--red);">
+      <input type="hidden" name="action" value="publish" />
+      <h2 style="margin-top:0;">A cleaned transcript is waiting — {draftWords.toLocaleString()} words</h2>
+      <p class="muted" style="margin:-6px 0 14px; max-width:64ch; font-size:15px;">
+        Read it before you publish it. It was cleaned from YouTube's automatic
+        captions, which mishear names and occasionally a verse — in the first one,
+        Ephesians 4:2's "lowliness" came through as "loneliness". Edit anything
+        here and it publishes as you leave it.
+      </p>
+      <textarea name="draft" rows="22"
+                style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.draft.text}</textarea>
+      <p class="muted" style="font-size:13px; margin:8px 0 14px;">
+        Anything inside an <code>editor's notes</code> comment is for you and is
+        removed when it publishes.
+      </p>
+      <button class="btn" type="submit">Publish this to the sermon's page</button>
+    </form>
+  )}
+
+  {sermon && (
+    <form method="POST">
+      <input type="hidden" name="sha" value={sermon.sha} />
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">Details</h2>
+        <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+          These normally come from the YouTube title. Renaming the video and
+          waiting for the nightly import fixes them everywhere at once; edit
+          here when that is not what you want.
+        </p>
+        <label class="field"><span>Sermon title</span><input name="title" value={v('title')} /></label>
+        <label class="field"><span>Speaker</span><input name="speaker" value={v('speaker')} /></label>
+        <label class="field"><span>Scripture</span><input name="scripture" value={v('scripture')} placeholder="Ephesians 1:16–19" /></label>
+        <label class="field" style="max-width:340px;">
+          <span>Series</span>
+          <select name="series">
+            <option value="">Not part of a series</option>
+            {series.map((s) => <option value={s.slug} selected={v('series') === s.slug}>{s.name}</option>)}
+          </select>
+        </label>
+        <label class="field">
+          <span>Artwork</span><input name="image" value={v('image')} />
+          <small class="muted">A filename from the sermon artwork folder. Empty uses the series artwork, then the YouTube still.</small>
+        </label>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">The page text</h2>
+        {!sermon.body.trim() && !sermon.draft && (
+          <p class="muted" style="margin:-6px 0 12px; font-size:15px;">
+            Nothing here yet. {sermon.hasTranscript
+              ? 'The transcript has been fetched — the Monday and Thursday routine will clean it into a draft.'
+              : 'No transcript yet either; the nightly job fetches those from YouTube.'}
+          </p>
+        )}
+        <textarea name="body" rows="14" style="font-family:ui-monospace,monospace; font-size:13.5px;">{sermon.body.trim()}</textarea>
+      </div>
+
+      <button class="btn" type="submit">Save details</button>
+    </form>
+  )}
+</AppLayout>

@@ -1,4 +1,4 @@
-import { defineCollection, z } from 'astro:content';
+import { defineCollection, reference, z } from 'astro:content';
 
 // Content collections give every editor (Decap CMS or the pastor by hand) a
 // typed schema — a malformed sermon date or a missing YouTube ID fails the
@@ -25,6 +25,33 @@ const optionalUrl = () =>
  * and the pages render richer when it's there. Making `speaker` required —
  * as it was — would have blocked the whole back-catalogue import.
  */
+/**
+ * A preaching series — the organising idea a run of sermons belongs to.
+ *
+ * A collection rather than a free-text field on each sermon, for one reason
+ * that matters in practice: free text means "Ephesians", "Ephesians " and
+ * "ephesians" are three different series, and nobody notices until the archive
+ * has three pages with one sermon each. Sermons now REFERENCE an entry here,
+ * so Astro fails the build on a name that does not exist instead of silently
+ * inventing a series.
+ *
+ * It also gives a series somewhere to keep its own artwork and description,
+ * which a string cannot.
+ */
+const series = defineCollection({
+  type: 'content',
+  schema: z.object({
+    name: z.string(),
+    /** One or two sentences, shown on the series page and in search results. */
+    summary: z.string().optional(),
+    /** Key into assets/series/ — the FILENAME, resolved by glob. See lib/sermon-assets.ts. */
+    artwork: z.string().optional(),
+    /** e.g. "Ephesians" or "The Sermon on the Mount". */
+    scripture: z.string().optional(),
+    draft: z.boolean().default(false),
+  }),
+});
+
 const sermons = defineCollection({
   type: 'content',
   schema: z.object({
@@ -38,7 +65,15 @@ const sermons = defineCollection({
     // --- optional enrichment: absent on imported entries, added by hand ---
     title: z.string().optional().describe('The sermon title, if someone adds one'),
     speaker: z.string().optional(),
-    series: z.string().optional(),
+    /** The series this belongs to. A reference, so a typo fails the build. */
+    series: reference('series').optional(),
+    /**
+     * Artwork for THIS sermon, overriding the series' own.
+     *
+     * The cascade is sermon -> series -> the YouTube thumbnail, so a church
+     * with no graphics at all still gets a usable card and link preview.
+     */
+    image: z.string().optional(),
     scripture: z.string().optional(),
 
     draft: z.boolean().default(false),
@@ -93,7 +128,7 @@ const ministries = defineCollection({
     // mistakes provisional colors/copy for final brand.
     //
     // The men's ministry was pulled on 2026-08-29 pending a rename, because
-    // "Fairhaven Men" reads as an unintended word. It returned on 2026-09-02 as SEnt,
+    // "Fairhaven Men" reads as an unintended word. It returned on 2026-09-02 as Fairhaven Men,
     // named for Isaiah 6:8 — so 'men' IS the men's ministry, not a fifth one.
     accent: z.enum(['men', 'kids', 'youth', 'women', 'seniors']),
     placeholder: z.boolean().default(false),
@@ -102,6 +137,29 @@ const ministries = defineCollection({
      *  Optional because Fairhaven Ladies/Fairhaven Seniors don't have theirs confirmed. */
     meets: z.string().optional(),
     where: z.string().optional(),
+    /**
+     * The hero photograph, as a FILENAME key into assets/photos/ — resolved by
+     * glob, so adding one is committing a file. Previously this lived in
+     * lib/ministry-assets.ts as an import per ministry, which meant changing a
+     * ministry photo was a TypeScript edit and therefore a developer's job.
+     */
+    photo: z.string().optional(),
+    /**
+     * Where to hold the crop, as a CSS object-position.
+     *
+     * This has to travel with the photo. The hero is far wider than any of
+     * these pictures, so `object-fit: cover` discards the top and bottom, and
+     * the right band depends entirely on how THAT photograph is framed — one
+     * of these was tuned because a man's face sits at 45% of the frame.
+     *
+     * It lived in code beside the imports, so replacing a photo left the old
+     * value pointing at nothing and silently cropped a face off. Here, it is
+     * edited in the same place as the photo it belongs to.
+     */
+    photoFocus: z.string().optional(),
+    /** Override the alt text — e.g. when the photo shows more than one person. */
+    photoAlt: z.string().optional(),
+
   }),
 });
 
@@ -176,4 +234,4 @@ const banner = defineCollection({
 });
 
 export const collections = {
-  beliefs, staff, sermons, ministries, settings, livestreamOverride, banner };
+  beliefs, staff, sermons, series, ministries, settings, livestreamOverride, banner };

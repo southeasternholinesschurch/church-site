@@ -7,7 +7,7 @@ import { slugify } from '../../lib/slugify';
 import { isVisibleSermon, SERMON_WINDOW_MONTHS } from '../../lib/content';
 import { SERVICE_TYPE_LABELS, type ServiceType } from '../../lib/sermons';
 
-const YOUTUBE_ARCHIVE = 'https://www.youtube.com/@YOUR-SUBDOMAIN/streams';
+const YOUTUBE_ARCHIVE = 'https://www.youtube.com/@yourchurchchurch/streams';
 
 /**
  * The archive is paginated server-side (the brief expects ~600 messages,
@@ -26,7 +26,17 @@ const { page } = Astro.props;
 const all = (await getCollection('sermons', ({ data }) => isVisibleSermon(data)))
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 
-const seriesList = [...new Set(all.map((s) => s.data.series).filter(Boolean))] as string[];
+/**
+ * Series that actually have a published sermon in the window. Read from the
+ * series collection rather than scraped out of the sermons, so a series keeps
+ * its proper name and casing — and so one that has been created but not yet
+ * preached does not appear as an empty filter.
+ */
+const allSeries = await getCollection('series', ({ data }) => !data.draft);
+const usedSlugs = new Set(all.map((s) => s.data.series?.slug).filter(Boolean));
+const seriesList = allSeries.filter((x) => usedSlugs.has(x.slug));
+/** slug -> display name, for the search index and the card labels below. */
+const seriesName = new Map(allSeries.map((x) => [x.slug, x.data.name]));
 const years = [...new Set(all.map((s) => String(s.data.date.getUTCFullYear())))].sort().reverse();
 
 // Only offer service types that actually occur, in a fixed running order.
@@ -39,10 +49,11 @@ const index = all.map((s) => ({
   sv: s.data.service,
   st: s.data.serviceType,
   sp: s.data.speaker ?? '',
-  se: s.data.series ?? '',
+  se: s.data.series ? (seriesName.get(s.data.series.slug) ?? '') : '',
   y: String(s.data.date.getUTCFullYear()),
   sc: s.data.scripture ?? '',
-  k: s.data.series?.trim() || (s.data.title?.trim() ? s.data.service : SERVICE_TYPE_LABELS[s.data.serviceType]),
+  k: (s.data.series ? seriesName.get(s.data.series.slug) : undefined)
+     || (s.data.title?.trim() ? s.data.service : SERVICE_TYPE_LABELS[s.data.serviceType]),
   u: `/sermons/${s.slug}`, id: s.data.youtubeId,
   d: s.data.date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
   // Extra haystack so date searches actually work. The visible label uses the
@@ -84,7 +95,7 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
         will be searchable here once it lands. In the meantime, every service is on
         our channel.
       </p>
-      <a href="https://www.youtube.com/@YOUR-SUBDOMAIN" target="_blank" rel="noreferrer" class="btn btn--ink">
+      <a href="https://www.youtube.com/@yourchurchchurch" target="_blank" rel="noreferrer" class="btn btn--ink">
         Watch on YouTube
       </a>
     </section>
@@ -125,7 +136,7 @@ const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
         {seriesList.length > 0 && (
           <nav class="chips reveal" aria-label="Filter by series">
             <a class="chip chip--on" href="/sermons">All</a>
-            {seriesList.map((s) => <a class="chip" href={`/sermons/series/${slugify(s)}`}>{s}</a>)}
+            {seriesList.map((x) => <a class="chip" href={`/sermons/series/${x.slug}`}>{x.data.name}</a>)}
           </nav>
         )}
       </section>

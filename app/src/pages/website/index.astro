@@ -1,9 +1,14 @@
 ---
 import AppLayout from '../../layouts/AppLayout.astro';
+import { tokenShape } from '../../lib/site-content';
 
 const user = Astro.locals.user!;
 const env = Astro.locals.runtime.env;
 const canPublish = Boolean(env.DEPLOY_HOOK_URL);
+
+/** Shown only when something is actually wrong — see tokenShape. */
+const token = tokenShape(env);
+const tokenTrouble = !token.present || !token.looksRight;
 
 /**
  * The launcher (build brief §6) — every place the church is administered, in
@@ -16,12 +21,30 @@ const canPublish = Boolean(env.DEPLOY_HOOK_URL);
  */
 const groups: { title: string; note?: string; links: { href: string; label: string; note: string }[] }[] = [
   {
+    title: 'Edit the website',
+    note: 'These write straight to the site. A save publishes itself in a couple of minutes.',
+    links: [
+      { href: '/website/right-now', label: 'Right now',
+        note: 'The livestream override and the homepage banner' },
+      { href: '/website/settings', label: 'Service times & contact',
+        note: 'The church\u2019s name, address, times, links' },
+      { href: '/website/content/staff', label: 'Staff & leadership',
+        note: 'Who is on the about page, and in what order' },
+      { href: '/website/content/ministries', label: 'Ministries',
+        note: 'The five ministry pages — summary, times, photo' },
+      { href: '/website/content/beliefs', label: 'What we believe',
+        note: 'The articles of faith' },
+      { href: '/website/sermons', label: 'Sermons',
+        note: 'Titles, speakers, series — and approving a cleaned transcript' },
+      { href: '/website/photos', label: 'Photos',
+        note: 'Every picture on the site. Upload a new one over an old name to replace it.' },
+    ],
+  },
+  {
     title: 'The website',
     links: [
-      { href: 'https://example.org/admin/', label: 'Edit site content',
-        note: 'Sermons, ministries, staff, beliefs and site settings' },
-      { href: 'https://example.org', label: 'View the site', note: 'What visitors see' },
-      { href: 'https://example.org/bulletin', label: 'This week’s bulletin',
+      { href: 'https://yourchurch.org', label: 'View the site', note: 'What visitors see' },
+      { href: 'https://yourchurch.org/bulletin', label: 'This week’s bulletin',
         note: 'Not in the menu — reachable by link only' },
     ],
   },
@@ -44,13 +67,29 @@ const groups: { title: string; note?: string; links: { href: string; label: stri
         note: 'Hosting, the domain, and both apps' },
       { href: 'https://console.cloud.google.com', label: 'Google Cloud',
         note: 'The YouTube key and the staff sign-in' },
-      { href: 'https://github.com/your-github-org/your-repo-name',
+      { href: 'https://github.com/yourchurchchurch/southeaster-holiness-church-site',
         label: 'The code', note: 'Everything that runs the site and this app' },
     ],
   },
 ];
 ---
 <AppLayout title="Website" user={user}>
+  {tokenTrouble && (
+    <div class="notice">
+      <strong>The editing token looks wrong, so the screens below will fail with a 401.</strong>
+      <ul style="margin:8px 0 0; padding-left:20px;">
+        <li>Present: {token.present ? 'yes' : 'NO — the secret is not set on this Worker'}</li>
+        {token.present && <li>Length: {token.length} — a fine-grained token is about 93. Shorter means it was clipped when pasted.</li>}
+        {token.present && <li>Starts: <code>{token.prefix}</code> — it should be <code>github_pat_</code>. A <code>ghp_</code> token is the older kind and will not carry these permissions.</li>}
+        <li>Repository: <code>{token.repo}</code></li>
+      </ul>
+      <p style="margin:10px 0 0;">
+        Re-set it with <code>npx wrangler secret put GITHUB_TOKEN</code> from the
+        <code>app</code> folder, or in the dashboard under Workers &amp; Pages →
+        changeme-app → Settings → Variables and Secrets.
+      </p>
+    </div>
+  )}
   <h1>Website</h1>
   <p class="muted" style="max-width:56ch; margin:-4px 0 26px;">
     Everywhere the church is administered, in one place.

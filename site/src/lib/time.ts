@@ -1,7 +1,7 @@
 /**
  * Timezone-aware "next service" math for the Livestream countdown.
  *
- * Indianapolis observes Eastern Time with DST (America/Indiana/Indianapolis),
+ * Fairhaven observes Eastern Time with DST (America/Indiana/Indianapolis),
  * so a fixed UTC offset is wrong roughly half the year. Rather than pull in
  * a date library, we lean on the JS engine's built-in IANA tzdata via
  * `Intl.DateTimeFormat` — it's always current and needs no dependency to

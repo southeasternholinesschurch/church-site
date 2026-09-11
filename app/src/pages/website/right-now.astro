@@ -1,0 +1,225 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import {
+  readFile, writeFile, listDir, siteEditingConfigured, commitMessage, GitConflict,
+} from '../../lib/site-content';
+
+/**
+ * The two things a church changes under time pressure: whether a notice is on
+ * the homepage, and whether we are live right now.
+ *
+ * They are one screen because they are one moment — Sunday morning, minutes
+ * before a service. Everything else about the website changes a few times a
+ * year and can live on calmer pages.
+ *
+ * This is also the first screen to write to the site's git repository, so it is
+ * deliberately the smallest one: two short files, no images, no lists. If the
+ * write path is wrong, it is wrong here, where it is easy to see.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+
+const OVERRIDE = 'site/src/content/livestreamOverride/current.yaml';
+const BANNER = 'site/src/content/banner/current.yaml';
+
+const configured = siteEditingConfigured(env);
+
+/** YAML is a superset of JSON, so JSON.stringify gives correct quoting and
+ *  escaping for free — including a note that contains a colon or a newline,
+ *  which hand-rolled quoting gets wrong the first time somebody writes one. */
+const yamlString = (v: string) => JSON.stringify(v ?? '');
+
+let error: string | null = null;
+let savedWhat: string | null = null;
+
+if (Astro.request.method === 'POST' && configured) {
+  const form = await readForm(Astro.request);
+  const which = String(form.get('which') ?? '');
+  try {
+    if (which === 'livestream') {
+      const active = form.get('active') === '1';
+      const youtubeUrl = String(form.get('youtubeUrl') ?? '').trim();
+      const note = String(form.get('note') ?? '').trim();
+      if (active && !youtubeUrl) {
+        error = 'Turning the override on needs the video link — that is the whole point of it.';
+      } else {
+        const current = await readFile(env, OVERRIDE);
+        const body = [
+          '# Manual override for the livestream page.',
+          '# Turn this ON only when auto-detection is wrong. TURN IT OFF afterwards.',
+          `active: ${active}`,
+          `youtubeUrl: ${yamlString(youtubeUrl)}`,
+          `note: ${yamlString(note)}`,
+          '',
+        ].join('\n');
+        await writeFile(env, {
+          path: OVERRIDE, content: body, sha: current?.sha,
+          message: commitMessage(
+            active ? 'Livestream: override ON' : 'Livestream: override off', user),
+        });
+        savedWhat = 'livestream';
+      }
+    } else if (which === 'banner') {
+      const active = form.get('active') === '1';
+      const headline = String(form.get('headline') ?? '').trim();
+      if (active && !headline) {
+        error = 'A banner with no headline shows an empty stripe. Give it something to say.';
+      } else {
+        const current = await readFile(env, BANNER);
+        const body = [
+          '# Homepage banner. Turn it on for something seasonal; turn it off after.',
+          `active: ${active}`,
+          `image: ${yamlString(String(form.get('image') ?? '').trim())}`,
+          `headline: ${yamlString(headline)}`,
+          `linkUrl: ${yamlString(String(form.get('linkUrl') ?? '').trim())}`,
+          `linkLabel: ${yamlString(String(form.get('linkLabel') ?? '').trim())}`,
+          '',
+        ].join('\n');
+        await writeFile(env, {
+          path: BANNER, content: body, sha: current?.sha,
+          message: commitMessage(
+            active ? `Banner on: ${headline}` : 'Banner off', user),
+        });
+        savedWhat = 'banner';
+      }
+    }
+  } catch (err) {
+    error = err instanceof GitConflict
+      ? 'Somebody else changed this at the same moment. Reload and try again — nothing was lost.'
+      : `Could not save: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  if (!error) return Astro.redirect(`/website/right-now?saved=${savedWhat}`, 303);
+}
+
+const saved = Astro.url.searchParams.get('saved');
+
+/** Read AFTER any write, so the form shows what is actually committed. */
+const parse = (text: string | undefined) => {
+  const out: Record<string, string> = {};
+  for (const line of (text ?? '').split('\n')) {
+    const m = /^([a-zA-Z]+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    let v = m[2].trim();
+    if (v.startsWith('"')) { try { v = JSON.parse(v); } catch { /* leave as written */ } }
+    out[m[1]] = v;
+  }
+  return out;
+};
+
+let overrideData: Record<string, string> = {};
+let bannerData: Record<string, string> = {};
+let uploads: string[] = [];
+let readError: string | null = null;
+if (configured) {
+  try {
+    overrideData = parse((await readFile(env, OVERRIDE))?.text);
+    bannerData = parse((await readFile(env, BANNER))?.text);
+    uploads = (await listDir(env, 'site/public/uploads'))
+      .filter((f) => /\.(jpe?g|png|webp|avif)$/i.test(f.name)).map((f) => f.name);
+  } catch (err) {
+    readError = err instanceof Error ? err.message : String(err);
+  }
+}
+const liveOn = overrideData.active === 'true';
+const bannerOn = bannerData.active === 'true';
+---
+<AppLayout title="Right now" user={user}>
+  <h1>Right now</h1>
+  <p class="muted" style="max-width:60ch; margin:-4px 0 24px;">
+    The two things that change on a Sunday morning. Everything else about the
+    website lives on its own page.
+  </p>
+
+  {!configured && (
+    <p class="notice">
+      <strong>Website editing is not connected yet.</strong> The GitHub token still
+      needs adding as a Worker secret — see <code>docs/site-editing.md</code>.
+    </p>
+  )}
+  {readError && <p class="notice">Could not read the website's files: {readError}</p>}
+  {error && <p class="notice">{error}</p>}
+  {saved && (
+    <p class="notice">
+      Saved. The website rebuilds itself and the change is live in a couple of minutes.
+    </p>
+  )}
+
+  <div class="card" style="margin-bottom:20px;">
+    <h2 style="margin-top:0;">Livestream override</h2>
+    <p class="muted" style="margin:-6px 0 14px; max-width:62ch; font-size:15px;">
+      The livestream page finds the stream on its own. Use this only when it is
+      wrong — and <strong>turn it off afterwards</strong>, or the page will keep
+      showing a service that finished.
+      {liveOn && <> It is <strong>on right now.</strong></>}
+    </p>
+    <form method="POST">
+      <input type="hidden" name="which" value="livestream" />
+      <label class="field" style="max-width:320px;">
+        <span>Override</span>
+        <select name="active">
+          <option value="0" selected={!liveOn}>Off — let the page detect it</option>
+          <option value="1" selected={liveOn}>On — show this video</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Video link</span>
+        <input name="youtubeUrl" value={overrideData.youtubeUrl ?? ''}
+               placeholder="https://www.youtube.com/watch?v=..." />
+      </label>
+      <label class="field">
+        <span>Note to yourself</span>
+        <input name="note" value={overrideData.note ?? ''}
+               placeholder="Why this is on, and when to turn it off" />
+        <small class="muted">Never shown on the website.</small>
+      </label>
+      <button class="btn" type="submit" disabled={!configured}>Save</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Homepage banner</h2>
+    <p class="muted" style="margin:-6px 0 14px; max-width:62ch; font-size:15px;">
+      A stripe across the top of the home page for something seasonal — a
+      revival, a Christmas Eve service, a series starting.
+      {bannerOn && <> It is <strong>showing now.</strong></>}
+    </p>
+    <form method="POST">
+      <input type="hidden" name="which" value="banner" />
+      <label class="field" style="max-width:320px;">
+        <span>Banner</span>
+        <select name="active">
+          <option value="0" selected={!bannerOn}>Off</option>
+          <option value="1" selected={bannerOn}>On</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Headline</span>
+        <input name="headline" value={bannerData.headline ?? ''}
+               placeholder="Revival services, October 12–15" />
+      </label>
+      <label class="field">
+        <span>Link</span>
+        <input name="linkUrl" value={bannerData.linkUrl ?? ''} placeholder="https://…" />
+        <small class="muted">Optional. Leave empty and the banner is text only.</small>
+      </label>
+      <label class="field">
+        <span>Link wording</span>
+        <input name="linkLabel" value={bannerData.linkLabel ?? ''} placeholder="See the schedule" />
+      </label>
+      <label class="field">
+        <span>Picture</span>
+        <select name="image">
+          <option value="">No picture — text only</option>
+          {uploads.map((u) => (
+            <option value={`/uploads/${u}`} selected={bannerData.image === `/uploads/${u}`}>{u}</option>
+          ))}
+        </select>
+        <small class="muted">
+          Upload one on the <a href="/website/photos">photos page</a> under "Banner images".
+        </small>
+      </label>
+      <button class="btn" type="submit" disabled={!configured}>Save</button>
+    </form>
+  </div>
+</AppLayout>

@@ -16,12 +16,8 @@ const settings = settingsEntry.data;
 // client-side HTML — it is in the page source of every visitor's browser
 // either way, so committing it changes nothing. All it can do is deliver mail
 // to the address it was registered with
-// (hello@example.org); it grants no account access.
-// A submit-only PUBLIC key — it belongs in the source, not in a secret.
-// Get one free at https://web3forms.com, registered to the address in
-// site.yaml. Until it is set, both forms show a clear notice instead of
-// silently failing. SETUP.md step 5.
-const WEB3FORMS_ACCESS_KEY = '';
+// (yourchurchchurch@gmail.com); it grants no account access.
+const WEB3FORMS_ACCESS_KEY = '88368cc2-71e3-4573-8e62-3424a2003558';
 const formsLive = !WEB3FORMS_ACCESS_KEY.startsWith('REPLACE_');
 const redirectUrl = `${Astro.site}contact/thank-you/`;
 
@@ -37,7 +33,7 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
 ---
 <BaseLayout
   title="Contact"
-  description="Get in touch with Fairhaven Community Church, send a prayer request, or find us in person."
+  description="Get in touch with Fairhaven Community Church, send a prayer request, or find us on Meadowbrook Road."
 >
   <!-- ============ HEADER ============ -->
   <section class="phead">
@@ -111,7 +107,7 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
         <p class="fm__p">Questions about the church, the schedule, or anything else.</p>
 
         <input type="hidden" name="access_key" value={WEB3FORMS_ACCESS_KEY} />
-        <input type="hidden" name="subject" value="New message from example.org contact form" />
+        <input type="hidden" name="subject" value="New message from yourchurch.org contact form" />
         <input type="hidden" name="redirect" value={redirectUrl} />
         <input type="checkbox" name="botcheck" class="visually-hidden" tabindex="-1" autocomplete="off" />
 
@@ -132,7 +128,7 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
           const form = document.querySelector('form.fm');
           if (form) {
             form.querySelector('input[name="subject"]').value =
-              'Directory access request from example.org';
+              'Directory access request from yourchurch.org';
             const kicker = form.querySelector('.fm__kicker');
             const head = form.querySelector('.fm__h');
             const lede = form.querySelector('.fm__p');
@@ -160,7 +156,7 @@ const smsHref = smsDigits.length === 10 ? `+1${smsDigits}` : `+${smsDigits}`;
         </p>
 
         <input type="hidden" name="access_key" value={WEB3FORMS_ACCESS_KEY} />
-        <input type="hidden" name="subject" value="New prayer request from example.org" />
+        <input type="hidden" name="subject" value="New prayer request from yourchurch.org" />
         <input type="hidden" name="redirect" value={redirectUrl} />
         <input type="checkbox" name="botcheck" class="visually-hidden" tabindex="-1" autocomplete="off" />
 

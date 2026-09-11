@@ -20,7 +20,7 @@ name: Import sermons
 
 on:
   schedule:
-    # 09:00 UTC daily (~4–5am Indianapolis). Uploads lag the service by days,
+    # 09:00 UTC daily (~4–5am Fairhaven). Uploads lag the service by days,
     # so a daily check catches everything without hammering the feed.
     - cron: '0 9 * * *'
   workflow_dispatch: # so it can also be run by hand from the Actions tab
@@ -64,23 +64,62 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: node scripts/import-sermons.mjs --write --prune --strict
 
-      - name: Commit any new services
+      - name: Import transcripts
+        working-directory: site
+        # Runs AFTER the sermon import, and that order is load-bearing.
+        #
+        # Both jobs draw on ONE 10,000-unit daily quota. Transcripts are the
+        # greedy one — 250 units per sermon against the importer's handful — so
+        # running them first starves the job that actually matters and the
+        # archive stops updating. That is not hypothetical: it failed exactly
+        # this way on 2026-09-11, when a manual back-catalogue run had already
+        # spent 84% of the day's units.
+        #
+        # Nothing is lost by running second: both steps finish before the
+        # single commit below, so a new sermon still arrives with its
+        # transcript in one commit.
+        #
+        # Quota, not time, is the limit: 10,000 units a day, and each sermon
+        # costs 250 (captions.list 50 + captions.download 200). The script caps
+        # itself at 35 so the sermon import below still has units to spend, and
+        # works through a back-catalogue over several nights.
+        #
+        # continue-on-error because a transcript is an enhancement: if YouTube
+        # refuses, or the token has been revoked, the sermon archive itself
+        # must still update.
+        continue-on-error: true
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
         run: |
-          if [ -z "$(git status --porcelain site/src/content/sermons)" ]; then
-            echo "No new services — nothing to commit."
+          if [ -z "$GOOGLE_REFRESH_TOKEN" ]; then
+            echo "No Google OAuth secrets set — skipping transcripts."
+            echo "See docs/transcripts.md. The sermon import below is unaffected."
+            exit 0
+          fi
+          node scripts/import-transcripts.mjs --write
+
+      - name: Commit any new services and transcripts
+        run: |
+          # Both paths, or a transcript would be fetched, spent against quota,
+          # and then thrown away when the runner is destroyed.
+          if [ -z "$(git status --porcelain site/src/content/sermons site/transcripts)" ]; then
+            echo "Nothing new — no services and no transcripts to commit."
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/src/content/sermons
+          git add site/src/content/sermons site/transcripts
           # Name what changed, so the history is readable at a glance.
-          added=$(git diff --cached --name-only --diff-filter=A | wc -l | tr -d ' ')
-          removed=$(git diff --cached --name-only --diff-filter=D | wc -l | tr -d ' ')
-          git commit -m "Sermons: +${added} new, -${removed} aged out" \
-                     -m "Automated by .github/workflows/import-sermons.yml from the channel's public RSS feed."
+          added=$(git diff --cached --name-only --diff-filter=A -- site/src/content/sermons | wc -l | tr -d ' ')
+          removed=$(git diff --cached --name-only --diff-filter=D -- site/src/content/sermons | wc -l | tr -d ' ')
+          texts=$(git diff --cached --name-only -- site/transcripts | wc -l | tr -d ' ')
+          git commit -m "Sermons: +${added} new, -${removed} aged out, ${texts} transcript(s)" \
+                     -m "Automated by .github/workflows/import-sermons.yml from the channel's RSS feed and, for transcripts, the YouTube Data API."
 
           # Absorb anything pushed while this job was running. The commit only
-          # ever touches site/src/content/sermons, so a rebase here cannot
-          # conflict with work happening anywhere else in the repo.
+          # ever touches site/src/content/sermons and site/transcripts, so a
+          # rebase here cannot conflict with work happening elsewhere.
           git pull --rebase origin main
           git push

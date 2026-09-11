@@ -3,43 +3,68 @@ import type { GetStaticPaths } from 'astro';
 import BaseLayout from '../../../../layouts/BaseLayout.astro';
 import SermonCard from '../../../../components/SermonCard.astro';
 import { getCollection } from 'astro:content';
-import { slugify } from '../../../../lib/slugify';
+import { SERIES_ARTWORK } from '../../../../lib/sermon-assets';
+import { Image } from 'astro:assets';
 import { isVisibleSermon } from '../../../../lib/content';
+import { byServiceOrder } from '../../../../lib/sermons';
 
 export const getStaticPaths = (async ({ paginate }) => {
   const sermons = await getCollection('sermons', ({ data }) => isVisibleSermon(data));
-  const seriesList = [...new Set(sermons.map((s) => s.data.series).filter(Boolean))] as string[];
+  const allSeries = await getCollection('series', ({ data }) => !data.draft);
 
-  return seriesList.flatMap((series) => {
+  return allSeries.flatMap((entry) => {
     const filtered = sermons
-      .filter((s) => s.data.series === series)
-      // oldest first: a series is meant to be followed from the beginning
-      .sort((a, b) => a.data.date.getTime() - b.data.date.getTime());
+      .filter((s) => s.data.series?.slug === entry.slug)
+      // oldest first, morning before evening on a shared date
+      .sort((a, b) => byServiceOrder(a.data, b.data));
+    // A series with nothing published yet gets no page rather than an empty one.
+    if (!filtered.length) return [];
     return paginate(filtered, {
       pageSize: 12,
-      params: { series: slugify(series) },
-      props: { seriesName: series, total: filtered.length, span: {
+      params: { series: entry.slug },
+      props: { entry, total: filtered.length, span: {
         from: filtered[0].data.date, to: filtered[filtered.length - 1].data.date,
       } },
     });
   });
 }) satisfies GetStaticPaths;
 
-const { page, seriesName, total, span } = Astro.props;
+const { page, entry, total, span } = Astro.props;
+const seriesName = entry.data.name;
+const { summary, scripture, artwork } = entry.data;
+const art = artwork ? SERIES_ARTWORK[artwork] : undefined;
 const fmt = (d: Date) =>
   d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const spanLabel = fmt(span.from) === fmt(span.to) ? fmt(span.from) : `${fmt(span.from)} – ${fmt(span.to)}`;
 ---
+{/* CollectionPage rather than VideoObject: this page is the index of a run,
+    and the individual sermons carry the video markup. */}
 <BaseLayout
   title={`${seriesName} — Sermons`}
-  description={`Every message in the ${seriesName} series from Fairhaven Community Church.`}
+  description={summary ?? `Every message in the ${seriesName} series from Fairhaven Community Church, in order.`}
+  ogImage={art?.src}
+  jsonLd={{
+    '@context': 'https://schema.org',
+    '@type': 'CreativeWorkSeries',
+    name: seriesName,
+    ...(summary ? { description: summary } : {}),
+    ...(scripture ? { about: scripture } : {}),
+    url: new URL(`/sermons/series/${entry.slug}`, Astro.site).href,
+    numberOfItems: total,
+  }}
 >
   <section class="phead">
+    {art && (
+      <div class="phead__art" aria-hidden="true">
+        <Image src={art} alt="" widths={[800, 1400, 2000]} sizes="100vw" loading="eager" />
+      </div>
+    )}
     <div class="phead__body">
       <a href="/sermons" class="phead__back load d1">← All sermons</a>
-      <p class="label load d1 phead__eyebrow">Series</p>
+      <p class="label load d1 phead__eyebrow">Series{scripture ? ` · ${scripture}` : ''}</p>
       <h1 class="serif load d2">{seriesName}</h1>
-      <p class="phead__lede load d3">
+      {summary && <p class="phead__lede load d3">{summary}</p>}
+      <p class="phead__count load d3">
         {total} service{total === 1 ? '' : 's'} · {spanLabel} · in order, from the beginning
       </p>
     </div>
@@ -68,7 +93,14 @@ const spanLabel = fmt(span.from) === fmt(span.to) ? fmt(span.from) : `${fmt(span
   .phead__back:hover { color: var(--cream); }
   .phead__eyebrow { color: var(--red-tint); margin: 0 0 18px; }
   .phead h1 { margin: 0; font-size: clamp(40px,5.6vw,80px); line-height: 1.02; letter-spacing: -.02em; }
-  .phead__lede { margin: 20px 0 0; font-size: 17px; line-height: 1.6; color: rgba(244,239,231,.74); }
+  .phead__lede { margin: 20px 0 0; font-size: 19px; line-height: 1.6; color: rgba(244,239,231,.82); max-width: 56ch; }
+  .phead__count { margin: 14px 0 0; font-size: 15px; color: rgba(244,239,231,.6); }
+  /* Artwork sits behind the title, dimmed enough that white type stays legible
+     on any photograph a church happens to upload. */
+  .phead__art { position: absolute; inset: 0; z-index: 1; }
+  .phead__art :global(img) { width: 100%; height: 100%; object-fit: cover; opacity: .34; }
+  .phead__art::after { content: ''; position: absolute; inset: 0;
+                       background: linear-gradient(180deg, rgba(26,21,18,.55), rgba(26,21,18,.9)); }
 
   .grid-wrap { padding-block: clamp(60px,7vw,96px) clamp(80px,9vw,130px); }
   .grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 44px 34px; }

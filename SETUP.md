@@ -371,33 +371,68 @@ Then add your domain as a custom domain, and update `site/wrangler.jsonc` and
 **Check:** the live URL serves your site, and `/api/live-status` returns JSON
 with `configured: true`.
 
-## Step 9. The CMS, so you are not editing files forever
+## Step 9. Editing the site without touching files
 
-`/admin` runs Decap CMS, which commits straight to your GitHub repo. On
-Cloudflare it needs a small OAuth proxy — that is `workers/decap-oauth`, about
-forty lines.
+The site's words and pictures live as text files in this repository. The staff
+app edits them for you — a save is a commit, and the commit triggers the build,
+so **a change publishes itself in about two minutes** with nothing else to press.
 
-Create a **GitHub OAuth App**, deploy the worker with its client ID and secret,
-and set the resulting URL in **two** places:
+That needs one credential.
 
-- `site/public/admin/config.yml` → `base_url`
-- `site/public/_headers` → the `connect-src` in the CSP
+**Create a fine-grained token.** GitHub → your avatar → Settings → Developer
+settings → Personal access tokens → **Fine-grained tokens** → Generate new token.
 
-**Miss the second and the CMS fails silently in the browser console**, which
-looks exactly like a login problem and is not.
+Signed in as the account that OWNS the repository — a token belongs to whoever
+makes it, and one made on a personal account stops working when that person
+leaves.
 
-Also set `repo:` in that config to your GitHub org and repo name.
+| Field | Value |
+|---|---|
+| Repository access | **Only select repositories** → this one |
+| Permissions | **Repository permissions → Contents → Read and write** |
 
-**Check:** log in at `/admin`, change one word, save, and confirm the commit
-appears in GitHub and the site rebuilds.
+**Contents is the only permission it needs.** Leave every other one at "No
+access". If you find yourself granting Administration or Actions, something has
+gone wrong — the app only ever reads and writes files.
 
----
+GitHub shows the token once. It starts `github_pat_` and is about 93 characters.
 
-# Part 2 — The staff app
+**Store it on the app's Worker**, from the `app` folder:
 
-A separate Worker, a separate database, a separate subdomain. Nothing here is
-reachable from the public site, and no member data ever crosses into the static
-build. That separation is deliberate and worth keeping.
+```bash
+npx wrangler secret put GITHUB_TOKEN
+```
+
+Paste it at the prompt. Secrets take effect immediately and survive later
+deploys, so there is nothing to redeploy.
+
+**Check:** open `/website` in the staff app. If the token is wrong, that page
+says so and tells you how — length, prefix and repository — rather than failing
+with a bare 401 somewhere else.
+
+Then `/website/settings` should show your real service times.
+
+### What you can edit there
+
+| Screen | What it changes |
+|---|---|
+| Right now | The livestream override and the homepage banner |
+| Service times & contact | Name, address, times, socials, giving links |
+| Staff & leadership | Who appears on the about page |
+| Ministries | Each ministry page, including where to hold the photo crop |
+| What we believe | The articles of faith |
+| Sermons | Titles, speakers, series, and approving a cleaned transcript |
+| Photos | Every picture, resized in your browser before it is sent |
+
+It is **admin-only**. Editors can do everything else in the app but cannot
+publish to the public website. If that is wrong for your church, it is one line
+in `app/src/lib/permissions.ts`, and the reasoning is written beside it.
+
+> **This replaced Decap CMS.** Earlier versions of this template shipped a
+> git-backed CMS at `/admin` with its own OAuth proxy Worker, a GitHub OAuth App,
+> two more secrets, and a step whose own instructions had to warn that a mistake
+> *fails silently in the browser console*. In the church this was built for it
+> was used exactly once. One token replaces all of it.
 
 ## Step 10. Create the database and storage
 

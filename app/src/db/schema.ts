@@ -286,7 +286,7 @@ export const scheduledMessages = sqliteTable('scheduled_messages', {
   groupId: integer('group_id').references(() => groups.id),
   /** ISO instant. Compared against now in the church's timezone by the caller. */
   sendAt: text('send_at').notNull(),
-  status: text('status', { enum: ['pending', 'sent', 'failed', 'skipped'] })
+  status: text('status', { enum: ['pending', 'men', 'failed', 'skipped'] })
     .notNull().default('pending'),
   sentAt: text('sent_at'),
   /** Why a send was skipped or failed — surfaced in the dashboard rather than
@@ -500,7 +500,7 @@ export const appSettings = sqliteTable('app_settings', {
 /**
  * Fairhaven Kids — the children's-ministry section.
  *
- * See migrations/0014_sekids.sql, which carries the reasoning in full. The
+ * See migrations/0014_kids.sql, which carries the reasoning in full. The
  * three decisions worth repeating here, because they are the ones a later
  * change is most likely to undo by accident:
  *
@@ -635,7 +635,7 @@ export type KidGuardian = typeof kidGuardians.$inferSelect;
  * Fairhaven Bucks — play money, and the cards children carry.
  *
  * No cash value, no relationship to real currency, and nothing here ever goes
- * near a payment detail. See migrations/0015_sekids_bucks.sql for the full
+ * near a payment detail. See migrations/0015_kids_bucks.sql for the full
  * reasoning; the two things worth repeating are that this is a LEDGER rather
  * than a balance, and that one attendance credit per child per meeting is
  * enforced by a partial unique index rather than by application code.

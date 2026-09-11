@@ -12,7 +12,7 @@ export interface AgeClass { id: number; name: string; minAge: number | null; max
  * the church's own timezone; neither is an instant.
  *
  * Parsed by SPLITTING THE STRING, not with `new Date(iso)`. `new Date('2019-07-04')`
- * is parsed as UTC midnight, which is the previous evening in Indianapolis —
+ * is parsed as UTC midnight, which is the previous evening in Fairhaven —
  * the bug that shipped on the public site once already and renders a day early.
  * Nothing here needs a Date at all: an age is arithmetic on three integers.
  */

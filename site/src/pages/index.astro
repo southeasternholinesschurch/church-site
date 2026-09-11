@@ -204,8 +204,8 @@ const ministryImages = MINISTRY_PHOTOS;
       {ministries.map((m) => (
         <a href={`/ministries/${m.slug}`} class="min reveal" data-ministry={m.data.accent}>
           <div class="min__media">
-            {ministryImages[m.data.accent] ? (
-              <Image src={ministryImages[m.data.accent]!} alt="" widths={[400, 800]} sizes="(max-width: 760px) 50vw, 25vw" />
+            {ministryImages[m.data.photo ?? ""] ? (
+              <Image src={ministryImages[m.data.photo ?? ""]!} alt="" widths={[400, 800]} sizes="(max-width: 760px) 50vw, 25vw" />
             ) : (
               <div class="min__placeholder" aria-hidden="true"></div>
             )}

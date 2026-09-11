@@ -184,7 +184,7 @@ const threads = [...byNumber.entries()]
   })
   .sort((a, b) => b.last.id - a.last.id);
 
-const sentTo = Astro.url.searchParams.get('sent');
+const sentTo = Astro.url.searchParams.get('men');
 const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
   dateStyle: 'medium', timeStyle: 'short', timeZone: CHURCH_TZ,
 });

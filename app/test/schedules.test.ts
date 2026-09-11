@@ -2,7 +2,7 @@
  * When a scheduled text is due, and who gets one.
  *
  * Two risks carry the weight here. The first is the timezone: a Worker runs in
- * UTC, and after 8pm Indianapolis it is already tomorrow — so "every Saturday
+ * UTC, and after 8pm Fairhaven it is already tomorrow — so "every Saturday
  * 6pm" fires on the wrong day if the clock is read carelessly. The second is
  * double-sending: the whole point of the queue key is that a rule which runs
  * every five minutes still texts a person once, so the "already ran" path is
@@ -32,7 +32,7 @@ const base: ScheduleRow = {
 };
 
 // ---- localNow: the timezone trap -------------------------------------------
-// 2026-09-06T01:30Z is still Saturday the 5th, 9:30pm, in Indianapolis.
+// 2026-09-06T01:30Z is still Saturday the 5th, 9:30pm, in Fairhaven.
 // Reading UTC would call this Sunday and fire a Saturday rule a day late.
 {
   const n = localNow(new Date('2026-09-06T01:30:00Z'));

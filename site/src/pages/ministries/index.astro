@@ -31,7 +31,7 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
   <section class="wrap grid-wrap">
     <div class="grid">
       {ministries.map((m) => {
-        const photo = MINISTRY_PHOTOS[m.data.accent];
+        const photo = m.data.photo ? MINISTRY_PHOTOS[m.data.photo] : undefined;
         const logo = MINISTRY_LOGOS[m.data.accent];  // presence only — see below
         return (
           <a href={`/ministries/${m.slug}`} class="card reveal" data-ministry={m.data.accent}>

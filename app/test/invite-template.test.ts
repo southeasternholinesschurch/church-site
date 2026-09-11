@@ -22,7 +22,7 @@ const eq = (label: string, got: unknown, want: unknown) => {
 const ok = (label: string, got: unknown) => eq(label, got === null, true);
 const bad = (label: string, got: unknown) => eq(label, typeof got === 'string', true);
 
-const O = 'https://app.example.org';
+const O = 'https://app.yourchurch.org';
 const T = 'abc123';
 const LINK = `${O}/directory/join/${T}`;
 
@@ -42,7 +42,7 @@ bad('over 900 characters', invalidTemplateReason('x'.repeat(901) + '{link}'));
 
 console.log('\nreasonable rewordings are accepted');
 ok('short', invalidTemplateReason('Directory: {link}'));
-ok('chatty', invalidTemplateReason('Hi! Here is your church directory link: {link} - Pastor [Name]'));
+ok('chatty', invalidTemplateReason('Hi! Here is your church directory link: {link} - Pastor the pastor'));
 ok('link first', invalidTemplateReason('{link} is your personal directory link.'));
 ok('900 exactly', invalidTemplateReason('x'.repeat(894) + '{link}'));
 

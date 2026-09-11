@@ -35,7 +35,7 @@ if (named.length > 1) {
 const role = named[0] ?? 'editor';
 
 const sql = (q) => {
-  const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'seh-app', scope, '--json', '--command', q],
+  const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'changeme-app', scope, '--json', '--command', q],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   return JSON.parse(out.slice(out.indexOf('[')));
 };

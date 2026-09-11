@@ -2,18 +2,18 @@
  * Linking a calendar event to a ministry with a hashtag in its Notes.
  *
  * Put `#kids` anywhere in an event's Notes in Apple Calendar and the event
- * links to Kids on the Events page AND appears under Kids on the Ministries
+ * links to Fairhaven Kids on the Events page AND appears under Fairhaven Kids on the Ministries
  * page. Nothing else to configure, and it's typed on a phone while creating the
  * event — the same place the schedule detail already goes.
  *
  * The tag vocabulary is the ministries' own `accent` values, so it cannot drift
- * out of step with the content collection: #men, #kids, #youth,
- * #women, #seniors.
+ * out of step with the content collection: #sent, #kids, #youth,
+ * #seladies, #seseniors.
  *
- * #men is the one tag that is also an ordinary English word. It still needs
+ * #sent is the one tag that is also an ordinary English word. It still needs
  * the hash, so prose is unaffected, but it is worth knowing that writing
- * "#men" in an event's Notes to mean "the email went out" would file that
- * event under the Men ministry.
+ * "#sent" in an event's Notes to mean "the email went out" would file that
+ * event under the Fairhaven Men ministry.
  *
  * Two behaviours worth stating, because both are deliberate:
  *
@@ -40,7 +40,7 @@ export interface TaggedNotes {
  * Pull ministry tags out of an event's Notes.
  *
  * Case-insensitive, because these are typed on a phone where autocapitalise
- * will happily produce "#Kids".
+ * will happily produce "#Fairhaven Kids".
  */
 export function extractMinistryTags(notes?: string): TaggedNotes {
   if (!notes) return { tags: [] };
@@ -68,11 +68,11 @@ export function extractMinistryTags(notes?: string): TaggedNotes {
 
 /** Display name for a tag. Kept here so it matches the tag vocabulary. */
 export const MINISTRY_TAG_LABELS: Record<MinistryTag, string> = {
-  men: 'Men',
-  kids: 'Kids',
-  youth: 'Youth',
-  women: 'Women',
-  seniors: 'Seniors',
+  sent: 'Fairhaven Men',
+  kids: 'Fairhaven Kids',
+  youth: 'Fairhaven Youth',
+  seladies: 'Fairhaven Ladies',
+  seseniors: 'Fairhaven Seniors',
 };
 
 /** Where a tagged event links to — each ministry has its own page. */

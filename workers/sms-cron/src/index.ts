@@ -10,7 +10,7 @@
  * a shared secret, nothing else.
  */
 export interface Env {
-  APP_URL: string;          // https://app.example.org
+  APP_URL: string;          // https://app.yourchurch.org
   SMS_CRON_SECRET: string;  // must match the app's secret of the same name
 }
 

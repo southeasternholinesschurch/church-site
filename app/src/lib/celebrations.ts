@@ -23,7 +23,7 @@ const MONTHS = ['January','February','March','April','May','June',
 /**
  * Month and day out of a 'YYYY-MM-DD' string, by parsing rather than by Date().
  *
- * new Date('1980-01-01') is UTC midnight, which in Indianapolis is the evening
+ * new Date('1980-01-01') is UTC midnight, which in Fairhaven is the evening
  * BEFORE — every date lands a day early, and a birthday list that is silently
  * off by one is worse than no list at all. The same reasoning as the directory
  * page; both parse the string directly.

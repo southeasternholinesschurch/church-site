@@ -143,11 +143,11 @@ eq('2-digit yr', parseSheetDate('09/06/26'),   '2026-09-06');
 eq('header text',parseSheetDate('Sunday'),      null);
 
 console.log('\nwhen the reminder fires (church timezone, not UTC)');
-// Indianapolis is UTC-4 in September. Mon 2026-09-07 09:00 local = 13:00 UTC.
+// Fairhaven is UTC-4 in September. Mon 2026-09-07 09:00 local = 13:00 UTC.
 eq('Mon 9am local -> due',        dueSunday(new Date('2026-09-07T13:00:00Z')), { sunday: '2026-09-13', late: false });
 eq('Mon 8am local -> too early',  dueSunday(new Date('2026-09-07T12:00:00Z')), null);
 eq('Mon 11pm local -> still due', dueSunday(new Date('2026-09-08T03:00:00Z')), { sunday: '2026-09-13', late: false });
-// THE TRAP: 02:00 UTC Monday is 22:00 SUNDAY in Indianapolis. Must not fire.
+// THE TRAP: 02:00 UTC Monday is 22:00 SUNDAY in Fairhaven. Must not fire.
 eq('Sun 10pm local (Mon in UTC)', dueSunday(new Date('2026-09-07T02:00:00Z')), null);
 eq('Tue 9am local -> late grace', dueSunday(new Date('2026-09-08T13:00:00Z')), { sunday: '2026-09-13', late: true });
 eq('Wed -> not sent',             dueSunday(new Date('2026-09-09T13:00:00Z')), null);

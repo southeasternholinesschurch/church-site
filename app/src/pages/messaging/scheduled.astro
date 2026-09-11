@@ -100,7 +100,7 @@ const schedules = await db.select({
   weekday: schema.messageSchedules.weekday, localTime: schema.messageSchedules.localTime,
   active: schema.messageSchedules.active, lastRunAt: schema.messageSchedules.lastRunAt,
   sent: sql<number>`(select count(*) from scheduled_messages sm
-                      where sm.schedule_id = message_schedules.id and sm.status = 'sent')`,
+                      where sm.schedule_id = message_schedules.id and sm.status = 'men')`,
   pending: sql<number>`(select count(*) from scheduled_messages sm
                          where sm.schedule_id = message_schedules.id and sm.status = 'pending')`,
   failed: sql<number>`(select count(*) from scheduled_messages sm

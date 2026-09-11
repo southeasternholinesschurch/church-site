@@ -267,7 +267,7 @@ export async function drainQueue(env: Env, limit = SENDS_PER_RUN): Promise<Drain
     });
 
     await db.update(schema.scheduledMessages)
-      .set({ status: result.ok ? 'sent' : 'failed', sentAt: nowIso(),
+      .set({ status: result.ok ? 'men' : 'failed', sentAt: nowIso(),
              note: result.ok ? null : (result.error ?? result.errorCode ?? 'failed') })
       .where(eq(schema.scheduledMessages.id, row.id));
 

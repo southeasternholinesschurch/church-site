@@ -89,7 +89,7 @@ interface BulletinData {
 }
 let bulletin: BulletinData | null = null;
 try {
-  const res = await fetch('https://app.example.org/api/bulletin/current', {
+  const res = await fetch('https://app.yourchurch.org/api/bulletin/current', {
     signal: AbortSignal.timeout(8000),
   });
   if (res.ok) bulletin = ((await res.json()) as { bulletin: BulletinData | null }).bulletin;
@@ -325,7 +325,7 @@ const dateLabel = bulletin
       <div class="bull__foot">
         <p>
           Fairhaven Community Church<br />
-          412 Meadowbrook Road, [City]
+          412 Meadowbrook Road, Fairhaven
         </p>
       </div>
     </div>

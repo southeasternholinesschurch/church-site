@@ -1,4 +1,4 @@
-// Rasterizes the real SHC logo mark (src/assets/brand/church-mark.png) into
+// Rasterizes the real SHC logo mark (src/assets/brand/shc-mark.png) into
 // every PWA/favicon size the manifest and <head> expect. Re-run this
 // (`node scripts/generate-icons.mjs`) any time that source file changes.
 import sharp from 'sharp';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const sourcePath = join(__dirname, '../src/assets/brand/church-mark.png');
+const sourcePath = join(__dirname, '../src/assets/brand/shc-mark.png');
 const iconsDir = join(__dirname, '../public/icons');
 const publicDir = join(__dirname, '../public');
 mkdirSync(iconsDir, { recursive: true });

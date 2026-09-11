@@ -55,7 +55,7 @@ const initials = (f: string, l: string) => `${f[0] ?? ''}${l[0] ?? ''}`.toUpperC
  * The year is kept in the database — the office may want to know a milestone —
  * but a church directory that publishes everyone's age is a different and much
  * less welcome document. Parsed by hand rather than through Date(): a bare
- * 'YYYY-MM-DD' is read as UTC midnight, which in Indianapolis renders as the
+ * 'YYYY-MM-DD' is read as UTC midnight, which in Fairhaven renders as the
  * evening BEFORE, and being wished a happy birthday a day early is exactly the
  * kind of small wrongness nobody reports and everybody notices.
  */
@@ -190,7 +190,7 @@ const viewerName = member ? `${member.firstName} ${member.lastName}` : staff?.na
           and nothing here to browse. If you're part of the church family and
           haven't had a link yet, ask in the office and we'll send you one.
         </p>
-        <a class="btn" href="https://example.org/contact?about=directory">Ask for a link</a>
+        <a class="btn" href="https://yourchurch.org/contact?about=directory">Ask for a link</a>
         <p class="sub" style="font-size:14px; line-height:1.7; margin-top:24px;">
           Already been sent a link? Open it on the device you want to use — it
           signs that device in and remembers it. Links keep working for 30 days,

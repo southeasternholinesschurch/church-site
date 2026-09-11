@@ -85,7 +85,16 @@ allows('kids', '/kids/child/new');
 allows('admin', '/staff');
 refuses('editor', '/staff');
 refuses('editor', '/staff/anything');
+// Publishing to the public website is admin-only — the pastor's call. The launcher
+// goes with it, since it carries links into the Cloudflare and Twilio consoles.
+refuses('editor', '/website');
+refuses('editor', '/website/right-now');
+// The endpoints, not just the pages. An editor who cannot open the photos
+// screen must not be able to POST to the route behind it either.
+refuses('editor', '/api/site/photo');
+refuses('editor', '/api/site/publish');
 for (const p of ['/', '/people', '/messaging', '/api/sms/send', '/kids']) allows('editor', p);
+allows('admin', '/website/right-now');
 
 // ---- the gate is asymmetric, which is the point ---------------------------
 // An admin walks DOWN into the children's section; a volunteer never walks up.

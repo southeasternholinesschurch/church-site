@@ -3,7 +3,7 @@
  *
  * The date handling is the point. Dates in this app are 'YYYY-MM-DD' strings in
  * the church's own timezone, and `new Date('2019-07-04')` parses as UTC
- * midnight — the previous evening in Indianapolis. That bug shipped on the
+ * midnight — the previous evening in Fairhaven. That bug shipped on the
  * public site once already, so ageOn does arithmetic on three integers and
  * never constructs a Date at all.
  *
@@ -38,7 +38,7 @@ eq('ON their birthday they are the new age', ageOn('2018-09-08', '2026-09-08'), 
 eq('the day before, still the old age',      ageOn('2018-09-09', '2026-09-08'), 7);
 eq('the day after',                          ageOn('2018-09-07', '2026-09-08'), 8);
 // A date that would shift under UTC parsing. Midnight UTC on the 1st is the
-// previous evening in Indianapolis; if a Date were involved this would be 6.
+// previous evening in Fairhaven; if a Date were involved this would be 6.
 eq('the first of a month does not slip a day', ageOn('2019-01-01', '2026-01-01'), 7);
 eq('new year’s eve does not slip a year',      ageOn('2019-12-31', '2026-12-31'), 7);
 
@@ -72,7 +72,7 @@ eq('has outgrown their class',   classMismatch(11, 3, CLASSES), true);
 
 // ---- which Fairhaven Kids service a day implies ------------------------------------
 // The noon-UTC trick again: parsing these as midnight UTC puts them on the
-// previous evening in Indianapolis and names the wrong day of the week.
+// previous evening in Fairhaven and names the wrong day of the week.
 eq('a Sunday means the Sunday classes',   likelyKidsKind('2026-09-06'), 'kids-sunday');
 eq('a Wednesday means the club',          likelyKidsKind('2026-09-09'), 'kids-wednesday');
 eq('a Saturday means neither',            likelyKidsKind('2026-09-05'), null);

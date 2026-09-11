@@ -5,7 +5,7 @@ import { getDb, schema, nowIso } from '../db';
  * Google sign-in for staff.
  *
  * WHY GOOGLE AND NOT EMAILED LINKS: the domain now publishes SPF `-all` and
- * DMARC `p=reject` (nothing may send as example.org), so a login
+ * DMARC `p=reject` (nothing may send as yourchurch.org), so a login
  * link would need that reopened. Google needs no mail at all.
  *
  * THE CRITICAL DISTINCTION: Google will happily authenticate anyone on earth.

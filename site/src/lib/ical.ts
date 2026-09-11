@@ -196,7 +196,7 @@ function safeEventUrl(raw: unknown): string | undefined {
  * Date, and it builds one at **local midnight of the machine doing the parse**.
  * So the same feed yields a different instant depending on where the build ran:
  *
- *   the pastor's Mac (Indianapolis) -> 2026-09-22T04:00:00Z
+ *   the pastor's Mac (Fairhaven) -> 2026-09-22T04:00:00Z
  *   Cloudflare's builder (UTC) -> 2026-09-22T00:00:00Z
  *
  * Formatting either one in the church's timezone is what shipped the Revival

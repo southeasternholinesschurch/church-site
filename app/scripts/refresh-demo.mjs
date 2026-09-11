@@ -7,7 +7,7 @@
  * Three steps that have to happen in this order and were previously three
  * things to remember:
  *
- *   1. migrate    — the demo has its own database (seh-demo) and its own
+ *   1. migrate    — the demo has its own database (changeme-demo) and its own
  *                   migration state; the real app's is separate.
  *   2. reseed     — scripts/seed-demo.mjs prints SQL, which is applied here.
  *                   The seed CLEARS what it owns, so this is repeatable.
@@ -18,7 +18,7 @@
  * the Fairhaven Kids tables, so anybody shown it saw an app with no children's
  * ministry in it.
  *
- * Safe to re-run. It only ever touches seh-demo — a separate Worker with a
+ * Safe to re-run. It only ever touches changeme-demo — a separate Worker with a
  * separate database holding nothing but invented people. DEMO_INSTANCE=1 is
  * set in wrangler.demo.jsonc, which is what makes texting impossible there.
  */
@@ -33,18 +33,18 @@ const run = (args, label) => {
   execFileSync('npx', ['wrangler', ...args], { stdio: 'inherit' });
 };
 
-run(['d1', 'migrations', 'apply', 'seh-demo', '--remote', ...CONFIG],
+run(['d1', 'migrations', 'apply', 'changeme-demo', '--remote', ...CONFIG],
     'migrating the demo database');
 
 // The seed writes SQL to stdout rather than applying it — same as it always
 // has, so it can be inspected before it goes anywhere.
 process.stdout.write('\n── generating the invented congregation\n');
 const sql = execFileSync('node', ['scripts/seed-demo.mjs'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const file = join(tmpdir(), 'seh-demo-seed.sql');
+const file = join(tmpdir(), 'changeme-demo-seed.sql');
 writeFileSync(file, sql);
 process.stdout.write(`   ${sql.split('\n').length} statements → ${file}\n`);
 
-run(['d1', 'execute', 'seh-demo', '--remote', '--file', file, ...CONFIG],
+run(['d1', 'execute', 'changeme-demo', '--remote', '--file', file, ...CONFIG],
     'seeding the demo database');
 
 // The build is the REAL app's build — one codebase, two deployments. The only

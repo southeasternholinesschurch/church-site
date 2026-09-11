@@ -25,4 +25,4 @@ crons = ["*/5 * * * *", "0 * * * *"]
 # they survive a deploy. Vars do not. Keeping it in the file means the deploy
 # that would erase it is the same deploy that restores it.
 [vars]
-APP_URL = "https://app.example.org"
+APP_URL = "https://app.yourchurch.org"

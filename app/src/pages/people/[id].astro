@@ -382,11 +382,11 @@ const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
             ? <> · {new Date(v.smsConsentAt).toLocaleString('en-US', {
                   dateStyle: 'medium', timeStyle: 'short',
                   // The Worker runs in UTC. Without pinning this, a text sent at
-                  // 8pm Indianapolis time is reported as 12:10 AM the NEXT DAY —
+                  // 8pm Fairhaven time is reported as 12:10 AM the NEXT DAY —
                   // wrong, and wrong in a way that undermines the record's whole
                   // purpose as evidence of when consent was given.
                   timeZone: CHURCH_TZ,
-                })} (Indianapolis)</>
+                })} (Fairhaven)</>
             : <> · no date on record</>}
         </p>
         {v.smsConsentSource === 'sms-stop' && (

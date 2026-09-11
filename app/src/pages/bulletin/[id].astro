@@ -142,7 +142,7 @@ const prayerRows = [...prayers, ...Array(3).fill({ text: '', since: '' })];
   {deploy === 'started' && (
     <p class="notice notice--ok">
       Published, and the website is rebuilding. Give it a minute or two, then
-      check <a href="https://example.org/bulletin" target="_blank" rel="noreferrer">the live bulletin</a>.
+      check <a href="https://yourchurch.org/bulletin" target="_blank" rel="noreferrer">the live bulletin</a>.
     </p>
   )}
   {deploy === 'failed' && (
@@ -169,7 +169,7 @@ const prayerRows = [...prayers, ...Array(3).fill({ text: '', since: '' })];
         </label>
         <label class="field" style="margin:0;">
           <span>Preaching</span>
-          <input name="preacher" value={b.preacher ?? ''} placeholder="Pastor [Name]" />
+          <input name="preacher" value={b.preacher ?? ''} placeholder="Pastor the pastor" />
         </label>
       </div>
     </div>

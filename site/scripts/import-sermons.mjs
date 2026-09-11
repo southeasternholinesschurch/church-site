@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(HERE, '..', 'src', 'content', 'sermons');
-const CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID || '';   // UC... — see SETUP.md step 6
+const CHANNEL_ID = 'UCCjlcMeiioBKihboxwgvnEg';
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);
@@ -119,7 +119,7 @@ function optional(part) {
 
 /**
  * Both title formats:
- *   "August 23, 2026 | Sunday Morning Worship | Pastor [Pastor Name] | The Narrow Gate"
+ *   "August 23, 2026 | Sunday Morning Worship | Pastor the pastor | The Narrow Gate"
  *   "August 23, 2026 Sunday Morning Worship"   (legacy — existing uploads)
  */
 function parseServiceTitle(title) {
@@ -170,12 +170,25 @@ async function fetchViaRss() {
   });
 }
 
+/**
+ * Thrown for a spent daily quota, which is NOT the same kind of problem as a
+ * broken API call. --strict exists to fail loudly when the channel's titling
+ * changes and the archive would silently go stale — a real, human problem. A
+ * spent quota is "come back tomorrow", and the nightly job does. Treating them
+ * the same puts a red cross on the repository every night for a transient
+ * condition, which is how people learn to ignore failing builds.
+ */
+class QuotaExceeded extends Error {}
+
 async function api(endpoint, params) {
   const url = new URL(`https://www.googleapis.com/youtube/v3/${endpoint}`);
   for (const [k, v] of Object.entries({ ...params, key: KEY })) url.searchParams.set(k, v);
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (res.status === 403 && /quotaExceeded/i.test(body)) {
+      throw new QuotaExceeded(`YouTube API quota is spent for today (${endpoint}).`);
+    }
     throw new Error(`YouTube API ${endpoint} -> ${res.status}. ${body.slice(0, 300)}`);
   }
   return res.json();
@@ -245,7 +258,18 @@ if (STRICT && !KEY) {
   process.exit(1);
 }
 
-const raw = KEY ? await fetchViaApi() : await fetchViaRss();
+let raw;
+try {
+  raw = KEY ? await fetchViaApi() : await fetchViaRss();
+} catch (err) {
+  if (err instanceof QuotaExceeded) {
+    console.log(`${err.message}`);
+    console.log('Nothing imported. The quota resets at midnight Pacific and the');
+    console.log('nightly run will catch up — this is not a failure to act on.');
+    process.exit(0);
+  }
+  throw err;
+}
 if (!KEY) {
   console.log('No YOUTUBE_API_KEY set — using the public RSS feed (most recent uploads only).');
   console.log('This is a rehearsal, not the real import. Durations are unavailable, so');

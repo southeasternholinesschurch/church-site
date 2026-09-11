@@ -1,0 +1,96 @@
+---
+import AppLayout from '../../../layouts/AppLayout.astro';
+import { siteEditingConfigured } from '../../../lib/site-content';
+import { listSermons, PAGE_SIZE, type SermonPage } from '../../../lib/site-sermons';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const configured = siteEditingConfigured(env);
+const page = Math.max(0, Number(Astro.url.searchParams.get('page') ?? 0) || 0);
+
+let data: SermonPage | null = null;
+let error: string | null = null;
+if (configured) {
+  try { data = await listSermons(env, page); }
+  catch (err) { error = err instanceof Error ? err.message : String(err); }
+}
+
+const SERVICE = (t: string) => t.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const waiting = data?.rows.filter((r) => r.hasDraft).length ?? 0;
+---
+<AppLayout title="Sermons" user={user}>
+  <p style="margin:0 0 6px;"><a href="/website" class="muted">← The website</a></p>
+  <h1>Sermons</h1>
+
+  {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong></p>}
+  {error && <p class="notice">Could not read the website's files: {error}</p>}
+
+  {data && (
+    <>
+      <p class="muted" style="max-width:64ch; margin:-4px 0 18px;">
+        {data.total} services. These arrive on their own from YouTube — the title,
+        speaker and date come from the video's own title, so the usual way to fix
+        one is to rename the video. Edit here for anything the title cannot carry.
+      </p>
+
+      {waiting > 0 && (
+        <p class="notice">
+          <strong>{waiting} cleaned {waiting === 1 ? 'transcript is' : 'transcripts are'} waiting for you.</strong>
+          {' '}Nothing is published until you read it.
+        </p>
+      )}
+
+      <div class="card t-wrap" style="padding:0; overflow-x:auto; margin-bottom:18px;">
+        <table class="t-stack">
+          <thead><tr><th>Date</th><th>Sermon</th><th>Page text</th><th></th></tr></thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr>
+                <td data-label="Date">
+                  {r.date}<br />
+                  <span class="muted" style="font-size:13px;">{SERVICE(r.serviceType)}</span>
+                </td>
+                <td data-label="Sermon">
+                  <strong>{r.title || <span class="muted">no title yet</span>}</strong>
+                  {r.speaker && <><br /><span class="muted" style="font-size:13px;">{r.speaker}</span></>}
+                </td>
+                <td data-label="Page text">
+                  {r.hasDraft
+                    ? <span style="color:var(--red); font-weight:700;">draft waiting</span>
+                    : r.hasBody
+                      ? <span class="muted">published</span>
+                      : r.hasTranscript
+                        ? <span class="muted">transcript only</span>
+                        : <span class="muted" style="opacity:.6;">—</span>}
+                </td>
+                <td data-label=""><a class="btn btn--ghost" style="min-height:36px; padding:6px 12px;"
+                   href={`/website/sermons/${r.slug}`}>{r.hasDraft ? 'Review' : 'Edit'}</a></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {data.pages > 1 && (
+        <nav class="pager">
+          {page > 0
+            ? <a href={`/website/sermons?page=${page - 1}`}>← Newer</a>
+            : <span class="muted">← Newer</span>}
+          <span class="muted">{page + 1} of {data.pages}</span>
+          {page + 1 < data.pages
+            ? <a href={`/website/sermons?page=${page + 1}`}>Older →</a>
+            : <span class="muted">Older →</span>}
+        </nav>
+      )}
+      <p class="muted" style="font-size:13px; margin-top:14px;">
+        {PAGE_SIZE} at a time — reading each one is a request, and a Worker gets
+        fifty per page load.
+      </p>
+    </>
+  )}
+</AppLayout>
+
+<style>
+  .pager { display: flex; gap: 22px; align-items: center; justify-content: center; font-size: 15px; }
+  .pager a { color: var(--red); font-weight: 700; }
+</style>

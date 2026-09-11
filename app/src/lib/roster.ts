@@ -6,7 +6,7 @@ import { CHURCH_TZ } from './services.ts';
  * The singing-schedule reminder — the PURE half.
  *
  * Deliberately imports no database. Parsing a sheet, reading a date and
- * deciding whether it is Monday morning in Indianapolis are all decidable from
+ * deciding whether it is Monday morning in Fairhaven are all decidable from
  * their inputs, and keeping them free of bindings is what lets them be tested
  * directly rather than through a running Worker. Anything needing the database
  * lives in roster-db.ts.

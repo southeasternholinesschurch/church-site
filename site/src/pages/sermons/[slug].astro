@@ -2,10 +2,11 @@
 import type { GetStaticPaths } from 'astro';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import SermonCard from '../../components/SermonCard.astro';
-import { getCollection } from 'astro:content';
+import { getCollection, getEntry } from 'astro:content';
 import { isVisibleSermon, SERMON_WINDOW_MONTHS } from '../../lib/content';
 import { slugify } from '../../lib/slugify';
-import { SERVICE_TYPE_LABELS } from '../../lib/sermons';
+import { SERVICE_TYPE_LABELS, byServiceOrder } from '../../lib/sermons';
+import { artworkUrl } from '../../lib/sermon-assets';
 
 export const getStaticPaths = (async () => {
   const sermons = await getCollection('sermons', ({ data }) => isVisibleSermon(data));
@@ -14,7 +15,7 @@ export const getStaticPaths = (async () => {
 
 const { sermon } = Astro.props;
 const { Content } = await sermon.render();
-const { title, series, speaker, date, scripture, youtubeId, service, serviceType } = sermon.data;
+const { title, series, speaker, date, scripture, youtubeId, service, serviceType, image } = sermon.data;
 // Imported services carry no sermon title; the service label is the heading.
 const heading = title?.trim() || service;
 // timeZone: 'UTC' — see the comment in SermonCard.astro; the frontmatter
@@ -23,14 +24,86 @@ const dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'lo
 
 // "More from this series" first, falling back to the most recent messages —
 // a sermon page should never be a dead end.
-const all = (await getCollection('sermons', ({ data }) => isVisibleSermon(data)))
+const seriesEntry = series ? await getEntry(series) : undefined;
+const seriesName = seriesEntry?.data.name;
+
+const visible = await getCollection('sermons', ({ data }) => isVisibleSermon(data));
+const all = visible
   .filter((s) => s.slug !== sermon.slug)
   .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-const sameSeries = series ? all.filter((s) => s.data.series === series) : [];
+
+/**
+ * The whole run, OLDEST first — a series is followed from the beginning, and
+ * "what comes next" only means anything in that order.
+ */
+const run = series
+  ? visible.filter((s) => s.data.series?.slug === series.slug)
+      .sort((a, b) => byServiceOrder(a.data, b.data))
+  : [];
+const position = run.findIndex((s) => s.slug === sermon.slug);
+const nextInSeries = position >= 0 ? run[position + 1] : undefined;
+const prevInSeries = position > 0 ? run[position - 1] : undefined;
+
+const sameSeries = run.filter((s) => s.slug !== sermon.slug);
 const more = (sameSeries.length ? sameSeries : all).slice(0, 3);
-const moreLabel = sameSeries.length ? `More from ${series}` : 'Recent Messages';
+const moreLabel = sameSeries.length ? `More from ${seriesName}` : 'Recent Messages';
+
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+
+/**
+ * Built from what is actually known, in the order a searcher reads it:
+ * who preached, from what, when, and where. Padding this with invented
+ * summary would rank no better and would put words in a preacher's mouth.
+ */
+/** sermon artwork -> series artwork -> the YouTube still, which always exists. */
+const shareImage = artworkUrl({
+  image, seriesArtwork: seriesEntry?.data.artwork, youtubeId, site: Astro.site,
+});
+
+const metaDescription = [
+  speaker ? `${heading} — ${speaker}` : heading,
+  scripture || null,
+  `${SERVICE_TYPE_LABELS[serviceType]}, ${dateLabel}`,
+  `${settingsEntry.data.churchName}, Fairhaven.`,
+].filter(Boolean).join(' · ');
 ---
-<BaseLayout title={heading} description={`${heading} at Fairhaven Community Church — ${dateLabel}.`}>
+{/*
+ * VideoObject is what turns a sermon page into a video result in Google —
+ * thumbnail, date and duration beside the link — rather than a blue line of
+ * text that happens to contain an iframe.
+ *
+ * `description` is assembled from what the import actually establishes. It is
+ * deliberately not padded with invented summary: a wrong description is worse
+ * for a church than a thin one, and the body text (when a sermon has one) is
+ * what should carry the substance.
+ */}
+{/* No duration: the importer does not persist it, and an invented duration in
+    structured data is a lie Google can check against the embed. */}
+<BaseLayout
+  title={heading}
+  description={metaDescription}
+  ogType="video.other"
+  ogImage={shareImage}
+  jsonLd={{
+    '@context': 'https://schema.org',
+    '@type': 'VideoObject',
+    name: heading,
+    description: metaDescription,
+    thumbnailUrl: [shareImage],
+    uploadDate: date.toISOString().slice(0, 10),
+    embedUrl: `https://www.youtube-nocookie.com/embed/${youtubeId}`,
+    contentUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
+    publisher: {
+      '@type': 'Organization',
+      name: settings.churchName,
+      url: Astro.site?.href,
+    },
+    ...(speaker ? { author: { '@type': 'Person', name: speaker } } : {}),
+    ...(scripture ? { about: scripture } : {}),
+    ...(series ? { partOfSeries: { '@type': 'CreativeWorkSeries', name: series } } : {}),
+  }}
+>
   <!-- ============ PLAYER ============ -->
   <section class="stage" data-par-frame>
     <div class="stage__bg duo par" data-par="70" style="--drift-scale: 1.28;" aria-hidden="true">
@@ -41,8 +114,10 @@ const moreLabel = sameSeries.length ? `More from ${series}` : 'Recent Messages';
       <a href="/sermons" class="stage__back load d1">← All sermons</a>
       <div class="stage__head">
         <div class="stage__title">
-          {series
-            ? <a href={`/sermons/series/${slugify(series)}`} class="label stage__series load d1">{series}</a>
+          {seriesEntry
+            ? <a href={`/sermons/series/${seriesEntry.slug}`} class="label stage__series load d1">
+                {seriesName}{run.length > 1 && position >= 0 ? ` · Part ${position + 1} of ${run.length}` : ''}
+              </a>
             : <span class="label stage__series stage__series--plain load d1">{SERVICE_TYPE_LABELS[serviceType]}</span>}
           <h1 class="serif load d2">{heading}</h1>
           <p class="stage__meta load d3">{speaker ? `${speaker} · ${dateLabel}` : dateLabel}</p>
@@ -80,6 +155,29 @@ const moreLabel = sameSeries.length ? `More from ${series}` : 'Recent Messages';
       </div>
     </div>
   </section>
+
+  {/* ============ NEXT IN THE SERIES ============
+      Placed immediately after the message rather than below the grid of
+      related cards: someone who has just finished part two is looking for
+      part three, not for a choice of nine things. */}
+  {(nextInSeries || prevInSeries) && (
+    <section class="wrap run-wrap">
+      <nav class="run reveal" aria-label={`Navigate ${seriesName}`}>
+        {prevInSeries ? (
+          <a href={`/sermons/${prevInSeries.slug}`} class="run__link run__link--prev">
+            <span class="label run__l">← Previous in {seriesName}</span>
+            <span class="run__t">{prevInSeries.data.title?.trim() || prevInSeries.data.service}</span>
+          </a>
+        ) : <span />}
+        {nextInSeries && (
+          <a href={`/sermons/${nextInSeries.slug}`} class="run__link run__link--next">
+            <span class="label run__l">Next in {seriesName} →</span>
+            <span class="run__t">{nextInSeries.data.title?.trim() || nextInSeries.data.service}</span>
+          </a>
+        )}
+      </nav>
+    </section>
+  )}
 
   <!-- ============ MORE ============ -->
   {more.length > 0 && (
@@ -126,6 +224,17 @@ const moreLabel = sameSeries.length ? `More from ${series}` : 'Recent Messages';
   .notes__l:not(:first-child) { margin-top: 20px; }
   .notes__v { margin: 0; font-size: 16px; line-height: 1.5; }
   .notes__yt { display: inline-block; margin-top: 28px; font-size: 14px; font-weight: 700; color: var(--red); }
+  .run-wrap { padding: 0 0 8px; }
+  .run { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .run__link { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px;
+               background: var(--cream-deep); border-radius: var(--radius);
+               color: inherit; text-decoration: none; transition: background .2s ease; }
+  .run__link:hover { background: var(--paper-deep, var(--cream-deep)); }
+  .run__link--next { text-align: right; }
+  .run__l { color: var(--red); }
+  .run__t { font-family: var(--font-display); font-size: 21px; line-height: 1.25; }
+  @media (max-width: 640px) { .run { grid-template-columns: 1fr; } .run__link--next { text-align: left; } }
+
   .notes__body :global(p) { margin: 0 0 18px; font-size: 18px; line-height: 1.8; color: var(--ink-soft); }
   .notes__body :global(h2) { font-family: var(--font-display); font-size: 30px; line-height: 1.2;
                              margin: 40px 0 14px; color: var(--ink); }

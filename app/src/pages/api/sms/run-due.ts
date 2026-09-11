@@ -149,7 +149,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     });
 
     await db.update(schema.scheduledMessages)
-      .set({ status: result.ok ? 'sent' : 'failed', sentAt: nowIso(),
+      .set({ status: result.ok ? 'men' : 'failed', sentAt: nowIso(),
              note: result.ok ? `${m.name}${due.late ? ' (sent late)' : ''}`
                              : `${m.name} — ${result.error ?? result.errorCode}` })
       .where(eq(schema.scheduledMessages.id, claim[0].id));

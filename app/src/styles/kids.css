@@ -80,8 +80,8 @@ body.kids h2 { font-size: 21px; }
  * nobody has to keep two numbers in step.
  */
 .k-bar .k-bar__brand { display: inline-flex; align-items: center; text-decoration: none; }
-.k-bar .k-bar__brand img { height: 36px; width: auto; display: block; }
-@media (max-width: 700px) { .k-bar .k-bar__brand img { height: 30px; } }
+.k-bar .k-bar__brand img { height: 30px; width: auto; display: block; }
+@media (max-width: 700px) { .k-bar .k-bar__brand img { height: 26px; } }
 .k-bar__nav { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
 .k-bar__nav a { color: rgba(255,255,255,.78); text-decoration: none; font-size: 15px; }
 .k-bar__nav a:hover, .k-bar__nav a[aria-current="page"] { color: var(--k-text); }

@@ -5,7 +5,7 @@ import EventCard from '../../components/EventCard.astro';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { getUpcomingEvents } from '../../lib/ical';
-import { MINISTRY_PHOTOS, MINISTRY_LOGOS, MINISTRY_PHOTO_ALT, MINISTRY_PHOTO_FOCUS,
+import { MINISTRY_PHOTOS, MINISTRY_LOGOS, MINISTRY_PHOTO_ALT, DEFAULT_PHOTO_FOCUS,
          MINISTRY_HERO_MOTION, DEFAULT_HERO_MOTION } from '../../lib/ministry-assets';
 
 export const getStaticPaths = (async () => {
@@ -17,7 +17,7 @@ const { ministry } = Astro.props;
 const { Content } = await ministry.render();
 const { name, ageRange, accent, meets, where, summary, placeholder } = ministry.data;
 
-const photo = MINISTRY_PHOTOS[accent];
+const photo = ministry.data.photo ? MINISTRY_PHOTOS[ministry.data.photo] : undefined;
 // Scale and drift move together — see MINISTRY_HERO_MOTION for why.
 const motion = MINISTRY_HERO_MOTION[accent] ?? DEFAULT_HERO_MOTION;
 const logo = MINISTRY_LOGOS[accent];
@@ -45,7 +45,7 @@ const next = siblings[(idx + 1) % siblings.length];
   <section class="mhero" data-ministry={accent} data-par-frame>
     {photo && (
       <div class="mhero__img duo par" data-par={motion.drift}
-           style={`--drift-scale: ${motion.scale}; --focus: ${MINISTRY_PHOTO_FOCUS[accent] ?? '50% 50%'};`}>
+           style={`--drift-scale: ${motion.scale}; --focus: ${ministry.data.photoFocus ?? DEFAULT_PHOTO_FOCUS};`}>
         <Image src={photo} alt={MINISTRY_PHOTO_ALT[accent] ?? ''}
                widths={[900, 1400, 2000, 2400]} sizes="140vw" fetchpriority="high" loading="eager" />
       </div>
@@ -126,7 +126,7 @@ const next = siblings[(idx + 1) % siblings.length];
   .mhero { position: relative; overflow: clip; background: var(--ink); color: var(--cream);
            min-height: 62vh; display: flex; flex-direction: column; }
   .mhero__img { position: absolute; inset: 0; z-index: 0; }
-  /* --focus is set per ministry — see MINISTRY_PHOTO_FOCUS. Centre is the
+  /* --focus comes from the ministry's own photoFocus. Centre is the
      default and is right for a wide shot; a portrait needs the crop held
      higher or the face is the part that gets thrown away. */
   .mhero__img :global(img) { width: 100%; height: 100%; object-fit: cover;

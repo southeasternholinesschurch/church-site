@@ -52,7 +52,7 @@ export const smsConfigured = (env: SmsEnv) =>
  * confident about must not be texted, because the cost of being wrong is a
  * message to a stranger.
  *
- * Deliberately US-only. Every number in this database is Indianapolis, and a
+ * Deliberately US-only. Every number in this database is Fairhaven, and a
  * general-purpose parser would accept far more than it should.
  */
 export function toE164(raw: string | null | undefined): string | null {

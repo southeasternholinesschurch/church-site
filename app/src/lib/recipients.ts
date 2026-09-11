@@ -42,7 +42,7 @@ export interface Audience {
  * both tables in ONE place — lib/consent.ts, called from the SMS webhook. If
  * you are about to unify these two builders "to remove the duplication", the
  * thing you would actually be removing is the reason the counts are honest.
- * Read §7.2 of SETUP.md step 20 (the kids ministry) first.
+ * Read §7.2 of handoff/SETUP.md step 16 first.
  *
  * The other builder is lib/kids-recipients.ts. It carries the same warning.
  */

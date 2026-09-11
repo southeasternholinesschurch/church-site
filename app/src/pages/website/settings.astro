@@ -1,0 +1,171 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { siteEditingConfigured, GitConflict } from '../../lib/site-content';
+import {
+  readSettings, saveSettings, validate, DAYS,
+  type SiteSettings, type ServiceTime,
+} from '../../lib/site-settings';
+
+/**
+ * The church's own facts. Rarely edited, and urgent when they are — a service
+ * time that moved is wrong on the home page, the contact page, the livestream
+ * countdown and the bulletin at the same moment, because they all read this
+ * one file.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const configured = siteEditingConfigured(env);
+
+/** Two spare rows, so adding a service needs no JavaScript and no button. */
+const SPARE_ROWS = 2;
+
+let problems: string[] = [];
+let error: string | null = null;
+
+if (Astro.request.method === 'POST' && configured) {
+  const form = await readForm(Astro.request);
+  const rows: ServiceTime[] = [];
+  for (let i = 0; form.has(`service-${i}-label`); i++) {
+    rows.push({
+      label: String(form.get(`service-${i}-label`) ?? ''),
+      day: String(form.get(`service-${i}-day`) ?? 'Sunday'),
+      time: String(form.get(`service-${i}-time`) ?? ''),
+    });
+  }
+  const next: SiteSettings = {
+    churchName: String(form.get('churchName') ?? ''),
+    address: String(form.get('address') ?? ''),
+    mapsUrl: String(form.get('mapsUrl') ?? ''),
+    email: String(form.get('email') ?? ''),
+    phone: String(form.get('phone') ?? ''),
+    smsNumber: String(form.get('smsNumber') ?? ''),
+    serviceTimes: rows,
+    socials: {
+      facebook: String(form.get('facebook') ?? ''),
+      instagram: String(form.get('instagram') ?? ''),
+      youtubeUrl: String(form.get('youtubeUrl') ?? ''),
+      youtubeChannelId: String(form.get('youtubeChannelId') ?? ''),
+    },
+    zeffyUrl: String(form.get('zeffyUrl') ?? ''),
+    givingLinksUrl: String(form.get('givingLinksUrl') ?? ''),
+    calendarFeedUrl: String(form.get('calendarFeedUrl') ?? ''),
+    webAnalyticsToken: String(form.get('webAnalyticsToken') ?? ''),
+  };
+
+  problems = validate(next);
+  if (!problems.length) {
+    try {
+      await saveSettings(env, next, String(form.get('sha') ?? '') || undefined, user);
+      return Astro.redirect('/website/settings?saved=1', 303);
+    } catch (err) {
+      error = err instanceof GitConflict
+        ? 'Somebody else saved this at the same moment. Reload and reapply your change — nothing was lost.'
+        : `Could not save: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const loaded = configured ? await readSettings(env) : null;
+const s = loaded?.settings;
+const rows = [...(s?.serviceTimes ?? []), ...Array.from({ length: SPARE_ROWS }, () => ({ label: '', day: 'Sunday', time: '' }))];
+---
+<AppLayout title="Service times & contact" user={user}>
+  <h1>Service times &amp; contact</h1>
+  <p class="muted" style="max-width:62ch; margin:-4px 0 24px;">
+    The church's own facts. The home page, the contact page, the livestream
+    countdown and the bulletin all read these, so a change here fixes all of
+    them at once.
+  </p>
+
+  {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong> The GitHub token still needs adding as a Worker secret.</p>}
+  {saved && <p class="notice">Saved. The website rebuilds itself; the change is live in a couple of minutes.</p>}
+  {error && <p class="notice">{error}</p>}
+  {problems.length > 0 && (
+    <div class="notice">
+      <strong>Not saved — {problems.length === 1 ? 'one thing needs fixing' : `${problems.length} things need fixing`}:</strong>
+      <ul style="margin:8px 0 0; padding-left:20px;">{problems.map((p) => <li>{p}</li>)}</ul>
+    </div>
+  )}
+
+  {s && (
+    <form method="POST">
+      <input type="hidden" name="sha" value={loaded!.sha} />
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">The church</h2>
+        <label class="field"><span>Name</span><input name="churchName" value={s.churchName} required /></label>
+        <label class="field"><span>Address</span><input name="address" value={s.address} required /></label>
+        <label class="field">
+          <span>Map link</span><input name="mapsUrl" value={s.mapsUrl} />
+          <small class="muted">The "Get directions" button on the contact page.</small>
+        </label>
+        <label class="field"><span>Email</span><input name="email" value={s.email} /></label>
+        <label class="field"><span>Phone</span><input name="phone" value={s.phone} /></label>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">Service times</h2>
+        <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+          Times are 24-hour — <code>10:00</code> is morning, <code>17:30</code> is
+          half past five. <strong>To remove a service, clear its name.</strong>
+        </p>
+        {rows.map((t, i) => (
+          <div class="svc">
+            <label class="field" style="margin:0;">
+              <span>{i < (s.serviceTimes.length) ? `Service ${i + 1}` : 'Add a service'}</span>
+              <input name={`service-${i}-label`} value={t.label} placeholder="Sunday Morning Worship" />
+            </label>
+            <label class="field" style="margin:0;">
+              <span>Day</span>
+              <select name={`service-${i}-day`}>
+                {DAYS.map((d) => <option value={d} selected={t.day === d}>{d}</option>)}
+              </select>
+            </label>
+            <label class="field" style="margin:0;">
+              <span>Time</span>
+              <input name={`service-${i}-time`} value={t.time} placeholder="10:00" />
+            </label>
+          </div>
+        ))}
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">Links</h2>
+        <label class="field"><span>Facebook</span><input name="facebook" value={s.socials.facebook} /></label>
+        <label class="field"><span>Instagram</span><input name="instagram" value={s.socials.instagram} /></label>
+        <label class="field"><span>YouTube channel</span><input name="youtubeUrl" value={s.socials.youtubeUrl} /></label>
+        <label class="field">
+          <span>YouTube channel ID</span><input name="youtubeChannelId" value={s.socials.youtubeChannelId} />
+          <small class="muted">Starts with UC. This is what finds the livestream and imports sermons — changing it wrongly breaks both.</small>
+        </label>
+        <label class="field"><span>Giving</span><input name="zeffyUrl" value={s.zeffyUrl} /></label>
+        <label class="field"><span>All giving options</span><input name="givingLinksUrl" value={s.givingLinksUrl} /></label>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">Feeds and codes</h2>
+        <label class="field">
+          <span>Calendar feed</span><input name="calendarFeedUrl" value={s.calendarFeedUrl} />
+          <small class="muted">The events page is built from this. Edits to the calendar appear after the next nightly rebuild.</small>
+        </label>
+        <label class="field">
+          <span>Text-in number</span><input name="smsNumber" value={s.smsNumber} />
+          <small class="muted">The number people text START to. Leave empty and the opt-in section is hidden — which is correct until texting is set up.</small>
+        </label>
+        <label class="field">
+          <span>Web analytics token</span><input name="webAnalyticsToken" value={s.webAnalyticsToken} />
+          <small class="muted">Optional. Not a secret — it ships in the HTML of every page.</small>
+        </label>
+      </div>
+
+      <button class="btn" type="submit" disabled={!configured}>Save</button>
+    </form>
+  )}
+</AppLayout>
+
+<style>
+  .svc { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 700px) { .svc { grid-template-columns: 1fr; } }
+</style>

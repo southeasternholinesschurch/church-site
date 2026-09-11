@@ -17,7 +17,7 @@ import type { SendScope } from './permissions.ts';
  * SMS webhook — and this builder treats an opt-out recorded in EITHER table as
  * final. If you are about to merge these two builders "to remove the
  * duplication", what you would actually remove is the reason the congregation's
- * counts are honest. Read §7.2 of SETUP.md step 20 (the kids ministry) first.
+ * counts are honest. Read §7.2 of handoff/SETUP.md step 16 first.
  */
 
 export interface KidsRecipient {

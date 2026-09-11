@@ -61,8 +61,29 @@ const KIDS_DIRECTOR_ONLY = [
   '/kids/cards',
 ];
 
-/** Granting access is the one thing an editor has never been able to do. */
-const ADMIN_ONLY = ['/staff'];
+/**
+ * Granting access is the one thing an editor has never been able to do — and
+ * now, publishing to the public website.
+ *
+ * the pastor's call. Worth stating what it costs: the /website screens are the only
+ * way to change service times, and only an admin can reach them. If a
+ * secretary ever needs to do that, this is the line to revisit rather than
+ * handing out an admin role.
+ *
+ * It covers the launcher too, not only the editors under it. The launcher
+ * carries links into Cloudflare and Twilio consoles, which is not a list an
+ * editor needs either.
+ */
+const ADMIN_ONLY = ['/staff', '/website', '/api/site'];
+
+/*
+ * /api/site is listed separately and deliberately. The screens live under
+ * /website, but the routes they POST to do not — so gating only /website would
+ * have left an editor able to commit a photograph to the public website by
+ * posting straight to the endpoint. Hiding a link is not access control; this
+ * is the same lesson the Fairhaven Kids gate is built around, and it very nearly got
+ * missed here because the page and its endpoint sit in different trees.
+ */
 
 export const isKidsRole = (role: Role): boolean =>
   role === 'kids' || role === 'kids-director';

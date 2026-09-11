@@ -24,6 +24,31 @@
 /** Canonical buckets for filtering. The raw label is kept separately for display. */
 export type ServiceType = 'sunday-morning' | 'sunday-evening' | 'wednesday' | 'other';
 
+/**
+ * Where a service falls within its own day.
+ *
+ * Sorting a series by date alone is not enough, because a church that preaches
+ * morning and evening puts two parts of a run on ONE date — and two entries
+ * with the same timestamp sort arbitrarily. That showed up immediately: the
+ * Sunday morning message was labelled "Part 2 of 2" and the evening one
+ * offered no "previous". Anything that orders a run must break the tie here.
+ */
+export const SERVICE_ORDER: Record<ServiceType, number> = {
+  'sunday-morning': 0,
+  'sunday-evening': 1,
+  wednesday: 2,
+  other: 3,
+};
+
+/** Chronological, oldest first — the order a series is meant to be followed. */
+export function byServiceOrder(
+  a: { date: Date; serviceType: ServiceType },
+  b: { date: Date; serviceType: ServiceType },
+): number {
+  return a.date.getTime() - b.date.getTime()
+    || SERVICE_ORDER[a.serviceType] - SERVICE_ORDER[b.serviceType];
+}
+
 export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
   'sunday-morning': 'Sunday Morning',
   'sunday-evening': 'Sunday Evening',
@@ -46,7 +71,7 @@ export interface ParsedServiceTitle {
 /**
  * TITLING CONVENTION for the YouTube channel
  * ------------------------------------------
- *   August 23, 2026 | Sunday Morning Worship | Pastor [Pastor Name] | The Narrow Gate
+ *   August 23, 2026 | Sunday Morning Worship | Pastor the pastor | The Narrow Gate
  *        date       |        service         |        speaker       |  sermon title
  *
  * Rules, in full:

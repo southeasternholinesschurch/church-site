@@ -72,7 +72,6 @@ procedure, the verification recipe, and a log of every bug this build hit.
 /app       Astro SSR on @astrojs/cloudflare → Cloudflare Workers. D1 (SQLite) for data,
            R2 for member photos. Staff auth via Google OAuth; members via SMS magic link.
 /workers   Three small Cloudflare Workers:
-             decap-oauth/   — GitHub OAuth proxy so Decap CMS can log editors in
              rebuild-cron/  — daily cron that triggers a site rebuild
              sms-cron/      — hourly cron that POSTs /api/sms/run-due in the app
 /docs      This file, plus anything else operational
@@ -87,7 +86,7 @@ procedure, the verification recipe, and a log of every bug this build hit.
 | **Astro + TypeScript** | Ships zero JS by default, fast static output, and content collections give every sermon/ministry/settings entry a typed schema (Zod) — a bad date or missing field fails the build loudly instead of quietly breaking the live site. |
 | **npm** (not pnpm/yarn) | Most universal option; least friction for a future volunteer who's never touched this repo before. |
 | **Cloudflare (Workers Builds, static assets)** | Free static hosting, fast global edge, Deploy Hooks give us the rebuild plumbing below for free. Note: this is Cloudflare's newer git-connected "Workers Builds" product, not classic "Pages" — same idea, some different UI/mechanics, see "Deploying" below and `site/wrangler.jsonc`'s comments for what that changes. |
-| **Decap CMS** | Per the brief — free, git-backed, no database of its own. Needs a small GitHub OAuth proxy Worker (`workers/decap-oauth`) since Netlify's "git-gateway" isn't available outside Netlify — this is a well-documented, standard substitute, not a hack. |
+| **The staff app edits the site** | Site content is markdown in this repository and the dashboard commits to it through the GitHub API, so a save publishes itself. This replaced Decap CMS, which needed its own OAuth proxy Worker, a GitHub OAuth App, two further secrets and an exception in the content-security policy. One fine-grained token replaces all of it. |
 | **Instrument Serif + Texta** | Headings are Instrument Serif (Google Fonts, OFL, free — regular and italic only, no bold, so hierarchy comes from size). Body and UI are Texta, the pastor's own, self-hosted from `site/public/fonts/` so the PWA works offline. **Licensing note:** Texta came from a desktop licence, which typically does NOT cover public web embedding — that's usually a separate tier. Worth confirming with Yellow Design Studio before launch. BD Script was used in an earlier direction and is no longer on the site. Change `--font-body`/`--font-display` in `src/styles/tokens.css` to re-brand. |
 | **`node-ical`** | Handles RRULE (recurring events) and EXDATE/overrides for the iCloud calendar feed — see "Testing the events feed" below, this is the brief's flagged risk area. |
 | **Web3Forms** for Contact/Prayer forms | A hosted form-relay needs zero DNS changes (no SPF/DKIM records to add) — important since the brief explicitly says don't touch the church's email DNS. Custom mail-sending code would need exactly those DNS changes. |
@@ -100,7 +99,7 @@ procedure, the verification recipe, and a log of every bug this build hit.
 None of these are committed. Set them where noted.
 
 **Cloudflare Worker secrets** (`npx wrangler secret put <NAME>`, run from each worker's folder):
-- `workers/decap-oauth`: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (from a GitHub OAuth App)
+- the app Worker: `GITHUB_TOKEN` — a fine-grained PAT, Contents: read and write, this repository only. This is what lets the dashboard edit the website.
 - `workers/rebuild-cron`: `DEPLOY_HOOK_URL` (from the site's Cloudflare project → Settings → Deploy hooks) — **done 2026-08-29**, deployed and verified firing a real rebuild
 
 - the site itself (`site/`): `YOUTUBE_API_KEY` — feeds `/api/live-status`. **Done 2026-08-31.**
@@ -187,7 +186,7 @@ address. the pastor's call — who to make a cheque out to is not something the 
 publishes. The Linktree (`givingLinksUrl` in site settings) covers the other
 digital options instead. Don't reinstate either without asking.
 - [x] Staff portrait confirmed with the pastor (2026-08-30)
-- [x] Staff portraits — all three in place as of 2026-08-30. Felicia's came from a real photo squared up via ChatGPT (confirmed with the pastor; the filename alone doesn't distinguish an AI-generated image from an AI-edited one, and it's worth asking).
+- [x] Staff portraits — all three in place as of 2026-08-30. Marion's came from a real photo squared up via ChatGPT (confirmed with the pastor; the filename alone doesn't distinguish an AI-generated image from an AI-edited one, and it's worth asking).
 - [x] All four staff portraits done. Notes for future ones: Portraits are circle-cropped, so head-and-shoulders works best. `focus` in the CMS moves the crop vertically, but ONLY on a non-square photo — a square source fills the circle exactly and `focus` does nothing. For a tall portrait, crop it square first and keep the uncropped original alongside (see `pastor-full.jpg`), because re-cropping later otherwise means digging the source out of git history. Note `a-wide-congregation-shot.jpg` in the photo library is a wide congregation shot and is deliberately NOT offered as a portrait
 - [x] Staff page complete — four entries, real photos, the church's own bios. To add someone: `/admin` → Staff & Leadership (a new photo must be added to `src/lib/staff-assets.ts` first so it appears in the dropdown).
 - [x] Kids Club time — Wednesdays at 7:00 (confirmed 2026-08-30)
@@ -296,15 +295,12 @@ The rest of this section is the record of how each piece was set up, 2026-08-29.
    to the deploy hook from step 4, cron fires daily at 09:00 UTC. Manually verified working:
    `curl https://rebuild-cron.YOUR-SUBDOMAIN.workers.dev` → `ok: deploy hook
    returned 200`.
-6. ✅ **decap-oauth Worker**: deployed at
-   https://decap-oauth.YOUR-SUBDOMAIN.workers.dev. GitHub OAuth App created
-   ("Fairhaven Community Church CMS", org-owned), callback URL
-   `https://decap-oauth.YOUR-SUBDOMAIN.workers.dev/callback`, "Expire user access
-   tokens" left **unchecked** (this Worker doesn't implement token refresh — see its
-   `src/index.ts` comments — so a non-expiring token is what it expects).
-   `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` secrets set, `public/admin/config.yml`'s `repo`
-   and `base_url` point at the real values. **Verified end-to-end 2026-08-29**: the pastor logged
-   into `/admin` successfully via GitHub.
+6. ✅ **Website editing**: built into the staff app at `/website`, admin only.
+   Needs one secret on the app Worker — `GITHUB_TOKEN`, a fine-grained PAT with
+   Contents: read and write on this repository and nothing else. A save commits,
+   and the commit triggers the build, so an edit publishes itself.
+   **Check:** `/website` reports a wrong token plainly — length, prefix and
+   repository — rather than failing with a bare 401 further in.
 
 Every subsequent push to `main` auto-deploys via Cloudflare's GitHub integration — no extra
 steps needed after this one-time setup. Auth for local `wrangler` commands is stored in
@@ -339,7 +335,7 @@ call `readSession()` itself. This silently broke the directory's "staff can view
 too" fallback for weeks — it was written, it typechecked, and it never once ran.
 
 **Never use `new Date('YYYY-MM-DD')` on a birthday or anniversary.** It parses as UTC
-midnight, which in Indianapolis is the evening *before*, so every date renders a day
+midnight, which in Fairhaven is the evening *before*, so every date renders a day
 early. Both the directory and `lib/celebrations.ts` parse the string with a regex.
 `app/test/celebrations.test.ts` checks all twelve month boundaries.
 
@@ -702,13 +698,13 @@ Put a hashtag in an event's **Notes** in Apple Calendar and the event attaches
 itself to that ministry:
 
 ```
-Games, pizza and a bounce house in the fellowship hall. Bring a friend! #sekids
+Games, pizza and a bounce house in the fellowship hall. Bring a friend! #kids
 ```
 
 That does two things:
 
 1. On the **Events page** the card gains a chip linking to that ministry.
-2. On **that ministry's own page** (`/ministries/sekids`) the event appears
+2. On **that ministry's own page** (`/ministries/kids`) the event appears
    under "Coming Up".
 
 One place to type it, two places it lands. The vocabulary is the ministries'
@@ -716,24 +712,24 @@ own accent names, so it can't drift out of step with the content collection:
 
 | Tag | Ministry |
 |---|---|
-| `#sekids` | Fairhaven Kids |
-| `#seyouth` | Fairhaven Youth |
+| `#kids` | Fairhaven Kids |
+| `#youth` | Fairhaven Youth |
 | `#seladies` | Fairhaven Ladies |
 | `#seseniors` | Fairhaven Seniors |
 
 Details worth knowing:
 
-- **Case doesn't matter.** `#Fairhaven Kids`, `#sekids` and `#SEKIDS` all work — phone
+- **Case doesn't matter.** `#Fairhaven Kids`, `#kids` and `#KIDS` all work — phone
   keyboards autocapitalise.
-- **Several tags are fine.** `#sekids #seyouth` puts a joint event under both.
+- **Several tags are fine.** `#kids #youth` puts a joint event under both.
   Under Fairhaven Kids it shows a "Fairhaven Youth" chip and vice versa, so a shared event
   reads as shared; the ministry's own chip is dropped where it would be
   circular.
-- **The tag is removed from the text before display.** Nobody reads "#sekids"
+- **The tag is removed from the text before display.** Nobody reads "#kids"
   in the middle of a sentence.
 - **Unrecognised hashtags are left alone.** `#potluck` is someone writing
   prose, not a failed instruction, so it stays as typed rather than vanishing.
-- **A word boundary is required**, so `#sekidsandmore` is not a tag.
+- **A word boundary is required**, so `#kidsandmore` is not a tag.
 - If the calendar can't be reached at build time, the Ministries page simply
   shows no event blocks — it never fails because of it.
 

@@ -2,7 +2,7 @@
  * The bulletin's monthly birthdays and anniversaries.
  *
  * The date handling is the whole risk here. A bare 'YYYY-MM-DD' put through
- * new Date() is UTC midnight, which in Indianapolis renders as the evening
+ * new Date() is UTC midnight, which in Fairhaven renders as the evening
  * BEFORE — every birthday a day early, which nobody reports and everybody
  * notices. All twelve month boundaries are checked below for exactly that.
  *

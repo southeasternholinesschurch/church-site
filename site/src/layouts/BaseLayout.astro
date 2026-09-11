@@ -7,6 +7,17 @@ import { getCollection } from 'astro:content';
 interface Props {
   title: string;
   description?: string;
+  /** Absolute or site-relative image for link previews. Falls back to the church mark. */
+  ogImage?: string;
+  ogType?: 'website' | 'article' | 'video.other';
+  /**
+   * Structured data for this page, as an object or array of objects.
+   *
+   * Rendered as JSON-LD. This is what earns a video rich result in search
+   * rather than a plain blue link — a sermon page without it is indexed as
+   * text that happens to contain an iframe.
+   */
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
   /** Dark page headers let the nav sit light-on-dark; a light page inverts it. */
   navTheme?: 'dark' | 'light';
   /**
@@ -48,10 +59,13 @@ const INSTALL = {
 
 const {
   title,
-  description = 'Fairhaven Community Church — a family in Indianapolis. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
+  description = 'Fairhaven Community Church — a family in Fairhaven. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
   navTheme = 'dark',
   noindex = false,
   installAs = 'site',
+  ogImage,
+  ogType = 'website',
+  jsonLd,
 } = Astro.props;
 const app = INSTALL[installAs];
 
@@ -72,6 +86,24 @@ const settings = settingsEntry.data;
         redirect in the Worker can never see a page request. This is what
         keeps the two hostnames from reading as two copies of the site. */}
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />
+
+    {/* Link previews. Without these, a sermon shared to Facebook — which is
+        how most of this congregation shares anything — renders as a bare URL
+        with no title, no image and no reason to tap it. */}
+    <meta property="og:site_name" content={settings.churchName} />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site).href} />
+    <meta property="og:image" content={new URL(ogImage ?? '/icons/icon-512.png', Astro.site).href} />
+    <meta name="twitter:card" content={ogImage ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={new URL(ogImage ?? '/icons/icon-512.png', Astro.site).href} />
+
+    {jsonLd && (
+      <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
+    )}
     <link rel="icon" href="/favicon-48.png" type="image/png" />
     <link rel="manifest" href={app.manifest} />
     <meta name="theme-color" content="#1a1512" />
@@ -91,17 +123,14 @@ const settings = settingsEntry.data;
          holding up first paint. Texta is self-hosted from /fonts. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    {/* Fonts come from the ACTIVE THEME (src/styles/themes/*.css), which
-        imports whatever it needs. Hardcoding a family here would mean two
-        places to change when the theme changes, and one of them would be
-        forgotten. */}
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
 
     {/* Cloudflare Web Analytics. Cookieless, so no consent banner is needed
         and nothing about a visitor is stored on their device. Rendered only
         when a token is set in site settings, so an empty setting costs a
         visitor nothing — not even the request.
 
-        Deliberately NOT on app.example.org: that side holds the
+        Deliberately NOT on app.yourchurch.org: that side holds the
         directory and attendance, and traffic data there would describe
         members' private behaviour rather than anything worth knowing. */}
     {settings.webAnalyticsToken && (

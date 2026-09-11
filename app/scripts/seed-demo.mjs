@@ -1,9 +1,9 @@
 /**
  * Fills the DEMO database with an invented congregation.
  *
- *   npx wrangler d1 migrations apply seh-demo --remote
+ *   npx wrangler d1 migrations apply changeme-demo --remote
  *   node scripts/seed-demo.mjs > /tmp/seed.sql
- *   npx wrangler d1 execute seh-demo --remote --file /tmp/seed.sql
+ *   npx wrangler d1 execute changeme-demo --remote --file /tmp/seed.sql
  *
  * Everything here is fiction. Numbers are in the 555-01xx range, which is
  * reserved for it and can never reach a real handset — belt and braces on top
@@ -167,7 +167,7 @@ for (const [cid, name, desc, lo, hi] of KID_CLASSES) {
  * /kids/classes is a feature you can see rather than an empty dropdown.
  */
 const KID_STAFF = [
-  ['felicia', 'Felicia S.', 'kids-director'],
+  ['marion', 'Marion S.', 'kids-director'],
   ['karen',   'Karen H.',   'kids'],
   ['bethany', 'Bethany R.', 'kids'],
   ['darrell', 'Darrell M.', 'kids'],
@@ -313,14 +313,14 @@ for (const k of kidRows) {
   if (!chance(0.8)) continue;
   if (chance(0.15)) {
     out.push(`INSERT INTO kid_cards (person_id, token, active, issued_at, revoked_at, issued_by)
-      VALUES (${k.id}, '${fakeToken()}', 0, datetime('now','-60 days'), datetime('now','-20 days'), 'felicia@example.org');`);
+      VALUES (${k.id}, '${fakeToken()}', 0, datetime('now','-60 days'), datetime('now','-20 days'), 'marion@example.org');`);
   }
   out.push(`INSERT INTO kid_cards (person_id, token, active, issued_at, issued_by)
-    VALUES (${k.id}, '${fakeToken()}', 1, datetime('now','-20 days'), 'felicia@example.org');`);
+    VALUES (${k.id}, '${fakeToken()}', 1, datetime('now','-20 days'), 'marion@example.org');`);
 }
 
 out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by)
-  VALUES ('kid_bucks_per_visit', '${PER_VISIT}', datetime('now'), 'felicia@example.org');`);
+  VALUES ('kid_bucks_per_visit', '${PER_VISIT}', datetime('now'), 'marion@example.org');`);
 
 /*
  * A kiosk the demo visitor can pair in one click.

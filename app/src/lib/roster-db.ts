@@ -70,6 +70,6 @@ export async function alreadySent(env: { DB: D1Database }, key: string): Promise
   const r = await db.select({ id: schema.scheduledMessages.id })
     .from(schema.scheduledMessages)
     .where(and(eq(schema.scheduledMessages.sourceKey, key),
-               sql`status in ('sent','skipped')`)).limit(1);
+               sql`status in ('men','skipped')`)).limit(1);
   return Boolean(r[0]);
 }

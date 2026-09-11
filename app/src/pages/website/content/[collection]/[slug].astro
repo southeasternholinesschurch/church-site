@@ -1,0 +1,216 @@
+---
+import AppLayout from '../../../../layouts/AppLayout.astro';
+import { readForm } from '../../../../lib/form';
+import { siteEditingConfigured, GitConflict } from '../../../../lib/site-content';
+import {
+  COLLECTIONS, readEntry, saveEntry, removeEntry, toSlug, type CollectionId,
+} from '../../../../lib/site-entries';
+
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const id = Astro.params.collection as CollectionId;
+if (!COLLECTIONS[id]) return Astro.redirect('/website', 302);
+
+const meta = COLLECTIONS[id];
+const configured = siteEditingConfigured(env);
+const slugParam = Astro.params.slug!;
+const isNew = slugParam === 'new';
+
+let error: string | null = null;
+let problems: string[] = [];
+
+if (Astro.request.method === 'POST' && configured) {
+  const form = await readForm(Astro.request);
+
+  if (String(form.get('action')) === 'delete' && !isNew) {
+    try {
+      await removeEntry(env, id, slugParam, user);
+      return Astro.redirect(`/website/content/${id}?removed=1`, 303);
+    } catch (err) {
+      error = `Could not remove: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  } else {
+    const values: Record<string, string> = {};
+    for (const f of meta.fields) values[f.name] = String(form.get(f.name) ?? '');
+    const body = String(form.get('body') ?? '');
+
+    for (const f of meta.fields) {
+      if (f.required && !values[f.name].trim()) problems.push(`${f.label} is needed.`);
+    }
+    // The filename is derived from the title, so a new entry cannot be saved
+    // without one — and renaming an existing entry must NOT move its file,
+    // because its URL on the public site is that filename.
+    const slug = isNew ? toSlug(values[meta.titleField] ?? '') : slugParam;
+    if (isNew && !slug) problems.push(`A ${meta.singular} needs a name before it can be saved.`);
+
+    if (!problems.length && !error) {
+      try {
+        if (isNew && await readEntry(env, id, slug)) {
+          problems.push(`There is already a ${meta.singular} called that.`);
+        } else {
+          await saveEntry(env, id, slug, values, body, String(form.get('sha') ?? '') || undefined, user);
+          return Astro.redirect(`/website/content/${id}/${slug}?saved=1`, 303);
+        }
+      } catch (err) {
+        error = err instanceof GitConflict
+          ? 'Somebody else saved this at the same moment. Reload and reapply your change — nothing was lost.'
+          : `Could not save: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+  }
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const entry = configured && !isNew ? await readEntry(env, id, slugParam) : null;
+if (!isNew && configured && !entry) return Astro.redirect(`/website/content/${id}`, 302);
+
+const val = (name: string) => String(entry?.data[name] ?? '');
+const title = isNew ? `New ${meta.singular}` : (val(meta.titleField) || slugParam);
+---
+<AppLayout title={title} user={user}>
+  <p style="margin:0 0 6px;"><a href={`/website/content/${id}`} class="muted">← {meta.label}</a></p>
+  <h1>{title}</h1>
+
+  {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong></p>}
+  {saved && <p class="notice">Saved. The website rebuilds itself; the change is live in a couple of minutes.</p>}
+  {error && <p class="notice">{error}</p>}
+  {problems.length > 0 && (
+    <div class="notice"><strong>Not saved:</strong>
+      <ul style="margin:8px 0 0; padding-left:20px;">{problems.map((p) => <li>{p}</li>)}</ul></div>
+  )}
+
+  {configured && (
+    <form method="POST">
+      {entry && <input type="hidden" name="sha" value={entry.sha} />}
+      <div class="card" style="margin-bottom:20px;">
+        {meta.fields.map((f) => (
+          <label class="field" hidden={meta.photo?.focusField === f.name && Boolean(val(meta.photo.field))}>
+            <span>{f.label}{f.required ? '' : ' (optional)'}</span>
+            {f.kind === 'area'
+              ? <textarea name={f.name} rows="3">{val(f.name)}</textarea>
+              : <input name={f.name} type={f.kind === 'number' ? 'number' : 'text'} value={val(f.name)} />}
+            {f.hint && <small class="muted">{f.hint}</small>}
+          </label>
+        ))}
+      </div>
+
+      {meta.photo && val(meta.photo.field) && (
+        <div class="card" style="margin-bottom:20px;">
+          <h2 style="margin-top:0;">Where to hold the crop</h2>
+          <p class="muted" style="margin:-6px 0 14px; max-width:62ch; font-size:15px;">
+            {meta.photo.preview === 'circle'
+              ? 'Portraits are cut to a circle, which for a tall photo keeps only the middle band. Click the face.'
+              : 'The hero is far wider than the photograph, so the top and bottom are discarded. Click what must stay in view.'}
+            {' '}The strip on the right is what people actually see.
+          </p>
+          <div class="pick">
+            <div class="pick__src">
+              <img id="focus-img" src={`/website/photo/${meta.photo.folder}/${val(meta.photo.field)}.jpg`} alt="" />
+              <span id="focus-dot" class="pick__dot" hidden></span>
+            </div>
+            <div class={`pick__out pick__out--${meta.photo.preview}`}>
+              <img id="focus-preview" src={`/website/photo/${meta.photo.folder}/${val(meta.photo.field)}.jpg`} alt="" />
+            </div>
+          </div>
+          <p class="muted" style="margin:10px 0 0; font-size:14px;">
+            Now: <code id="focus-read">{val(meta.photo.focusField) || (meta.photo.focusKind === 'vertical' ? '50' : '50% 50%')}</code>
+            <button type="button" class="btn btn--ghost" id="focus-reset"
+                    style="min-height:32px; padding:4px 10px; margin-left:10px;">Centre it</button>
+          </p>
+          <input type="hidden" id="focus-input" name={meta.photo.focusField}
+                 value={val(meta.photo.focusField)} />
+          <script type="application/json" id="focus-cfg" is:inline set:html={JSON.stringify({ kind: meta.photo.focusKind })}></script>
+        </div>
+      )}
+
+      <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">The page itself</h2>
+        <p class="muted" style="margin:-6px 0 12px; font-size:15px;">
+          Markdown. A blank line starts a new paragraph; <code>## </code> at the
+          start of a line makes a heading.
+        </p>
+        <textarea name="body" rows="16" style="font-family:ui-monospace,monospace; font-size:14px;">{entry?.body?.trim() ?? ''}</textarea>
+      </div>
+
+      <button class="btn" type="submit">Save</button>
+    </form>
+  )}
+
+  {configured && !isNew && (
+    <form method="POST" style="margin-top:28px;"
+          onsubmit="return confirm('Remove this from the website? The page and its link disappear at the next build.')">
+      <input type="hidden" name="action" value="delete" />
+      <button class="btn btn--ghost" type="submit" style="color:var(--red);">Remove from the website</button>
+    </form>
+  )}
+</AppLayout>
+
+<style>
+  .pick { display: grid; grid-template-columns: 1fr 240px; gap: 18px; align-items: start; }
+  .pick__src { position: relative; cursor: crosshair; line-height: 0; }
+  .pick__src img { width: 100%; border-radius: var(--radius); display: block; }
+  .pick__dot { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+               border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,0,0,.55);
+               pointer-events: none; }
+  .pick__out { overflow: hidden; background: var(--cream-deep); }
+  .pick__out img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pick__out--wide { aspect-ratio: 21/9; border-radius: var(--radius); }
+  .pick__out--circle { width: 190px; height: 190px; border-radius: 50%; margin: 0 auto; }
+  @media (max-width: 720px) { .pick { grid-template-columns: 1fr; } }
+</style>
+
+<script>
+  const cfg = document.getElementById('focus-cfg');
+  if (cfg) {
+    const kind = (JSON.parse(cfg.textContent || '{}') as { kind: string }).kind;
+    const src = document.getElementById('focus-img') as HTMLImageElement;
+    const dot = document.getElementById('focus-dot') as HTMLElement;
+    const out = document.getElementById('focus-preview') as HTMLImageElement;
+    const input = document.getElementById('focus-input') as HTMLInputElement;
+    const read = document.getElementById('focus-read')!;
+
+    /** Vertical-only for the circular crop; the horizontal centre is never wrong there. */
+    const toValue = (x: number, y: number) =>
+      kind === 'vertical' ? String(Math.round(y)) : `${Math.round(x)}% ${Math.round(y)}%`;
+
+    function apply(x: number, y: number) {
+      dot.hidden = false;
+      dot.style.left = `${x}%`;
+      dot.style.top = `${y}%`;
+      out.style.objectPosition = `${x}% ${y}%`;
+      const v = toValue(x, y);
+      input.value = v;
+      read.textContent = v;
+    }
+
+    /** Read whatever is already stored, so the dot starts where the photo is set. */
+    const initial = input.value.trim();
+    if (kind === 'vertical') apply(50, Number.isFinite(Number(initial)) ? Number(initial) : 50);
+    else {
+      const m = /^(\d+)%\s+(\d+)%$/.exec(initial);
+      apply(m ? Number(m[1]) : 50, m ? Number(m[2]) : 50);
+    }
+
+    /** 0-100, or the fallback — never NaN. */
+    const pct = (offset: number, size: number, fallback: number) => {
+      if (!size) return fallback;
+      const v = (offset / size) * 100;
+      return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : fallback;
+    };
+
+    src.parentElement!.addEventListener('click', (e) => {
+      const r = src.getBoundingClientRect();
+      /*
+       * A click before the image has laid out gives a zero-size rect, and
+       * dividing by it yields NaN — which sailed through the clamp and wrote
+       * "NaN% 0%" into the hidden input, ready to be committed to the content
+       * file. Caught by driving the picker rather than by reading it.
+       */
+      if (!r.width || !r.height) return;
+      const ev = e as MouseEvent;
+      apply(pct(ev.clientX - r.left, r.width, 50), pct(ev.clientY - r.top, r.height, 50));
+    });
+
+    document.getElementById('focus-reset')!.addEventListener('click', () => apply(50, 50));
+  }
+</script>

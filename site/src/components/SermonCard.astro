@@ -1,5 +1,6 @@
 ---
 import type { CollectionEntry } from 'astro:content';
+import { getEntry } from 'astro:content';
 
 interface Props {
   sermon: CollectionEntry<'sermons'>;
@@ -24,7 +25,10 @@ const heading = title?.trim() || service;
 // "Sunday Morning Worship" with "Sunday Morning" above it is the same words
 // twice, which is most of the archive: the imported entries carry no title
 // until someone adds one. So the kicker is dropped rather than repeated.
-const kicker = series?.trim() || (title?.trim() ? service : null);
+/* series is a reference now, so resolve it for the kicker. A card is rendered
+   in lists of a dozen; getEntry is cached by Astro, so this is not N queries. */
+const seriesEntry = series ? await getEntry(series) : undefined;
+const kicker = seriesEntry?.data.name || (title?.trim() ? service : null);
 
 const thumb = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
 ---

@@ -5,7 +5,7 @@
  * 0000_initial_schema.sql), which is why adding the two Fairhaven Kids kinds needed no
  * migration — the same reason widening `staff.role` needed none.
  *
- * The `sekids` ones are SEPARATE SERVICES, not a flag on the existing Sunday
+ * The `kids` ones are SEPARATE SERVICES, not a flag on the existing Sunday
  * school. The church's Sunday school is all ages and the Wednesday service is
  * the adult one; `unique(date, kind)` means a children's register sharing
  * either kind would collide with the service the congregation is already in.
@@ -32,11 +32,11 @@ export type ServiceKind = (typeof SERVICE_KINDS)[number]['id'];
  * actually reads. They are taken on the Fairhaven Kids register instead, and counted
  * there.
  */
-export const CHURCH_SERVICE_KINDS = SERVICE_KINDS.filter((k) => !('sekids' in k));
+export const CHURCH_SERVICE_KINDS = SERVICE_KINDS.filter((k) => !('kids' in k));
 /* Left to infer rather than annotated `string[]`: drizzle's `kind` column is a
  * literal union, and widening these to plain strings makes notInArray reject
  * them. */
-export const KIDS_KIND_IDS = SERVICE_KINDS.filter((k) => 'sekids' in k).map((k) => k.id);
+export const KIDS_KIND_IDS = SERVICE_KINDS.filter((k) => 'kids' in k).map((k) => k.id);
 
 export const kindLabel = (k: string) =>
   SERVICE_KINDS.find((s) => s.id === k)?.label ?? k;
@@ -47,7 +47,7 @@ export const isKidsKind = (k: string): boolean => (KIDS_KIND_IDS as readonly str
 
 /**
  * Today in the CHURCH's timezone, not the server's. A Worker runs in UTC, so
- * after 7pm Indianapolis time `new Date()` is already tomorrow — which would
+ * after 7pm Fairhaven time `new Date()` is already tomorrow — which would
  * file a Wednesday evening service under Thursday. The public site shipped
  * exactly this bug once already.
  */
@@ -70,7 +70,7 @@ export function likelyKind(dateIso: string): ServiceKind {
  * Sunday classes and the Wednesday club; any other day has no children's
  * meeting, so it returns null rather than guessing. Uses the same noon-UTC
  * trick as likelyKind — `new Date('2026-09-06')` is midnight UTC, which is the
- * evening BEFORE in Indianapolis, and would name the wrong day.
+ * evening BEFORE in Fairhaven, and would name the wrong day.
  */
 export function likelyKidsKind(dateIso: string): 'kids-sunday' | 'kids-wednesday' | null {
   const dow = new Date(`${dateIso}T12:00:00Z`).getUTCDay();

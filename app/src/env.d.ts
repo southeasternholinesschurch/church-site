@@ -9,6 +9,17 @@ interface Env {
   PHOTOS?: R2Bucket;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /*
+   * Editing the public website.
+   *
+   * The site's content is markdown in the git repository, so saving an edit
+   * means committing — which is also what publishes it, since a push triggers
+   * the site build. GITHUB_TOKEN is a fine-grained PAT with Contents: write on
+   * that one repository and nothing else. A Worker secret, never in the repo.
+   */
+  GITHUB_TOKEN?: string;
+  GITHUB_REPO?: string;
+  GITHUB_BRANCH?: string;
   /* Twilio — Worker secrets, never in the repo and never sent to a browser. */
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_API_KEY_SID?: string;

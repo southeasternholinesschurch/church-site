@@ -49,7 +49,7 @@ export interface LocalNow {
 }
 
 /**
- * Where the clock is, in Indianapolis.
+ * Where the clock is, in Fairhaven.
  *
  * Derived from the formatter rather than from UTC arithmetic, because Indiana
  * observes DST and hard-coding an offset silently breaks twice a year. The
@@ -139,7 +139,7 @@ export function dueOn(s: ScheduleRow, now: LocalNow): string | null {
  *
  * Compares month and day as NUMBERS parsed out of the stored string, never via
  * `new Date(iso)` — that parses 'YYYY-MM-DD' as UTC midnight, which in
- * Indianapolis is the evening BEFORE, so half the church would be wished a
+ * Fairhaven is the evening BEFORE, so half the church would be wished a
  * happy birthday a day early. celebrations.ts carries the same warning.
  *
  * 29 February is wished on the 28th in a common year, so leap-day birthdays are
