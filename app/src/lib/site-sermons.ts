@@ -15,7 +15,7 @@
 import {
   readFile, listDir, writeFile, deleteFile, commitMessage, type GitEnv,
   YAML_OUT,
-} from './site-content';
+} from './site-content.ts';
 import { parseDocument } from 'yaml';
 
 export const SERMONS_DIR = 'site/src/content/sermons';
@@ -144,6 +144,41 @@ export async function saveSermon(
   });
 }
 
+
+/**
+ * Any line that announces the editor's notes: the HTML comment the cleaning
+ * routine asks for, or a heading or bold line in case a run writes it that way.
+ */
+const EDITOR_NOTES = /^[ \t]*(?:<!--[ \t]*|#{1,6}[ \t]*|\*\*[ \t]*)editor'?s?[ \t]+notes\b/im;
+
+/**
+ * The transcript up to the editor's notes.
+ *
+ * THE MARKER IS A TERMINATOR, NOT A WRAPPER. This used to strip the marker as
+ * though it were a comment wrapped around the notes, which is not what the
+ * routine produces:
+ *
+ *     <!-- editor's notes -->
+ *     - Mark 6:3 came through as "Joseph"; the KJV reads "Joses".
+ *
+ * Removing "the comment" removed the first line and published the bullets under
+ * the pastor's name. Three sermons went up that way before anyone noticed.
+ * A sermon ends with the preaching; nothing follows it.
+ *
+ * Kept here rather than imported because this bundles for Workers. The copy in
+ * site/scripts/lib/editor-notes.mjs is the same rule, and
+ * test/editor-notes.test.ts runs both against the same cases so they cannot
+ * drift apart.
+ */
+export function stripEditorNotes(text: string): string {
+  const m = EDITOR_NOTES.exec(text);
+  return (m ? text.slice(0, m.index) : text).trimEnd();
+}
+
+/** Whether a piece of text still carries notes — for checking, not for cutting. */
+export function hasEditorNotes(text: string): boolean {
+  return EDITOR_NOTES.test(text);
+}
 /**
  * Approve a cleaned transcript: it becomes the sermon's page, and the draft is
  * removed so it cannot be published twice.
@@ -161,8 +196,7 @@ export async function publishDraft(
   if (sermon.body.trim()) throw new Error('That sermon already has text on its page. Clear it first if you mean to replace it.');
 
   // Editor's notes are addressed to the reviewer, not to the congregation.
-  const text = (edited ?? sermon.draft.text)
-    .replace(/<!--\s*editor'?s notes[\s\S]*?-->/gi, '').trim();
+  const text = stripEditorNotes(edited ?? sermon.draft.text).trim();
 
   await saveSermon(env, slug, {
     title: String(sermon.data.title ?? ''),

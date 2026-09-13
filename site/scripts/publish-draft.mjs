@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripEditorNotes } from './lib/editor-notes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DRAFTS = path.join(HERE, '..', 'transcripts', 'drafts');
@@ -55,8 +56,10 @@ if (body.trim()) {
   process.exit(1);
 }
 
-// Editor's notes are for the pastor, not for the congregation.
-const cleaned = draft.replace(/<!--\s*editor'?s notes[\s\S]*?-->/gi, '').trim();
+// Editor's notes are for the reviewer, not for the congregation. The marker
+// ends the transcript — see lib/editor-notes.mjs for why that is a cut and
+// not a deletion.
+const cleaned = stripEditorNotes(draft).trim();
 
 fs.writeFileSync(sermonPath, `${frontmatter}\n${cleaned}\n`);
 fs.unlinkSync(draftPath);

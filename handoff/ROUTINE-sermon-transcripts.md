@@ -93,6 +93,21 @@ Real example: he said "the last four chapters of Ephesians" where Ephesians has
 six and he had just said three. Cleaning should fix that, but he must be able to
 see that it was fixed.
 
+
+**That line ends the transcript.** Everything below it is cut when the sermon is
+published, so:
+
+- put the notes there and nowhere else — not at the top, not beside the passage
+  they refer to, not in an aside partway down;
+- put nothing below it that belongs on the page;
+- write the marker exactly once.
+
+This is not a formality. The marker was once treated as a comment to delete
+rather than a place to stop, so the line vanished and the notes beneath it were
+published — three sermons went up with "corrected to match scripture" and "worth
+a listen to confirm" on them, under the pastor's name, on the church's website. The
+publisher now cuts at the marker, and `npm test` in `app/` fails if a published
+sermon ends in a bulleted list. Keep the marker where it belongs and both hold.
 ## 5. Write the draft
 
 To `site/transcripts/drafts/<slug>.md`. **Nothing on the site reads this
