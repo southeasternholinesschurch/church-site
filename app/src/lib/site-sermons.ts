@@ -211,3 +211,42 @@ export async function publishDraft(
 
   return { words: text.split(/\s+/).filter(Boolean).length };
 }
+
+/**
+ * Remove a sermon from the site entirely.
+ *
+ * Needed because the archive can end up with a service on it twice: the slug
+ * is date + service type, the service type is read off the YouTube title, and
+ * titles get edited after the stream. A stream that goes up as "Evening
+ * Worship" and is retitled to "Sunday School and Evening Worship" gets filed a
+ * second time by the next night's import. The importer refuses to do that now,
+ * but somebody still has to say which of the two entries is the wrong one, and
+ * without this that means editing the repository by hand.
+ *
+ * The draft goes with it, if one is still waiting. Leaving a draft behind
+ * would make the sermon reappear in the review queue with no page to publish
+ * it to.
+ *
+ * Deliberately not reversible from here. It is a git commit, so the text is
+ * recoverable by someone who knows how, but this is not an "archive" or a
+ * trash can and should not read like one.
+ */
+export async function deleteSermon(
+  env: GitEnv, slug: string, who: { email: string },
+): Promise<{ hadTranscript: boolean; hadDraft: boolean }> {
+  const sermon = await readSermon(env, slug);
+  if (!sermon) throw new Error('That sermon no longer exists.');
+
+  const hadTranscript = sermon.body.trim().length > 0;
+  const hadDraft = Boolean(sermon.draft);
+
+  await deleteFile(env, `${SERMONS_DIR}/${slug}.md`, sermon.sha,
+    commitMessage(`Sermon: remove ${slug}`, who));
+
+  if (sermon.draft) {
+    await deleteFile(env, `${DRAFTS_DIR}/${slug}.md`, sermon.draft.sha,
+      commitMessage(`Sermon: remove the draft for ${slug} along with it`, who));
+  }
+
+  return { hadTranscript, hadDraft };
+}

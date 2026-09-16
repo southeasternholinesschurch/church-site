@@ -7,6 +7,7 @@ const user = Astro.locals.user!;
 const env = Astro.locals.runtime.env;
 const configured = siteEditingConfigured(env);
 const page = Math.max(0, Number(Astro.url.searchParams.get('page') ?? 0) || 0);
+const removed = Astro.url.searchParams.get('removed') === '1';
 
 let data: SermonPage | null = null;
 let error: string | null = null;
@@ -22,6 +23,7 @@ const waiting = data?.rows.filter((r) => r.hasDraft).length ?? 0;
   <p style="margin:0 0 6px;"><a href="/website" class="muted">← The website</a></p>
   <h1>Sermons</h1>
 
+  {removed && <p class="notice notice--ok">Removed. The page comes off the website at the next build.</p>}
   {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong></p>}
   {error && <p class="notice">Could not read the website's files: {error}</p>}
 

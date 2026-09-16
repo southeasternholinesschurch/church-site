@@ -2,7 +2,7 @@
 import AppLayout from '../../../layouts/AppLayout.astro';
 import { readForm } from '../../../lib/form';
 import { siteEditingConfigured, GitConflict } from '../../../lib/site-content';
-import { readSermon, saveSermon, listSeries, publishDraft, fromSlug } from '../../../lib/site-sermons';
+import { readSermon, saveSermon, listSeries, publishDraft, deleteSermon, fromSlug } from '../../../lib/site-sermons';
 
 /**
  * One sermon: its details, and the review step for a cleaned transcript.
@@ -23,6 +23,20 @@ if (Astro.request.method === 'POST' && configured) {
   const form = await readForm(Astro.request);
   const action = String(form.get('action') ?? 'save');
   try {
+    if (action === 'delete') {
+      /*
+       * Typing the date is the confirmation — a deliberateness check, not a
+       * disambiguator: two entries for one service share a date, and which one
+       * is being deleted is fixed by the URL. It is here because a sermon page
+       * can carry hours of review behind it, and a single button is too light
+       * a touch for that.
+       */
+      if (String(form.get('confirm') ?? '').trim() !== fromSlug(slug).date) {
+        throw new Error("That did not match the sermon's date, so nothing was deleted.");
+      }
+      await deleteSermon(env, slug, user);
+      return Astro.redirect('/website/sermons?removed=1', 303);
+    }
     if (action === 'publish') {
       const { words } = await publishDraft(env, slug, user, String(form.get('draft') ?? '') || undefined);
       return Astro.redirect(`/website/sermons/${slug}?published=${words}`, 303);
@@ -125,6 +139,24 @@ const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean
       </div>
 
       <button class="btn" type="submit">Save details</button>
+    </form>
+  )}
+
+  {sermon && (
+    <form method="POST" class="card" style="margin-top:28px; border-color:var(--red);">
+      <input type="hidden" name="action" value="delete" />
+      <h2 style="margin-top:0;">Remove this sermon</h2>
+      <p class="muted" style="margin:-6px 0 14px; max-width:60ch; font-size:15px;">
+        Takes the page off the website for good, along with its transcript and
+        any draft still waiting. Mostly this is for a service that has been
+        imported twice under two names — check the other entry is the one you
+        want to keep before removing this one.
+      </p>
+      <label class="field" style="max-width:280px;">
+        <span>Type {meta.date} to confirm</span>
+        <input name="confirm" autocomplete="off" placeholder={meta.date} />
+      </label>
+      <button class="btn btn--danger" type="submit">Remove from the website</button>
     </form>
   )}
 </AppLayout>

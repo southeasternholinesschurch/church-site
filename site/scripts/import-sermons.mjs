@@ -387,8 +387,33 @@ function isPristine(raw) {
     .every((l) => IMPORTER_KEYS.has(l.slice(0, l.indexOf(':')).trim()));
 }
 
+/*
+ * Which video each existing entry is of, so the same service cannot be filed
+ * twice under two names.
+ *
+ * The slug is date + service type, but the SERVICE TYPE comes from the YouTube
+ * title, and titles get edited after the fact. A stream that goes up as
+ * "Evening Worship" is imported as <date>-other; retitled to "Sunday School
+ * and Evening Worship", the next night's run files it again as
+ * <date>-sunday-evening. Two pages, one service, the same transcript on both.
+ *
+ * The video id is the identity; the slug is only a filename.
+ */
+function videoIdOf(file) {
+  const m = /^youtubeId:\s*["']?([^"'\s]+)/m.exec(fs.readFileSync(path.join(OUT_DIR, file), 'utf8'));
+  return m ? m[1] : null;
+}
+const existingByVideo = new Map();
+if (fs.existsSync(OUT_DIR)) {
+  for (const f of fs.readdirSync(OUT_DIR).filter((f) => f.endsWith('.md'))) {
+    const id = videoIdOf(f);
+    if (id) existingByVideo.set(id, f.replace(/\.md$/, ''));
+  }
+}
+
 let written = 0, updated = 0, kept = 0;
 const handEdited = [];
+const refiled = [];
 for (const r of records) {
   const file = path.join(OUT_DIR, `${r.slug}.md`);
   const body = [
@@ -417,8 +442,35 @@ for (const r of records) {
     continue;
   }
 
+  /*
+   * This slug is new, but is the VIDEO? If the service was already imported
+   * under a different name, writing this would publish it a second time.
+   *
+   * Reported, not resolved. Renaming the existing entry to match is the
+   * tempting fix and it is the wrong one: sermon URLs are permanent and
+   * indexed, and a rename turns every link to the old one into a 404 —
+   * including whatever the transcript on it has earned in search. Which of the
+   * two names is right is a judgement call, so it goes to a person.
+   */
+  const already = existingByVideo.get(r.videoId);
+  if (already && already !== r.slug) {
+    refiled.push({ slug: r.slug, already, service: r.service });
+    kept++;
+    continue;
+  }
+
   if (!DRY) { fs.mkdirSync(OUT_DIR, { recursive: true }); fs.writeFileSync(file, body); }
+  existingByVideo.set(r.videoId, r.slug);
   written++;
+}
+
+if (refiled.length) {
+  console.log(`\nSkipped ${refiled.length} service(s) already imported under another name:`);
+  for (const x of refiled) {
+    console.log(`  ${x.slug}  is the same video as  ${x.already}   ("${x.service}")`);
+  }
+  console.log('  The YouTube title changed after the first import. Delete whichever entry is wrong');
+  console.log('  in the dashboard (Website → Sermons → Remove); nothing was written for these.\n');
 }
 
 if (handEdited.length) {
