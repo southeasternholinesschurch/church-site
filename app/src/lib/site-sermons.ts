@@ -88,7 +88,7 @@ export interface SermonDetail {
   data: Record<string, unknown>;
   body: string;
   sha: string;
-  draft: { text: string; sha: string } | null;
+  draft: { text: string; sha: string; suggested: Record<string, string> } | null;
   hasTranscript: boolean;
 }
 
@@ -103,7 +103,9 @@ export async function readSermon(env: GitEnv, slug: string): Promise<SermonDetai
     data: m ? (parseDocument(m[1]).toJS() ?? {}) : {},
     body: m ? m[2] : '',
     sha: file.sha,
-    draft: draftFile ? { text: draftFile.text, sha: draftFile.sha } : null,
+    draft: draftFile
+      ? { ...splitDraft(draftFile.text), sha: draftFile.sha }
+      : null,
     hasTranscript: Boolean(transcript),
   };
 }
@@ -146,6 +148,64 @@ export async function saveSermon(
 
 
 /**
+ * The suggested details a cleaning run may leave at the top of a draft:
+ *
+ *     ---
+ *     title: "The Triumphal Entry"
+ *     scripture: "Matthew 21:1-11"
+ *     ---
+ *
+ * Both are guesses made by whatever read the sermon, and they exist to save
+ * the pastor typing what the transcript already says. They reach the sermon's
+ * frontmatter only when he approves the draft, and only into fields nobody has
+ * filled in already.
+ *
+ * A block is only a block if every line in it parses, so a transcript that
+ * opened with a horizontal rule keeps its first paragraphs instead of losing
+ * them to a frontmatter block that was never there.
+ *
+ * Kept here rather than imported for the same reason as stripEditorNotes: this
+ * bundles for Workers. site/scripts/lib/draft-front.mjs is the same rule, and
+ * test/draft-suggestions.test.ts runs both against the same cases.
+ */
+const DRAFT_FRONT = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/;
+const DRAFT_LINE = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(.*)$/;
+
+/** The keys a draft may suggest. Everything else in the block is dropped. */
+export const SUGGESTED_KEYS = ['title', 'scripture'] as const;
+
+function unquote(raw: string): string {
+  const v = raw.trim();
+  if (v.length > 1 && v.startsWith('"') && v.endsWith('"')) {
+    return v.slice(1, -1).replace(/\\(["\\])/g, '$1');
+  }
+  if (v.length > 1 && v.startsWith("'") && v.endsWith("'")) {
+    return v.slice(1, -1).replace(/''/g, "'");
+  }
+  return v;
+}
+
+export function splitDraft(raw: string): { suggested: Record<string, string>; text: string } {
+  const full = String(raw ?? '');
+  const m = DRAFT_FRONT.exec(full);
+  if (!m) return { suggested: {}, text: full.trim() };
+
+  const lines = m[1].split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length || !lines.every((l) => DRAFT_LINE.test(l.trim()))) {
+    return { suggested: {}, text: full.trim() };
+  }
+
+  const suggested: Record<string, string> = {};
+  for (const line of lines) {
+    const f = DRAFT_LINE.exec(line.trim())!;
+    if (!(SUGGESTED_KEYS as readonly string[]).includes(f[1])) continue;
+    const v = unquote(f[2]);
+    if (v) suggested[f[1]] = v;
+  }
+  return { suggested, text: full.slice(m[0].length).trim() };
+}
+
+/**
  * Any line that announces the editor's notes: the HTML comment the cleaning
  * routine asks for, or a heading or bold line in case a run writes it that way.
  */
@@ -179,6 +239,38 @@ export function stripEditorNotes(text: string): string {
 export function hasEditorNotes(text: string): boolean {
   return EDITOR_NOTES.test(text);
 }
+
+/**
+ * Keep an edit to a draft without publishing it.
+ *
+ * Reviewing a long transcript is not one sitting, and the review form is the
+ * only place a person ever sees a draft. Without this, stopping halfway meant
+ * either publishing something half-read or throwing the reading away — so the
+ * Save button now writes the draft back exactly as it stands.
+ *
+ * The suggested title and passage at the top of the draft are NOT written back.
+ * They exist to fill in the form; the same save has just carried them into the
+ * sermon's own frontmatter, and leaving a second copy behind would mean a later
+ * save quietly reinstating a guess the pastor had already replaced.
+ *
+ * Does nothing when there is no draft, and nothing when the text is unchanged —
+ * a Save that only touched the title should not produce a commit saying the
+ * transcript was edited.
+ */
+export async function saveDraft(
+  env: GitEnv, slug: string, text: string, who: { email: string },
+): Promise<void> {
+  const path = `${DRAFTS_DIR}/${slug}.md`;
+  const existing = await readFile(env, path);
+  if (!existing) return;
+  const content = `${text.trim()}\n`;
+  if (content === existing.text) return;
+  await writeFile(env, {
+    path, content, sha: existing.sha,
+    message: commitMessage(`Sermon: save the draft for ${slug} without publishing`, who),
+  });
+}
+
 /**
  * Approve a cleaned transcript: it becomes the sermon's page, and the draft is
  * removed so it cannot be published twice.
@@ -186,9 +278,16 @@ export function hasEditorNotes(text: string): boolean {
  * Refuses if the sermon already has a body. That is somebody's work — possibly
  * typed by hand — and silently replacing it is not a thing an Approve button
  * should be able to do.
+ *
+ * `values` are the details as the reviewer left them on the form, saved in the
+ * same commit as the transcript. Approving used to write the transcript alone
+ * and carry the old details over, so a title and a passage typed while reading
+ * the draft were thrown away by the very button that published it, and had to
+ * be typed again afterwards. Omit them and the sermon keeps what it had.
  */
 export async function publishDraft(
-  env: GitEnv, slug: string, who: { email: string }, edited?: string,
+  env: GitEnv, slug: string, who: { email: string },
+  opts: { edited?: string; values?: Record<string, string> } = {},
 ): Promise<{ words: number }> {
   const sermon = await readSermon(env, slug);
   if (!sermon) throw new Error('That sermon no longer exists.');
@@ -196,15 +295,13 @@ export async function publishDraft(
   if (sermon.body.trim()) throw new Error('That sermon already has text on its page. Clear it first if you mean to replace it.');
 
   // Editor's notes are addressed to the reviewer, not to the congregation.
-  const text = stripEditorNotes(edited ?? sermon.draft.text).trim();
+  const text = stripEditorNotes(opts.edited ?? sermon.draft.text).trim();
 
-  await saveSermon(env, slug, {
-    title: String(sermon.data.title ?? ''),
-    speaker: String(sermon.data.speaker ?? ''),
-    scripture: String(sermon.data.scripture ?? ''),
-    series: String(sermon.data.series ?? ''),
-    image: String(sermon.data.image ?? ''),
-  }, text, sermon.sha, who);
+  const values: Record<string, string> = {};
+  for (const key of EDITABLE) {
+    values[key] = opts.values?.[key] ?? String(sermon.data[key] ?? '');
+  }
+  await saveSermon(env, slug, values, text, sermon.sha, who);
 
   await deleteFile(env, `${DRAFTS_DIR}/${slug}.md`, sermon.draft.sha,
     commitMessage(`Sermon: publish the cleaned transcript for ${slug}`, who));

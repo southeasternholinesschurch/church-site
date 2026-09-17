@@ -2,7 +2,7 @@
 import AppLayout from '../../../layouts/AppLayout.astro';
 import { readForm } from '../../../lib/form';
 import { siteEditingConfigured, GitConflict } from '../../../lib/site-content';
-import { readSermon, saveSermon, listSeries, publishDraft, deleteSermon, fromSlug } from '../../../lib/site-sermons';
+import { readSermon, saveSermon, saveDraft, listSeries, publishDraft, deleteSermon, fromSlug } from '../../../lib/site-sermons';
 
 /**
  * One sermon: its details, and the review step for a cleaned transcript.
@@ -10,6 +10,13 @@ import { readSermon, saveSermon, listSeries, publishDraft, deleteSermon, fromSlu
  * The Approve button is the point. Until now publishing a draft meant running
  * publish-draft.mjs from a terminal, which is not a thing a pastor should have
  * to do to put his own sermon on his own website.
+ *
+ * THE DETAILS AND THE TRANSCRIPT ARE ONE FORM. They were two, and a browser
+ * only submits the form whose button you pressed, so typing a title and a
+ * passage while reading the draft and then pressing Publish sent the draft and
+ * nothing else — the details came back blank and had to be typed a second time.
+ * Everything a person can edit here now goes up in one submission, and the
+ * buttons only decide whether the draft is published along with it.
  */
 const user = Astro.locals.user!;
 const env = Astro.locals.runtime.env;
@@ -17,11 +24,17 @@ const configured = siteEditingConfigured(env);
 const slug = Astro.params.slug!;
 
 let error: string | null = null;
-let published: number | null = null;
 
 if (Astro.request.method === 'POST' && configured) {
   const form = await readForm(Astro.request);
   const action = String(form.get('action') ?? 'save');
+  const values = {
+    title: String(form.get('title') ?? ''),
+    speaker: String(form.get('speaker') ?? ''),
+    scripture: String(form.get('scripture') ?? ''),
+    series: String(form.get('series') ?? ''),
+    image: String(form.get('image') ?? ''),
+  };
   try {
     if (action === 'delete') {
       /*
@@ -38,16 +51,21 @@ if (Astro.request.method === 'POST' && configured) {
       return Astro.redirect('/website/sermons?removed=1', 303);
     }
     if (action === 'publish') {
-      const { words } = await publishDraft(env, slug, user, String(form.get('draft') ?? '') || undefined);
+      const { words } = await publishDraft(env, slug, user, {
+        edited: String(form.get('draft') ?? '') || undefined,
+        values,
+      });
       return Astro.redirect(`/website/sermons/${slug}?published=${words}`, 303);
     }
-    await saveSermon(env, slug, {
-      title: String(form.get('title') ?? ''),
-      speaker: String(form.get('speaker') ?? ''),
-      scripture: String(form.get('scripture') ?? ''),
-      series: String(form.get('series') ?? ''),
-      image: String(form.get('image') ?? ''),
-    }, String(form.get('body') ?? ''), String(form.get('sha') ?? '') || undefined, user);
+    await saveSermon(env, slug, values, String(form.get('body') ?? ''),
+      String(form.get('sha') ?? '') || undefined, user);
+    /*
+     * A draft being reviewed is on this form too, so Save keeps the reading so
+     * far. Second, and separately, because the details are the thing the button
+     * says it saves — if this ever fails, the details are already safe.
+     */
+    const draft = form.get('draft');
+    if (draft !== null) await saveDraft(env, slug, String(draft), user);
     return Astro.redirect(`/website/sermons/${slug}?saved=1`, 303);
   } catch (err) {
     error = err instanceof GitConflict
@@ -65,6 +83,17 @@ const series = configured ? await listSeries(env) : [];
 const meta = fromSlug(slug);
 const v = (k: string) => String(sermon?.data[k] ?? '');
 const youtubeId = v('youtubeId');
+
+/*
+ * A draft under review can carry a suggested title and passage, read off the
+ * sermon by whatever cleaned it. They fill in a field the sermon has left
+ * empty and never overwrite one that is already answered — a guess is worth
+ * less than anything the pastor or the YouTube title has already said.
+ */
+const suggested = sermon?.draft?.suggested ?? {};
+const reviewing = Boolean(sermon?.draft && !sermon.body.trim());
+const field = (k: string) => v(k) || (reviewing ? String(suggested[k] ?? '') : '');
+const guessed = (k: string) => reviewing && !v(k) && Boolean(suggested[k]);
 const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean).length : 0;
 ---
 <AppLayout title={v('title') || slug} user={user}>
@@ -80,39 +109,29 @@ const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean
   {publishedWords && <p class="notice"><strong>Published — {Number(publishedWords).toLocaleString()} words are now on the sermon's page.</strong></p>}
   {error && <p class="notice">{error}</p>}
 
-  {sermon?.draft && !sermon.body.trim() && (
-    <form method="POST" class="card" style="margin-bottom:22px; border:2px solid var(--red);">
-      <input type="hidden" name="action" value="publish" />
-      <h2 style="margin-top:0;">A cleaned transcript is waiting — {draftWords.toLocaleString()} words</h2>
-      <p class="muted" style="margin:-6px 0 14px; max-width:64ch; font-size:15px;">
-        Read it before you publish it. It was cleaned from YouTube's automatic
-        captions, which mishear names and occasionally a verse — in the first one,
-        Ephesians 4:2's "lowliness" came through as "loneliness". Edit anything
-        here and it publishes as you leave it.
-      </p>
-      <textarea name="draft" rows="22"
-                style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.draft.text}</textarea>
-      <p class="muted" style="font-size:13px; margin:8px 0 14px;">
-        Anything inside an <code>editor's notes</code> comment is for you and is
-        removed when it publishes.
-      </p>
-      <button class="btn" type="submit">Publish this to the sermon's page</button>
-    </form>
-  )}
-
   {sermon && (
     <form method="POST">
       <input type="hidden" name="sha" value={sermon.sha} />
+
       <div class="card" style="margin-bottom:20px;">
         <h2 style="margin-top:0;">Details</h2>
-        <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
-          These normally come from the YouTube title. Renaming the video and
-          waiting for the nightly import fixes them everywhere at once; edit
-          here when that is not what you want.
+        <p class="muted" style="margin:-6px 0 14px; font-size:15px; max-width:66ch;">
+          The service name and speaker come from the YouTube title. Renaming the
+          video and waiting for the nightly import fixes those everywhere at
+          once; edit here when that is not what you want. The sermon's own title
+          and passage are not on YouTube at all, so they are typed here.
         </p>
-        <label class="field"><span>Sermon title</span><input name="title" value={v('title')} /></label>
+        <label class="field">
+          <span>Sermon title</span>
+          <input name="title" value={field('title')} />
+          {guessed('title') && <small class="muted">Suggested from the transcript — change it to whatever he called it.</small>}
+        </label>
         <label class="field"><span>Speaker</span><input name="speaker" value={v('speaker')} /></label>
-        <label class="field"><span>Scripture</span><input name="scripture" value={v('scripture')} placeholder="Ephesians 1:16–19" /></label>
+        <label class="field">
+          <span>Scripture</span>
+          <input name="scripture" value={field('scripture')} placeholder="Ephesians 1:16–19" />
+          {guessed('scripture') && <small class="muted">Suggested from the transcript — worth checking against what he read.</small>}
+        </label>
         <label class="field" style="max-width:340px;">
           <span>Series</span>
           <select name="series">
@@ -126,19 +145,51 @@ const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean
         </label>
       </div>
 
-      <div class="card" style="margin-bottom:20px;">
-        <h2 style="margin-top:0;">The page text</h2>
-        {!sermon.body.trim() && !sermon.draft && (
-          <p class="muted" style="margin:-6px 0 12px; font-size:15px;">
-            Nothing here yet. {sermon.hasTranscript
-              ? 'The transcript has been fetched — the Monday and Thursday routine will clean it into a draft.'
-              : 'No transcript yet either; the nightly job fetches those from YouTube.'}
+      {reviewing ? (
+        <div class="card" style="margin-bottom:20px; border:2px solid var(--red);">
+          <h2 style="margin-top:0;">A cleaned transcript is waiting — {draftWords.toLocaleString()} words</h2>
+          <p class="muted" style="margin:-6px 0 14px; max-width:64ch; font-size:15px;">
+            Read it before you publish it. It was cleaned from YouTube's automatic
+            captions, which mishear names and occasionally a verse — in the first one,
+            Ephesians 4:2's "lowliness" came through as "loneliness". Edit anything
+            here and it publishes as you leave it.
           </p>
-        )}
-        <textarea name="body" rows="14" style="font-family:ui-monospace,monospace; font-size:13.5px;">{sermon.body.trim()}</textarea>
-      </div>
+          <textarea name="draft" rows="22"
+                    style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.draft!.text}</textarea>
+          <p class="muted" style="font-size:13px; margin:8px 0 0;">
+            Anything below an <code>editor's notes</code> line is for you and is
+            removed when it publishes.
+          </p>
+        </div>
+      ) : (
+        <div class="card" style="margin-bottom:20px;">
+          <h2 style="margin-top:0;">The page text</h2>
+          {!sermon.body.trim() && (
+            <p class="muted" style="margin:-6px 0 12px; font-size:15px;">
+              Nothing here yet. {sermon.hasTranscript
+                ? 'The transcript has been fetched — the Monday and Thursday routine will clean it into a draft.'
+                : 'No transcript yet either; the nightly job fetches those from YouTube.'}
+            </p>
+          )}
+          <textarea name="body" rows="14" style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.body.trim()}</textarea>
+        </div>
+      )}
 
-      <button class="btn" type="submit">Save details</button>
+      {/*
+        Save comes first in the markup deliberately. Pressing Enter in a text
+        field submits a form through its first button, and that should never be
+        the one that puts a sermon on the website.
+      */}
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+        <button class="btn" type="submit" name="action" value="save">
+          {reviewing ? 'Save without publishing' : 'Save'}
+        </button>
+        {reviewing && (
+          <button class="btn" type="submit" name="action" value="publish">
+            Publish this to the sermon's page
+          </button>
+        )}
+      </div>
     </form>
   )}
 

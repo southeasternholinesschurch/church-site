@@ -113,6 +113,41 @@ sermon ends in a bulleted list. Keep the marker where it belongs and both hold.
 To `site/transcripts/drafts/<slug>.md`. **Nothing on the site reads this
 directory** — that is deliberate. Nothing publishes without the pastor.
 
+Open it with the passage and a title, when you have them:
+
+```markdown
+---
+title: "The Triumphal Entry"
+scripture: "Matthew 21:1-11"
+---
+
+Before we get into the lesson — somebody sent pictures yesterday…
+```
+
+You have just read the whole service, so you know what he preached from. That
+is worth writing down: none of it is in the YouTube metadata, and without this
+somebody types it by hand for every sermon in the archive.
+
+**The scripture is the passage the message is built on** — the one he directs
+attention to at the start, or reads before he begins, or returns to throughout.
+Not every verse he cites along the way; a sermon quotes a dozen and is *from*
+one. Write it as `Book chapter:verse`, KJV book names, a range where he read a
+range: `Isaiah 57:15`, `Ephesians 4:1-6`, `Mark 6`.
+
+**The title is a name for the sermon**, four or five words, taken from his own
+words where he gives you one — a phrase he repeats, the thing he says the
+message is about. Not a summary of it.
+
+**Both are guesses, and an omitted key costs nothing.** They land in the review
+form as a starting point the pastor types over, and they only ever fill a field
+the sermon has left empty — a title already on the sermon wins, always. So if
+he never names a text, leave `scripture` out rather than picking the first verse
+quoted; a wrong reference under a sermon is worse than a blank one. Say in your
+report which ones you left out and why.
+
+The block is optional and only these two keys are read — anything else in it is
+ignored. A draft with no block at all is still a perfectly good draft.
+
 ## 6. Commit and report
 
 ```bash
@@ -121,9 +156,10 @@ git commit -m "Transcripts: cleaned <slug> (draft, awaiting review)"
 git pull --rebase origin main && git push origin main
 ```
 
-Then tell the pastor, briefly: which sermons were drafted, the word count against the
-original, and anything you are unsure about — a passage you could not hear, a
-name you guessed at, a scripture you could not place.
+Then tell the pastor, briefly: which sermons were drafted, the word count
+against the original, the title and passage you suggested for each, and anything
+you are unsure about — a passage you could not hear, a name you guessed at, a
+scripture you could not place.
 
 **Say what you were unsure about.** Silent confidence is the failure mode here.
 
@@ -135,9 +171,14 @@ He reads the draft, edits if he wants, then:
 cd site && node scripts/publish-draft.mjs <slug>
 ```
 
-That moves the text into the sermon's markdown body, where the page already
-renders it, and deletes the draft. Eventually this becomes an Approve button in
-the dashboard.
+That cuts everything from `<!-- editor's notes -->` onward, moves the rest into
+the sermon's markdown body where the page already renders it, fills in the title
+and scripture from the draft's block if the sermon has none of its own, and
+deletes the draft.
+
+He can do it from the dashboard instead — the sermon's page there shows the
+draft, the title and the passage together, and one button saves all three.
+`--list` shows each waiting draft with whatever it suggested.
 
 ---
 
