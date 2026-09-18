@@ -42,7 +42,7 @@ bad('over 900 characters', invalidTemplateReason('x'.repeat(901) + '{link}'));
 
 console.log('\nreasonable rewordings are accepted');
 ok('short', invalidTemplateReason('Directory: {link}'));
-ok('chatty', invalidTemplateReason('Hi! Here is your church directory link: {link} - Pastor the pastor'));
+ok('chatty', invalidTemplateReason('Hi! Here is your church directory link: {link} - Pastor Reeve'));
 ok('link first', invalidTemplateReason('{link} is your personal directory link.'));
 ok('900 exactly', invalidTemplateReason('x'.repeat(894) + '{link}'));
 

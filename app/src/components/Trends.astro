@@ -1,0 +1,194 @@
+---
+import { getDb, schema } from '../db';
+import { sql } from 'drizzle-orm';
+import { kindLabel, formatDate, KIDS_KIND_IDS } from '../lib/services';
+
+/**
+ * Attendance over time: the chart, the regulars who have stopped coming, and
+ * the last dozen services.
+ *
+ * This was a tab of its own next to Attendance. It is a fold on the Attendance
+ * page now, because it is not a place you go — it is the second half of the
+ * question "how was Sunday", and the first half is the table it now sits under.
+ *
+ * It brings its own <details> with it rather than being wrapped by the page,
+ * because the summary line has to state the average and the number of services,
+ * and those are numbers only this file has.
+ */
+interface Props {
+  /** Which service kind to chart. */
+  kind: string;
+  /** Whether the fold starts open. */
+  open?: boolean;
+  /** How the page wants the filter chips to link. Must carry whatever the page
+   *  needs to reopen this fold and scroll back to it. */
+  linkTo: (kind: string) => string;
+}
+const { kind: kindFilter, open = false, linkTo } = Astro.props;
+
+const db = getDb(Astro.locals.runtime.env);
+
+/** Every service with its headcount, oldest first so the chart reads left to right. */
+const series = await db.all<{ id: number; date: string; kind: string; members: number; visitors: number }>(sql`
+  SELECT s.id, s.date, s.kind,
+    (SELECT count(*) FROM attendance a WHERE a.service_id = s.id) AS members,
+    (SELECT count(*) FROM visitors v WHERE v.service_id = s.id) AS visitors
+  FROM services s
+  ${kindFilter === 'all'
+      /* "Every service" means every service of the CONGREGATION's. Children's
+       * registers are counted in the Fairhaven Kids section; folding them in here would
+       * silently inflate the church's own attendance line by the same children
+       * twice on a Sunday. */
+      ? sql`WHERE s.kind NOT IN (${sql.join(KIDS_KIND_IDS.map((k) => sql`${k}`), sql`, `)})`
+      : sql`WHERE s.kind = ${kindFilter}`}
+  ORDER BY s.date ASC
+  LIMIT 104
+`);
+
+const points = series.map((s) => ({ ...s, total: s.members + s.visitors }));
+const max = Math.max(10, ...points.map((p) => p.total));
+
+// --- chart geometry (inline SVG; no charting library to rot) ---
+const W = 900, H = 260, PAD_L = 38, PAD_B = 28, PAD_T = 12;
+const plotW = W - PAD_L - 10, plotH = H - PAD_B - PAD_T;
+const x = (i: number) => PAD_L + (points.length <= 1 ? plotW / 2 : (i / (points.length - 1)) * plotW);
+const y = (v: number) => PAD_T + plotH - (v / max) * plotH;
+const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(' ');
+const area = points.length ? `${line} L${x(points.length - 1).toFixed(1)},${PAD_T + plotH} L${x(0).toFixed(1)},${PAD_T + plotH} Z` : '';
+const ticks = [0, Math.round(max / 2), max];
+
+/**
+ * Regulars who have stopped coming — the brief asks for this specifically, and
+ * it is the one number here that prompts a phone call rather than a report.
+ *
+ * "Regular" is deliberately loose: present at 3 or more of the 8 services
+ * before the last 4, and absent from all of the last 4. Someone on holiday for
+ * a fortnight does not appear; someone who quietly stopped in March does.
+ */
+const recentIds = points.slice(-4).map((p) => p.id);
+const priorIds = points.slice(-12, -4).map((p) => p.id);
+let missing: { id: number; firstName: string; lastName: string; before: number; lastSeen: string }[] = [];
+if (recentIds.length === 4 && priorIds.length >= 4) {
+  missing = await db.all(sql`
+    SELECT p.id, p.first_name AS firstName, p.last_name AS lastName,
+      count(a.id) AS before,
+      (SELECT max(s2.date) FROM attendance a2 JOIN services s2 ON s2.id = a2.service_id
+        WHERE a2.person_id = p.id) AS lastSeen
+    FROM people p
+    JOIN attendance a ON a.person_id = p.id
+    WHERE p.archived = 0
+      AND a.service_id IN (${sql.join(priorIds.map((i) => sql`${i}`), sql`, `)})
+    GROUP BY p.id
+    HAVING before >= 3
+      AND p.id NOT IN (
+        SELECT person_id FROM attendance
+        WHERE service_id IN (${sql.join(recentIds.map((i) => sql`${i}`), sql`, `)})
+      )
+    ORDER BY before DESC, lastName ASC
+    LIMIT 25
+  `);
+}
+
+/* Deliberately a short hand-picked list, not every kind — these are the four
+ * lines the pastor actually compares. No Fairhaven Kids kind belongs here: a children's
+ * register is not a service the congregation attended. */
+const KINDS = [['sunday-morning', 'Sunday Morning'], ['sunday-evening', 'Sunday Evening'],
+               ['wednesday', 'Wednesday'], ['all', 'Every service']];
+const recent = [...points].reverse().slice(0, 12);
+const avg = points.length ? Math.round(points.reduce((a, p) => a + p.total, 0) / points.length) : 0;
+const thisKind = KINDS.find(([k]) => k === kindFilter)?.[1] ?? kindLabel(kindFilter);
+---
+<details class="card" id="trends" open={open}>
+  <summary class="fold">
+    Trends
+    <span class="muted fold__n">
+      {points.length === 0 ? 'nothing to chart yet'
+        : `${thisKind} · ${avg} on average over ${points.length} ${points.length === 1 ? 'service' : 'services'}`}
+    </span>
+  </summary>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin:18px 0 20px;">
+    {KINDS.map(([k, label]) => (
+      <a href={linkTo(k)} class="chip"
+         style={kindFilter === k ? 'background:var(--ink);color:var(--cream);text-decoration:none' : 'text-decoration:none'}>{label}</a>
+    ))}
+  </div>
+
+  {points.length === 0 ? (
+    <p class="muted" style="margin:0;">
+      Take attendance at a service or two and the graph builds itself. The old
+      spreadsheets were empty templates, so this starts from your first real
+      check-in rather than from imported history.
+    </p>
+  ) : (
+    <>
+      <div style="display:flex; gap:26px; flex-wrap:wrap; margin-bottom:14px;">
+        <div><p class="label muted" style="margin:0;">Services</p><p style="font-size:26px;margin:2px 0 0;">{points.length}</p></div>
+        <div><p class="label muted" style="margin:0;">Average</p><p style="font-size:26px;margin:2px 0 0;">{avg}</p></div>
+        <div><p class="label muted" style="margin:0;">Most recent</p><p style="font-size:26px;margin:2px 0 0;">{points[points.length - 1]!.total}</p></div>
+      </div>
+      {/* The only thing on the app that scrolls sideways on purpose. A line
+          chart squeezed to 360px is unreadable, so it keeps its width and
+          the note below tells the reader it moves rather than leaving them
+          to discover a cut-off edge. */}
+      <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style="min-width:520px; display:block;"
+             role="img" aria-label={`Attendance over the last ${points.length} services`}>
+          {ticks.map((t) => (
+            <>
+              <line x1={PAD_L} x2={W - 10} y1={y(t)} y2={y(t)} stroke="rgba(26,21,18,.12)" stroke-width="1" />
+              <text x={PAD_L - 8} y={y(t) + 4} text-anchor="end" font-size="11" fill="#4a4038">{t}</text>
+            </>
+          ))}
+          {points.length > 1 && <path d={area} fill="rgba(176,24,24,.10)" />}
+          <path d={line} fill="none" stroke="#b01818" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+          {points.map((p, i) => <circle cx={x(i)} cy={y(p.total)} r="3.5" fill="#b01818"><title>{formatDate(p.date)}: {p.total}</title></circle>)}
+          <text x={PAD_L} y={H - 8} font-size="11" fill="#4a4038">{formatDate(points[0]!.date)}</text>
+          {points.length > 1 && <text x={W - 10} y={H - 8} font-size="11" fill="#4a4038" text-anchor="end">{formatDate(points[points.length - 1]!.date)}</text>}
+        </svg>
+      </div>
+      <p class="muted chart-hint" style="margin:8px 0 0; font-size:13px;">Swipe the chart sideways to see every service.</p>
+
+      {missing.length > 0 && (
+        <div style="margin-top:26px;">
+          <h3 style="margin:0 0 4px;">Haven't been in a while</h3>
+          <p class="muted" style="margin:0 0 12px; font-size:15px;">
+            Came to at least 3 of the previous 8 services, then missed the last 4.
+            Long enough to mean something; short enough that a holiday doesn't land here.
+          </p>
+          <table>
+            <thead><tr><th>Name</th><th>Last seen</th></tr></thead>
+            <tbody>
+              {missing.map((m) => (
+                <tr>
+                  <td><a href={`/people/${m.id}`}>{m.lastName}, {m.firstName}</a></td>
+                  <td>{m.lastSeen ? formatDate(m.lastSeen) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div class="t-wrap" style="overflow-x:auto; margin-top:26px;">
+        <table class="t-stack">
+          <thead><tr><th>Date</th><th>Service</th><th>Members</th><th>Visitors</th><th>Total</th></tr></thead>
+          <tbody>
+            {recent.map((p) => (
+              <tr>
+                <td>{formatDate(p.date)}</td><td data-label="Service">{kindLabel(p.kind)}</td>
+                <td data-label="Members">{p.members}</td><td data-label="Visitors">{p.visitors || <span class="muted">—</span>}</td>
+                <td data-label="Total"><strong>{p.total}</strong></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+</details>
+
+<style>
+  .chart-hint { display: none; }
+  @media (max-width: 700px) { .chart-hint { display: block; } }
+</style>

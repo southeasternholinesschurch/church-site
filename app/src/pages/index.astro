@@ -11,44 +11,33 @@ const [counts] = await db.select({
   adults: sql<number>`sum(case when adult_child = 'adult' then 1 else 0 end)`,
   children: sql<number>`sum(case when adult_child = 'child' then 1 else 0 end)`,
   unknown: sql<number>`sum(case when adult_child = 'unknown' then 1 else 0 end)`,
-  consented: sql<number>`sum(case when include_in_directory = 1 then 1 else 0 end)`,
 }).from(schema.people).where(eq(schema.people.archived, false));
 
 /*
- * Directory rollout, counted the way access actually works.
+ * The directory rollout card used to live here — "X of Y listed adults have
+ * opened their link", with a progress bar.
  *
- * This card used to report how many adults had an EMAIL ADDRESS and said
- * invitations were sent by email. That was true of the original plan and has
- * never been true of what was built: invites go by TEXT, and the gate is a
- * phone number plus texting consent. So it measured something irrelevant and
- * announced a number of people who "cannot be invited yet" that had nothing to
- * do with whether they could be invited.
+ * It is gone, and not because it was wrong. It was right, and it finished:
+ * nearly everyone has opened the link, so the bar sat at the top of the page
+ * reporting a number that no longer moves. A dashboard's best space should go
+ * to what is done every week, not to what was done once. The same figures are
+ * still counted on /invites, which is where you go when you actually want to
+ * chase the last few people.
+ *
+ * What replaces it is the four screens the pastor opens most.
  */
-const [dir] = await db.select({
-  listed: sql<number>`sum(case when adult_child = 'adult' and include_in_directory = 1 then 1 else 0 end)`,
-  active: sql<number>`sum(case when directory_status = 'active' then 1 else 0 end)`,
-  invited: sql<number>`sum(case when directory_status = 'invited' then 1 else 0 end)`,
-  unreachable: sql<number>`sum(case when adult_child = 'adult' and include_in_directory = 1
-    and directory_status <> 'active'
-    and (phone_e164 is null or phone_e164 = '' or sms_consent <> 'opted_in') then 1 else 0 end)`,
-}).from(schema.people).where(eq(schema.people.archived, false));
 
 const recent = await db.select().from(schema.services)
   .orderBy(desc(schema.services.date)).limit(5);
 
 const total = counts?.total ?? 0;
 const unknown = counts?.unknown ?? 0;
-const listed = dir?.listed ?? 0;
-const inDirectory = dir?.active ?? 0;
-const waitingToOpen = dir?.invited ?? 0;
-const unreachable = dir?.unreachable ?? 0;
-const pct = listed > 0 ? Math.round((inDirectory / listed) * 100) : 0;
 ---
 <AppLayout title="Dashboard" user={user} backdrop>
   <h1>Dashboard</h1>
 
   {total === 0 ? (
-    <div class="card">
+    <div class="card" style="margin-bottom:26px;">
       <h2>No people yet</h2>
       <p class="muted">
         The database is empty. Import the Breeze export to get started — see
@@ -59,7 +48,12 @@ const pct = listed > 0 ? Math.round((inDirectory / listed) * 100) : 0;
     </div>
   ) : (
     <>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:26px;">
+      {/* 140px rather than 160px, which is the difference between two of these
+          per row on a 375px phone and four stacked full-width cards pushing the
+          quick links below the fold — the whole point of the quick links being
+          that they are reached without scrolling. Four items and auto-fit still
+          means four across on a desktop. */}
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin-bottom:26px;">
         <div class="card"><p class="label muted">People</p><p style="font-size:32px;margin:4px 0 0;">{total}</p></div>
         <div class="card"><p class="label muted">Adults</p><p style="font-size:32px;margin:4px 0 0;">{counts?.adults ?? 0}</p></div>
         <div class="card"><p class="label muted">Children</p><p style="font-size:32px;margin:4px 0 0;">{counts?.children ?? 0}</p></div>
@@ -74,26 +68,54 @@ const pct = listed > 0 ? Math.round((inDirectory / listed) * 100) : 0;
           children in attendance. <a href="/people?filter=unknown">Review them</a>.
         </p>
       )}
-
-      <div class="card" style="margin-bottom:22px;">
-        <h2>Directory access</h2>
-        <p style="margin:0 0 12px; font-size:19px;">
-          <strong>{inDirectory}</strong> of {listed} listed adults have opened their
-          link{listed > 0 && <> — {pct}%</>}.
-        </p>
-        <div class="bar" aria-hidden="true"><div class="bar__fill" style={`width:${pct}%`}></div></div>
-        <dl class="dtally">
-          <div><dt>Texted, waiting for them to open it</dt><dd>{waitingToOpen}</dd></div>
-          <div><dt>No number, or not opted in to texts</dt><dd>{unreachable}</dd></div>
-        </dl>
-        <p class="muted" style="margin:10px 0 0; font-size:14px;">
-          Invitations go by text, not email. Anyone without a textable number needs
-          their link handed over another way — it is on their own page.
-          {' '}<a href="/invites">Send invitations</a>.
-        </p>
-      </div>
     </>
   )}
+
+  {/* The four most-used screens, as targets big enough to hit on a phone
+      without aiming. Deliberately not a fifth: the moment this becomes a menu
+      it stops being faster than the nav bar above it. */}
+  <nav class="quick" aria-label="Jump to">
+    <a href="/messaging">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
+      </svg>
+      <span class="quick__l">Send a text</span>
+      <span class="quick__n">Everyone, or one group</span>
+    </a>
+
+    <a href="/attendance">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 11.5l2.6 2.6L21 4.7" />
+        <path d="M20.5 12v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2H16" />
+      </svg>
+      <span class="quick__l">Take attendance</span>
+      <span class="quick__n">Start or reopen a service</span>
+    </a>
+
+    <a href="/bulletin">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 2.75H6.5a2 2 0 0 0-2 2v14.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8.25z" />
+        <path d="M14 2.75v5.5h5.5" />
+        <path d="M8.5 13.5h7M8.5 17h7M8.5 10h2.5" />
+      </svg>
+      <span class="quick__l">Bulletin</span>
+      <span class="quick__n">Build this week’s</span>
+    </a>
+
+    <a href="/signups">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M15.5 4.5h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h2" />
+        <rect x="8.5" y="2.5" width="7" height="4" rx="1.2" />
+        <path d="M8.75 11.5h6.5M8.75 15.5h4" />
+      </svg>
+      <span class="quick__l">Sign-up sheets</span>
+      <span class="quick__n">Meals, nursery, helpers</span>
+    </a>
+  </nav>
 
   <div class="card">
     <h2>Recent services</h2>
@@ -113,12 +135,32 @@ const pct = listed > 0 ? Math.round((inDirectory / listed) * 100) : 0;
 </AppLayout>
 
 <style>
-  .bar { height: 8px; border-radius: 999px; background: var(--cream-deep); overflow: hidden; margin-bottom: 14px; }
-  .bar__fill { height: 100%; background: var(--ink); }
-  .dtally { margin: 0; display: grid; gap: 2px; }
-  .dtally div { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0;
-                border-bottom: 1px solid var(--hair); }
-  .dtally div:last-child { border-bottom: 0; }
-  .dtally dt { margin: 0; color: var(--ink-soft); font-size: 15px; }
-  .dtally dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* Four squares. Two-up on a phone, which keeps them square there as well —
+     a 4-wide row on a 375px screen gives tiles too small to label. */
+  .quick {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 14px; margin-bottom: 26px;
+  }
+  .quick a {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 9px; text-align: center; aspect-ratio: 1; max-height: 200px;
+    padding: 16px 12px; border-radius: var(--radius-lg);
+    border: 1px solid var(--hair); background: rgba(255, 255, 255, .94);
+    color: var(--ink); text-decoration: none;
+    transition: background .12s ease, border-color .12s ease, transform .12s ease;
+  }
+  .quick a:hover { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+  .quick a:active { transform: translateY(1px); }
+  .quick svg { width: 30px; height: 30px; }
+  .quick__l { font-weight: 700; font-size: 17px; line-height: 1.25; }
+  .quick__n { font-size: 13px; line-height: 1.35; color: var(--ink-soft); }
+  .quick a:hover .quick__n { color: rgba(244, 239, 231, .8); }
+
+  @media (max-width: 720px) {
+    .quick { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .quick a { transition: none; }
+    .quick a:active { transform: none; }
+  }
 </style>

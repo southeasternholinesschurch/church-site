@@ -43,7 +43,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!smsConfigured(env)) return json({ error: 'Twilio is not configured yet.' }, 400);
 
   const body = (await request.json().catch(() => null)) as
-    { body?: string; groupId?: number | null; to?: string; offset?: number } | null;
+    { body?: string; groupId?: number | null; personIds?: number[];
+      to?: string; offset?: number } | null;
   const text = (body?.body ?? '').trim();
   if (!text) return json({ error: 'The message is empty.' }, 400);
 
@@ -71,8 +72,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
     };
   } else {
     const groupId = body?.groupId ? Number(body.groupId) : null;
-    audience = await buildAudience(env, groupId);
-    if (!audience.handsets.length) return json({ error: 'Nobody in that group can be texted.' }, 400);
+    /*
+     * A hand-picked list of people, from the compose screen.
+     *
+     * Sanitised to positive integers here rather than trusted, and then handed
+     * to buildAudience, which applies the SAME consent filter it applies to a
+     * group. Picking somebody by name is not a way around their opt-out — it
+     * just means the send reaches fewer people than were ticked.
+     */
+    const personIds = Array.isArray(body?.personIds)
+      ? body.personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : null;
+    audience = await buildAudience(env, groupId, personIds);
+    if (!audience.handsets.length) {
+      return json({ error: personIds
+        ? 'None of the people you picked can be texted.'
+        : 'Nobody in that group can be texted.' }, 400);
+    }
   }
 
   const db = getDb(env);

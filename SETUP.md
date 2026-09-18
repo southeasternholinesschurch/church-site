@@ -23,6 +23,11 @@ and visitor check-in, groups, trends, a bulletin editor that publishes to the
 website, and text messaging: broadcasts, replies, scheduled texts, and
 automatic birthday texts.
 
+**Sign-up sheets** — a meal train, a volunteer list, or a pitch-in with the
+dishes named. One link for the bulletin, a text or a QR code on the pews. People
+see which days are taken, and can ask to be texted the day before theirs. There
+is nothing to set up: they work as soon as the app is deployed.
+
 **A members' directory** members reach by a personal link texted to them, with
 photos, and which each member can edit for themselves.
 

@@ -9,6 +9,12 @@
   --red: #b01818;
   --red-deep: #8c1212;
   --hair: rgba(26, 21, 18, 0.14);
+  /* The quiet end of the palette, for the footer that carries your own name and
+     the way out. NOT a literal light tan: #c8b89a reads as "tan" but sits at
+     1.70:1 on the cream ground, which is not quiet, it is invisible. This is
+     4.57:1 — still obviously the tan of the two, and still legible to somebody
+     reading it on a phone in a sunlit doorway. */
+  --tan: #7b6a4e;
   --ok: #1f6b3a;
   --radius: 6px;
   --radius-lg: 12px;
@@ -47,18 +53,48 @@ h2 { font-size: 21px; }
   .bar__in { gap: 10px 14px; padding: 8px var(--pad); }
   .bar__brand { font-size: 15px; }
   /* Roomy enough that the row wraps to two comfortable lines instead of five
-     items crammed edge to edge. the pastor said vertical density is not the issue;
+     items crammed edge to edge. The pastor said vertical density is not the issue;
      legibility across the width is. */
   .bar__nav { gap: 12px 20px; width: 100%; margin-left: 0; }
   .bar__nav a, .bar__nav button { font-size: 15px !important; }
-  /* The signed-in name is reassurance, not navigation — it can go. */
-  .bar__who { display: none; }
 }
 .bar__brand { font-weight: 700; letter-spacing: .04em; color: var(--cream); text-decoration: none; }
 .bar__nav { display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }
 .bar__nav a { color: rgba(244,239,231,.82); text-decoration: none; font-size: 15px; }
 .bar__nav a:hover, .bar__nav a[aria-current="page"] { color: var(--cream); }
-.bar__who { font-size: 13px; color: rgba(244,239,231,.6); }
+
+/* --- who you are, and the way out ---
+ *
+ * Both used to sit at the right-hand end of the app bar, and neither earned a
+ * slot there. Your own name is not news, and signing out is something you do
+ * once at the end of a day, if ever — on a bar that had fourteen tabs on it
+ * they were two of the sixteen things competing for the same row. On a phone
+ * the name was already being hidden outright, which says what it was worth.
+ *
+ * So: the foot of every page, small and tan. The button is a real <button> in
+ * a real form — signing out is a POST, and it has to stay one so that a
+ * prefetch or a crawler cannot sign anybody out by following a link.
+ */
+.acct { border-top: 1px solid var(--hair); margin-top: 40px;
+        position: relative; z-index: 1; }
+.acct__in { display: flex; align-items: baseline; gap: 4px 16px; flex-wrap: wrap;
+            font-size: 13px; color: var(--tan); padding-block: 16px 28px; }
+.acct form { margin: 0; }
+.acct button { background: none; border: 0; font: inherit; color: var(--tan);
+               text-decoration: underline; text-underline-offset: 3px;
+               cursor: pointer;
+               /* Not 44px: this is a text link in a footer, not a control you
+                  reach for one-handed mid-task. The vertical padding still
+                  gives it a thumb-sized target without drawing a box. */
+               padding: 6px 0; }
+.acct button:hover { color: var(--ink); }
+.acct button:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
+/* On a phone it goes back to being a 44px target like every other control in
+   this file. The text stays 13px — what grows is the reachable area, not the
+   emphasis. */
+@media (max-width: 700px) {
+  .acct button { padding: 12px 0; }
+}
 
 /* ---- controls: 44px minimum, because these are used one-handed ---- */
 .btn {
@@ -79,6 +115,21 @@ h2 { font-size: 21px; }
   width: 100%; font: inherit; min-height: 44px; padding: 9px 12px;
   border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; color: var(--ink);
 }
+
+/*
+ * A textarea that is NOT inside a .field used to fall back to the browser's
+ * default of about twenty characters a line. That is how the sermon draft came
+ * to be reviewed through a 184px slot inside a 1032px card, with 804px of the
+ * card empty beside it — and the page-text and content editors were the same.
+ *
+ * Every textarea in this app is for writing into a form, so the width belongs
+ * on the element rather than on whichever wrapper happens to be around it.
+ */
+textarea {
+  width: 100%; font: inherit; padding: 9px 12px; resize: vertical;
+  border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; color: var(--ink);
+}
+textarea:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 .field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible {
   outline: 2px solid var(--red); outline-offset: 2px;
 }
@@ -87,6 +138,36 @@ h2 { font-size: 21px; }
 .notice { border-left: 3px solid var(--red); background: #f7e9e9; color: var(--red-deep);
           padding: 12px 16px; border-radius: 0 var(--radius) var(--radius) 0; margin: 0 0 20px; }
 .notice--ok { border-color: var(--ok); background: #e8f2eb; color: #16532c; }
+
+/* --- a card that folds ---
+   For the parts of a screen that are set once and then read at a glance: the
+   birthday rule at the bottom of Messaging, the list of groups under People.
+   Two rules make it work:
+
+   1. The fold SAYS WHAT IS INSIDE IT while shut. `.fold__n` carries the count,
+      or "off", or the date of the newest one. The whole point of shutting a
+      section is being able to tell from outside whether it is worth opening,
+      and a summary that reads only "Replies" defeats that.
+
+   2. It has to LOOK like it opens. `display:flex` on a <summary> throws the
+      browser's own triangle away — the marker belongs to `display:list-item` —
+      so the chevron below is drawn by hand. Without it this is a heading that
+      mysteriously does nothing until clicked. */
+.fold { cursor: pointer; font-size: 21px; font-weight: 700; line-height: 1.3;
+        display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+        list-style: none; }
+.fold::-webkit-details-marker { display: none; }
+.fold::before {
+  content: ""; flex: none; align-self: center; width: 8px; height: 8px;
+  margin-right: 2px; border-right: 2px solid var(--ink-soft);
+  border-bottom: 2px solid var(--ink-soft); transform: rotate(-45deg);
+  transition: transform .15s ease;
+}
+details[open] > .fold::before { transform: rotate(45deg); }
+.fold__n { font-size: 14px; font-weight: 400; margin-left: auto; }
+.fold:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
+@media (max-width: 560px) { .fold__n { margin-left: 0; width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .fold::before { transition: none; } }
 
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
@@ -127,3 +208,28 @@ tr:hover td { background: var(--cream-deep); }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden;
                    clip: rect(0 0 0 0); white-space: nowrap; }
+
+/*
+ * Reading a four-thousand-word transcript — the draft awaiting review, and the
+ * same text again if it is edited after publishing.
+ *
+ * The draft was being reviewed through a 184px slot — twenty-two characters a
+ * line — inside a 1032px card, because a textarea outside a .field got no
+ * width at all. The base rule above fixes that part.
+ *
+ * The rest is deliberately NOT "as wide as the window". At 1440px the full
+ * width comes to 162 characters a line, and the drafts are two different
+ * shapes: the earlier ones hard-wrap at 80, the recent ones run to
+ * 2,400-character paragraphs that soft-wrap to whatever they are given. A
+ * hundred or so characters suits both — long enough that a hard-wrapped line
+ * never breaks twice, short enough that the eye finds the left margin again.
+ *
+ * The gain goes into HEIGHT instead, which is what actually puts more of the
+ * sermon in front of you, and the corner still drags if a particular draft
+ * wants different.
+ */
+.transcript {
+  max-width: 108ch;
+  height: clamp(400px, 70vh, 1100px);
+  resize: both;
+}

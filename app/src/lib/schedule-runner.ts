@@ -12,13 +12,16 @@
  * capped by a hard platform limit. Keeping them apart means a slow or partial
  * send never loses the record of who was supposed to get it.
  */
-import { and, eq, inArray, lte } from 'drizzle-orm';
+import { and, eq, inArray, lte, ne, sql } from 'drizzle-orm';
 import { getDb, schema, nowIso } from '../db';
 import { buildAudience } from './recipients';
 import { sendOne, smsConfigured, countSegments, type SmsEnv } from './sms';
 import { dueOn, hasBirthdayOn, localNow, parseHhmm, queueKey, renderBody,
          GRACE_MINUTES, type ScheduleRow } from './schedules';
 import { getBirthdaySettings } from './birthday-settings';
+import { consentByNumbers } from './consent';
+import { firstNameOf, reminderBodyFor, reminderDue, reminderKey, reminderMissed,
+         renderReminder, shortWhen } from './signups';
 
 /**
  * Twilio sends per cron run.
@@ -98,6 +101,11 @@ export async function expandDue(env: Env, now = new Date()): Promise<ExpandResul
   const bq = await expandBirthdays(env, local);
   if (bq) { queued += bq.queued; schedules++; detail.push(bq.detail); }
 
+  // --- "you are bringing a meal tomorrow" ---------------------------------
+  // Same shape again: a standing arrangement, not a rule anybody creates.
+  const sq = await expandSignupReminders(env, local);
+  if (sq) { queued += sq.queued; schedules++; detail.push(sq.detail); }
+
   return { queued, schedules, detail };
 }
 
@@ -143,6 +151,142 @@ async function expandBirthdays(env: Env, local: ReturnType<typeof localNow>) {
     if (ins[0]) queued++;
   }
   return { queued, detail: `Birthdays: ${queued} queued (${targets.length} today)` };
+}
+
+/**
+ * Sign-up reminders: "you signed up to bring a meal tomorrow."
+ *
+ * Fires at 09:00 church time the day BEFORE the day somebody claimed, and stays
+ * sendable until 09:00 on the day itself. Both halves of that window live in
+ * reminderDue() in lib/signups.ts, which is pure and tested with an injected
+ * clock — this function does the reading and writing and decides nothing.
+ *
+ * `source_key` is `signup:{id}`. A sign-up is for exactly ONE slot on ONE date,
+ * so its id is already a stable occurrence identity and no date needs to ride
+ * along the way it does for a weekly rule. The UNIQUE index on
+ * scheduled_messages.source_key is the ONLY thing preventing a second text —
+ * not the loop, not any check below — which is what makes this safe to run on
+ * every five-minute tick.
+ *
+ * A MISSED reminder writes a `skipped` row rather than nothing. It takes the
+ * same key, so the row that records the miss is also what stops a late text
+ * going out on the next tick. A silent non-send is worse than a visible one.
+ */
+async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow>) {
+  const db = getDb(env);
+
+  /*
+   * Bounded to yesterday, today and tomorrow.
+   *
+   * The window is at most two days wide, so those three dates are every row
+   * that could possibly be due — and without the bound this query would grow
+   * without limit, re-reading every meal train the church has ever run on every
+   * tick. Yesterday is in the list only so that a full day of cron outage still
+   * leaves a visible `skipped` row instead of nothing at all.
+   *
+   * The date a sign-up is FOR is the slot's own day when it has one (a meal
+   * train), and otherwise the event's date (a dish sheet, a dated list).
+   */
+  const when = sql`coalesce(${schema.signupSlots.onDate}, ${schema.signupSheets.eventDate})`;
+  const window = [
+    new Date(Date.parse(`${local.date}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10),
+    local.date,
+    new Date(Date.parse(`${local.date}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10),
+  ];
+
+  const rows = await db.select({
+    id: schema.signups.id,
+    name: schema.signups.name,
+    personId: schema.signups.personId,
+    ownPhone: schema.signups.phoneE164,
+    ownConsent: schema.signups.smsConsent,
+    onDate: schema.signupSlots.onDate,
+    eventDate: schema.signupSheets.eventDate,
+    reminderBody: schema.signupSheets.reminderBody,
+    memberPhone: schema.people.phoneE164,
+    memberConsent: schema.people.smsConsent,
+    memberArchived: schema.people.archived,
+  }).from(schema.signups)
+    .innerJoin(schema.signupSlots, eq(schema.signups.slotId, schema.signupSlots.id))
+    .innerJoin(schema.signupSheets, eq(schema.signups.sheetId, schema.signupSheets.id))
+    // A member's number is resolved through `people` rather than copied onto
+    // the sign-up: they already consented once, nothing new is stored, and a
+    // member who changes their number is reached at the new one.
+    .leftJoin(schema.people, eq(schema.signups.personId, schema.people.id))
+    .where(and(
+      eq(schema.signups.remind, true),
+      // A draft sheet is not public, so nothing should have signed up to one —
+      // but staff can add somebody by hand, and a draft must not text anyone.
+      ne(schema.signupSheets.status, 'draft'),
+      inArray(when, window),
+    ));
+
+  if (!rows.length) return null;
+
+  /*
+   * CONSENT IS MATCHED BY NUMBER, NEVER BY PERSON — the rule lib/consent.ts
+   * exists to enforce, applied here at the moment of queueing rather than
+   * trusted from whatever was recorded when somebody filled the form in. A
+   * number that texted STOP last week must not be reached today because a row
+   * from last month still says opted_in.
+   *
+   * One query per table for the whole batch, not one per sign-up.
+   */
+  // The row's OWN number wins over the member's on-file one. A recognised
+  // member who was not already opted in types a number like anybody else, and
+  // that is the number they asked to be reached at.
+  const numberFor = (r: { ownPhone: string | null; memberPhone: string | null }) =>
+    r.ownPhone ?? r.memberPhone;
+  const numbers = [...new Set(rows.map(numberFor).filter((n): n is string => !!n))];
+  const decision = await consentByNumbers(db, numbers);
+
+  let queued = 0, skipped = 0;
+  for (const r of rows) {
+    const date = r.onDate ?? r.eventDate;
+    const due = reminderDue(date, local);
+    const missed = !due && reminderMissed(date, local);
+    if (!due && !missed) continue;
+
+    const phone = numberFor(r);
+    // An archived member is not texted, the same rule every other audience
+    // follows. Their sign-up still stands on the sheet.
+    const allowed = Boolean(phone) && decision.get(phone!) === 'opted_in'
+      && !(r.personId && r.memberArchived);
+
+    const body = renderReminder(reminderBodyFor(r.reminderBody), {
+      first: firstNameOf(r.name),
+      when: shortWhen(date ?? ''),
+    });
+
+    const note = missed
+      ? 'Reminder window passed before this could be sent'
+      : 'No consent to text this number at reminder time';
+
+    const ins = await db.insert(schema.scheduledMessages).values({
+      sourceKey: reminderKey(r.id),
+      // 'schedule', because that is what drainQueue sends. A different source
+      // here would queue a row that nothing ever picks up.
+      source: 'schedule',
+      personId: r.personId,
+      phoneE164: phone ?? null,
+      body,
+      sendAt: nowIso(),
+      status: due && allowed ? 'pending' : 'skipped',
+      sentAt: due && allowed ? null : nowIso(),
+      note: due && allowed ? null : note,
+      createdAt: nowIso(),
+    }).onConflictDoNothing().returning({ id: schema.scheduledMessages.id });
+
+    if (!ins[0]) continue;                 // already queued, sent or skipped
+    if (due && allowed) queued++; else skipped++;
+  }
+
+  if (!queued && !skipped) return null;
+  return {
+    queued,
+    detail: `Sign-up reminders: ${queued} queued`
+          + (skipped ? `, ${skipped} skipped` : ''),
+  };
 }
 
 interface Target { personId: number; phoneE164: string; firstName: string; lastName: string }
@@ -267,7 +411,7 @@ export async function drainQueue(env: Env, limit = SENDS_PER_RUN): Promise<Drain
     });
 
     await db.update(schema.scheduledMessages)
-      .set({ status: result.ok ? 'men' : 'failed', sentAt: nowIso(),
+      .set({ status: result.ok ? 'sent' : 'failed', sentAt: nowIso(),
              note: result.ok ? null : (result.error ?? result.errorCode ?? 'failed') })
       .where(eq(schema.scheduledMessages.id, row.id));
 

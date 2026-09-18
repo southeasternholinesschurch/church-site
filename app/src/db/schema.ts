@@ -286,7 +286,7 @@ export const scheduledMessages = sqliteTable('scheduled_messages', {
   groupId: integer('group_id').references(() => groups.id),
   /** ISO instant. Compared against now in the church's timezone by the caller. */
   sendAt: text('send_at').notNull(),
-  status: text('status', { enum: ['pending', 'men', 'failed', 'skipped'] })
+  status: text('status', { enum: ['pending', 'sent', 'failed', 'skipped'] })
     .notNull().default('pending'),
   sentAt: text('sent_at'),
   /** Why a send was skipped or failed — surfaced in the dashboard rather than
@@ -742,3 +742,143 @@ export const kidRouteCaptains = sqliteTable('kid_route_captains', {
 }, (t) => ({
   uniq: unique('kid_route_captains_pair').on(t.staffId, t.routeId),
 }));
+
+/**
+ * A sign-up sheet, reached by a LINK rather than through the website's menu.
+ *
+ * ONE MODEL, THREE PRESETS. A meal train, a volunteer list and a pitch-in are
+ * the same thing: a list of slots with a capacity, that people claim. `kind`
+ * decides only how the slots get made and what the form asks for; the public
+ * page, the taken/available display, the corrections and the reminders are
+ * written once. Three tables here rather than three features upstairs.
+ */
+export const signupSheets = sqliteTable('signup_sheets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /**
+   * The whole security of the link rests on this — 16 bytes, 128 bits, the
+   * same as a directory invite.
+   *
+   * A friendly slug (/signup/thanksgiving) was considered and left out: it
+   * would make sheets guessable, and the link is delivered by text and by the
+   * pew link-tree, where its length costs nothing.
+   */
+  token: text('token').notNull().unique(),
+  title: text('title').notNull(),
+  /** The editable paragraph under the heading on the public page. */
+  intro: text('intro'),
+  kind: text('kind', { enum: ['meal-train', 'list', 'dish'] }).notNull(),
+  /**
+   * Draft sheets are not public AT ALL — they render the same page as a token
+   * that never existed. A half-built meal train must not be collectable from a
+   * link somebody pasted early.
+   */
+  status: text('status', { enum: ['draft', 'open', 'closed'] }).notNull().default('draft'),
+  /** YYYY-MM-DD in church time, never a UTC instant. Drives the reminder for
+   *  the kinds whose slots carry no date of their own. */
+  eventDate: text('event_date'),
+  /** After this date the sheet reads as closed, whatever its status says. */
+  closesOn: text('closes_on'),
+  /** Off unless switched on, per sheet. A name is enough by default. */
+  askHeadcount: integer('ask_headcount', { mode: 'boolean' }).notNull().default(false),
+  /** Staff-editable reminder wording, {first} and {when}. Null means the
+   *  built-in default — see lib/signups.ts, which defends the read as well as
+   *  validating the write. */
+  reminderBody: text('reminder_body'),
+  createdBy: text('created_by'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (t) => ({
+  statusIdx: index('signup_sheets_status_idx').on(t.status),
+}));
+
+/**
+ * One thing people can claim: a day of the meal train, a named dish, or the
+ * single implicit slot of a plain list.
+ *
+ * CHILD ROWS, NOT A JSON COLUMN — deliberately different from
+ * bulletins.announcements. The bulletin's JSON is right because it is only ever
+ * read and written whole. A slot is POINTED AT by sign-ups made concurrently by
+ * different people from different phones, so it needs a stable id that survives
+ * an edit to the row above it.
+ */
+export const signupSlots = sqliteTable('signup_slots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sheetId: integer('sheet_id').notNull()
+    .references(() => signupSheets.id, { onDelete: 'cascade' }),
+  sort: integer('sort').notNull(),
+  label: text('label').notNull(),
+  detail: text('detail'),
+  /** YYYY-MM-DD for a meal-train day. Null for a dish or a list, which take
+   *  their date from the sheet. */
+  onDate: text('on_date'),
+  /** NULL MEANS NO LIMIT. Not zero, and not a large number standing in for
+   *  unlimited — both of those read as a cap somebody forgot to set. */
+  capacity: integer('capacity'),
+}, (t) => ({
+  sheetIdx: index('signup_slots_sheet_idx').on(t.sheetId),
+}));
+
+/**
+ * Somebody taking a slot.
+ *
+ * `seat` plus the unique index below is the whole design. Two families being
+ * told they both have Tuesday is the one failure this feature cannot have, and
+ * counting rows before inserting does not prevent it — two phones can count the
+ * same number at the same moment. The DATABASE is the guard: compute the next
+ * seat, insert with onConflictDoNothing, and if nothing comes back somebody
+ * beat you to it. Same shape as the queue key on scheduled_messages.
+ */
+export const signups = sqliteTable('signups', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sheetId: integer('sheet_id').notNull()
+    .references(() => signupSheets.id, { onDelete: 'cascade' }),
+  slotId: integer('slot_id').notNull()
+    .references(() => signupSlots.id, { onDelete: 'cascade' }),
+  /** 1-based, within the slot. See the unique index. */
+  seat: integer('seat').notNull(),
+  /** Set when the browser carried a member session, so staff can tell a
+   *  recognised member from a typed name. Null for everyone else. */
+  personId: integer('person_id').references(() => people.id),
+  /** Always present, even for a member — what the sheet actually displays. */
+  name: text('name').notNull(),
+  headcount: integer('headcount'),
+  note: text('note'),
+  /**
+   * A THIRD TABLE HOLDING A PHONE NUMBER AND A CONSENT DECISION.
+   *
+   * That is not a small thing: lib/consent.ts existed because there were two,
+   * and it says so in its own doc comment. It has been extended to cover this
+   * one. Anything added here that stores a number must be added there too, or a
+   * STOP is recorded as handled while the texts keep arriving.
+   */
+  phoneE164: text('phone_e164'),
+  smsConsent: text('sms_consent', { enum: ['unknown', 'opted_in', 'opted_out'] }),
+  /** 'signup-sheet' when the tick-box on the public page was ticked. */
+  smsConsentSource: text('sms_consent_source'),
+  smsConsentAt: text('sms_consent_at'),
+  /** Whether to text the day before. False unless they asked for it. */
+  remind: integer('remind', { mode: 'boolean' }).notNull().default(false),
+  /** Staff email when the office added this on somebody's behalf; NULL when
+   *  the person did it themselves. The distinction is the audit trail for
+   *  "I never signed up for that". */
+  createdBy: text('created_by'),
+  createdAt: text('created_at').notNull(),
+}, (t) => ({
+  /**
+   * THE GUARD. Not decoration, and not a performance index.
+   *
+   * Do not weaken it, and do not replace the insert-and-check pattern with a
+   * count-then-insert: the count is read at one moment and acted on at another,
+   * and the gap between them is exactly where two people get the same Tuesday.
+   */
+  seatUniq: unique('signups_slot_seat').on(t.slotId, t.seat),
+  sheetIdx: index('signups_sheet_idx').on(t.sheetId),
+  slotIdx: index('signups_slot_idx').on(t.slotId),
+  /** What the STOP handler looks up. Opt-out is matched by NUMBER, never by
+   *  person — one handset, one decision. See kid_guardians_phone_idx. */
+  phoneIdx: index('signups_phone_idx').on(t.phoneE164),
+}));
+
+export type SignupSheet = typeof signupSheets.$inferSelect;
+export type SignupSlot = typeof signupSlots.$inferSelect;
+export type Signup = typeof signups.$inferSelect;

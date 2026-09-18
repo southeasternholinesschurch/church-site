@@ -1,0 +1,117 @@
+---
+/**
+ * The layout for pages anyone with a link may open.
+ *
+ * The three /directory pages each write their own <!doctype html> with a
+ * scoped <style>, and the three of them have quietly drifted. This
+ * generalises that shape into one layout so the sign-up sheets — and whatever
+ * is public next — share it.
+ *
+ * It does NOT import styles/app.css. That stylesheet is the STAFF TOOL: a dark
+ * app bar, dense tables, system sans throughout. A church member opening a meal
+ * train from a text should see the church, not the dashboard. So the palette
+ * tokens are the same values app.css uses (deliberately, so the two never look
+ * like different organisations) while the type is the church's own, exactly as
+ * /directory sets it.
+ *
+ * NO STAFF NAV, and nothing that implies there is more of an app behind this.
+ * The reader may well be a neighbour who has never been to the building.
+ */
+interface Props {
+  title: string;
+  /** Small line above the heading — "Meal train", "Sign-up sheet". */
+  eyebrow?: string;
+}
+const { title, eyebrow } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · Fairhaven Community</title>
+    {/* The sheet carries people's full names. It is public to anyone holding
+        the link and must never be public to a search engine — the middleware
+        sends x-robots-tag as well, since a header covers things that cannot
+        carry a meta tag. Belt and braces, on purpose. */}
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    {/* So the token in the URL is not handed to anything the page links out
+        to. There is nothing secret on the page itself; the LINK is the key. */}
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="/favicon-48.png" />
+    <meta name="theme-color" content="#1a1512" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style is:global>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+
+      /* The same values as styles/app.css and /directory. Copied rather than
+         imported: see the note at the top of this file. */
+      :root {
+        --ink:#1a1512; --ink-soft:#4a4038; --red:#b01818; --red-deep:#8e1313;
+        --cream:#f4efe7; --cream-deep:#eae2d6; --hair:rgba(26,21,18,.16);
+        --ok:#1f6b3a;
+        --radius:3px; --radius-lg:12px;
+        --font-body:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --font-display:'Instrument Serif', Georgia, 'Times New Roman', serif;
+      }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--cream-deep); color:var(--ink); line-height:1.55;
+             font-family:var(--font-body); font-size:17px; }
+      .wrap { max-width:620px; margin-inline:auto; padding:36px clamp(20px,5vw,32px) 80px; }
+
+      .eyebrow { font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+                 color:var(--ink-soft); margin:0 0 8px; }
+      h1 { font-family:var(--font-display); font-weight:400; letter-spacing:-.01em;
+           font-size:clamp(30px,6vw,42px); line-height:1.05; margin:0 0 14px; }
+      h2 { font-family:var(--font-display); font-weight:400; font-size:23px; line-height:1.2;
+           margin:0 0 12px; }
+      p { margin:0 0 14px; }
+      a { color:var(--red-deep); }
+
+      .card { background:var(--cream); border:1px solid var(--hair);
+              border-radius:var(--radius-lg); padding:22px clamp(16px,4vw,24px); }
+      .muted { color:var(--ink-soft); }
+      .lede { color:var(--ink-soft); margin:0 0 26px; }
+
+      /* 44px minimum on everything touchable. This is read on a phone, usually
+         one-handed, often by somebody who is not young. */
+      .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px;
+             min-height:46px; padding:11px 24px; border:1px solid var(--ink);
+             border-radius:var(--radius); background:var(--ink); color:var(--cream);
+             font:inherit; font-weight:700; cursor:pointer; text-decoration:none; }
+      .btn:hover { background:#000; }
+      .btn--ghost { background:transparent; color:var(--ink); }
+
+      .field { display:block; margin-bottom:16px; }
+      .field > span { display:block; font-size:11px; font-weight:700; letter-spacing:.12em;
+                      text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
+      .field input, .field textarea, .field select {
+        width:100%; font:inherit; min-height:46px; padding:10px 13px;
+        border:1px solid var(--hair); border-radius:var(--radius);
+        background:#fff; color:var(--ink); }
+      .field textarea { min-height:78px; resize:vertical; }
+      .field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible {
+        outline:2px solid var(--red); outline-offset:2px; }
+
+      .notice { border-left:3px solid var(--red); background:#f7e9e9; color:var(--red-deep);
+                padding:12px 16px; border-radius:0 var(--radius) var(--radius) 0;
+                margin:0 0 22px; }
+      .notice--ok { border-color:var(--ok); background:#e8f2eb; color:#16532c; }
+
+      .foot { margin-top:34px; padding-top:18px; border-top:1px solid var(--hair);
+              font-size:15px; color:var(--ink-soft); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+      <slot />
+      <p class="foot">Fairhaven Community Church</p>
+    </div>
+  </body>
+</html>

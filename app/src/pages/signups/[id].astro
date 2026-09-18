@@ -1,0 +1,815 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { countSegments } from '../../lib/sms';
+import { localNow } from '../../lib/schedules';
+import {
+  availability, closedReason, dayLabel, DEFAULT_REMINDER_BODY,
+  invalidRangeReason, invalidReminderReason, LIST_SLOT_LABEL, nextSeat,
+  planDays, reminderBodyFor, sampleReminder, SIGNUP_KINDS,
+} from '../../lib/signups';
+
+/**
+ * One sheet: what it is for, what people sign up for, who has, and the link.
+ *
+ * FOUR SECTIONS IN THE ORDER SOMEBODY THINKS IN — the pastor asked specifically that
+ * these pages flow rather than feel disjointed. Section two is the only part
+ * that differs by kind; everything else is written once, because a meal train,
+ * a volunteer list and a pitch-in are the same thing underneath.
+ *
+ * Modelled on bulletin/[id].astro: POST in the frontmatter, an `action` on each
+ * submit button, 303 after every write, flash read from the query string, and
+ * no client-side JavaScript except the copy button at the foot.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/signups', 302);
+
+/*
+ * READ THE SHEET BEFORE THE POST HANDLER.
+ *
+ * bulletin/[id].astro carries a comment about this exact mistake: the row used
+ * to be read after, code inside the handler referenced it, and every save threw
+ * a ReferenceError into a page that still rendered perfectly. It looked like
+ * the editor simply would not save.
+ */
+const [sheet] = await db.select().from(schema.signupSheets)
+  .where(eq(schema.signupSheets.id, id)).limit(1);
+if (!sheet) return new Response('Not found', { status: 404 });
+
+const str = (f: FormData, k: string) => {
+  const v = f.get(k);
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+};
+
+/**
+ * The lowest free seat in a slot, IGNORING capacity.
+ *
+ * Staff overriding a full slot is allowed on purpose: the office is recording
+ * what is already true — somebody rang up and said they are bringing Tuesday as
+ * well — and refusing would leave the sheet disagreeing with reality. The
+ * screen says when a slot has gone over. The unique index still holds, so two
+ * rows can never share a seat however this is reached.
+ */
+async function freeSeat(slotId: number): Promise<number> {
+  const taken = await db.select({ seat: schema.signups.seat })
+    .from(schema.signups).where(eq(schema.signups.slotId, slotId));
+  return nextSeat(taken.map((t) => t.seat), null)!;
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+  const back = (flash: string) => Astro.redirect(`/signups/${id}?${flash}`, 303);
+
+  /* -- 1. what it is for ---------------------------------------------------- */
+
+  /*
+   * Save, Open, Close and Back-to-draft are FOUR BUTTONS ON ONE FORM, so all
+   * four save what is in it. Changing only the status would mean somebody who
+   * types the paragraph and then presses "Open it" — the obvious thing to do —
+   * watches their words disappear, with the sheet going live without them. The
+   * bulletin's publish button makes the same call for the same reason.
+   */
+  if (action === 'details' || action === 'open' || action === 'close' || action === 'draft') {
+    const body = str(form, 'reminderBody');
+    // Refused rather than saved-and-hoped: a message that costs two segments
+    // does so on every reminder ever sent, quietly. Same shape as
+    // setBirthdaySettings. Refusing also holds back the status change, which is
+    // right — a sheet should not go live carrying wording we would not send.
+    const bad = body ? invalidReminderReason(body) : null;
+    if (bad) return back(`badbody=${encodeURIComponent(bad)}`);
+
+    const status = action === 'open' ? 'open' as const
+      : action === 'close' ? 'closed' as const
+      : action === 'draft' ? 'draft' as const : null;
+
+    await db.update(schema.signupSheets).set({
+      title: str(form, 'title') ?? sheet.title,
+      intro: str(form, 'intro'),
+      eventDate: str(form, 'eventDate'),
+      closesOn: str(form, 'closesOn'),
+      askHeadcount: form.get('askHeadcount') === 'on',
+      reminderBody: body,
+      ...(status ? { status } : {}),
+      updatedAt: nowIso(),
+    }).where(eq(schema.signupSheets.id, id));
+    return back(`saved=${action}`);
+  }
+
+  /* -- 2. what people are signing up for ------------------------------------ */
+
+  /**
+   * *Set the days* — makes the sheet match the range in the two date boxes.
+   *
+   * Both halves matter and only the first was here at the start. Widen the
+   * range and the new days appear; NARROW it and the days you dropped used to
+   * stay on the sheet, still collectable, with nothing to say they were meant
+   * to be gone.
+   *
+   * A DAY SOMEBODY HAS CLAIMED IS NEVER REMOVED — see planDays, which is where
+   * that rule lives and is tested. It is kept, and said out loud, exactly as
+   * clearing a dish row somebody has signed up for is refused rather than
+   * obeyed. Nobody should have to type seven rows, and nobody should lose a
+   * commitment to a press of a button.
+   */
+  if (action === 'fill-days') {
+    const start = String(form.get('startDate') ?? '');
+    const end = String(form.get('endDate') ?? '');
+    const bad = invalidRangeReason(start, end);
+    if (bad) return back(`badrange=${encodeURIComponent(bad)}`);
+
+    const perRaw = Number(form.get('perDay'));
+    const perDay = Number.isInteger(perRaw) && perRaw > 0 && perRaw < 20 ? perRaw : 1;
+
+    /*
+     * The sign-up COUNT per slot, not just the dates — the plan cannot decide
+     * what is safe to remove without knowing who is on it. Two queries, joined
+     * in JS: a meal train is a dozen rows at the outside.
+     */
+    const existing = await db.select({
+      id: schema.signupSlots.id, onDate: schema.signupSlots.onDate,
+    }).from(schema.signupSlots).where(eq(schema.signupSlots.sheetId, id));
+    const counts = existing.length
+      ? await db.select({ slotId: schema.signups.slotId })
+          .from(schema.signups)
+          .where(inArray(schema.signups.slotId, existing.map((e) => e.id)))
+      : [];
+    const plan = planDays(
+      existing.map((e) => ({
+        ...e, taken: counts.filter((c) => c.slotId === e.id).length,
+      })), start, end);
+
+    for (const onDate of plan.add) {
+      await db.insert(schema.signupSlots).values({
+        sheetId: id,
+        // A DATED SLOT IS ORDERED BY ITS DATE, not by this — see the ordering
+        // on every read. So a day added later lands in the right place without
+        // renumbering the days around it, and `sort` is left meaning what it
+        // means everywhere else: the order staff typed the rows in.
+        sort: 0,
+        label: dayLabel(onDate),
+        onDate,
+        capacity: perDay,
+      });
+    }
+    if (plan.remove.length) {
+      await db.delete(schema.signupSlots).where(and(
+        eq(schema.signupSlots.sheetId, id),
+        inArray(schema.signupSlots.id, plan.remove)));
+    }
+    return back(`filled=${plan.add.length}&trimmed=${plan.remove.length}`
+              + `&heldback=${plan.keep.length}`);
+  }
+
+  /**
+   * The slot rows — dish parts, and the generated meal-train days once staff
+   * want to change one.
+   *
+   * The bulletin's convention: spare blank rows are appended server-side, a
+   * BLANK LABEL MEANS DELETE, and existing rows carry their id in a hidden
+   * field so identity survives a save.
+   */
+  if (action === 'slots') {
+    const ids = form.getAll('slot_id').map(String);
+    const labels = form.getAll('slot_label').map(String);
+    const caps = form.getAll('slot_cap').map(String);
+    const dates = form.getAll('slot_date').map(String);
+
+    const current = await db.select({ id: schema.signupSlots.id })
+      .from(schema.signupSlots).where(eq(schema.signupSlots.sheetId, id));
+    const counts = current.length
+      ? await db.select({ slotId: schema.signups.slotId, id: schema.signups.id })
+          .from(schema.signups)
+          .where(inArray(schema.signups.slotId, current.map((c) => c.id)))
+      : [];
+    const hasSignups = (slotId: number) => counts.some((c) => c.slotId === slotId);
+
+    const refused: string[] = [];
+    for (let i = 0; i < labels.length; i++) {
+      const rowId = Number(ids[i]);
+      const label = labels[i].trim().slice(0, 80);
+      const capRaw = Number(caps[i]);
+      // Blank means NO LIMIT, which is why this is null and not zero.
+      const capacity = Number.isInteger(capRaw) && capRaw > 0 && capRaw < 500 ? capRaw : null;
+      const onDate = /^\d{4}-\d{2}-\d{2}$/.test(dates[i] ?? '') ? dates[i] : null;
+
+      if (Number.isInteger(rowId) && rowId > 0) {
+        if (!label) {
+          /*
+           * REFUSE TO DELETE A SLOT SOMEBODY HAS CLAIMED. Silently dropping the
+           * row would drop a commitment with it — the family stops expecting
+           * Tuesday's meal and nobody knows. Said out loud instead.
+           */
+          if (hasSignups(rowId)) { refused.push(String(rowId)); continue; }
+          await db.delete(schema.signupSlots)
+            .where(and(eq(schema.signupSlots.id, rowId), eq(schema.signupSlots.sheetId, id)));
+          continue;
+        }
+        await db.update(schema.signupSlots).set({ label, capacity, onDate, sort: i })
+          .where(and(eq(schema.signupSlots.id, rowId), eq(schema.signupSlots.sheetId, id)));
+      } else if (label) {
+        await db.insert(schema.signupSlots)
+          .values({ sheetId: id, sort: i, label, capacity, onDate });
+      }
+    }
+    return back(refused.length ? `kept=${refused.length}` : 'saved=slots');
+  }
+
+  /** A plain list: one implicit slot, so there is only a cap to set. */
+  if (action === 'list-cap') {
+    const capRaw = Number(form.get('capacity'));
+    const capacity = Number.isInteger(capRaw) && capRaw > 0 && capRaw < 500 ? capRaw : null;
+    const [only] = await db.select({ id: schema.signupSlots.id })
+      .from(schema.signupSlots).where(eq(schema.signupSlots.sheetId, id)).limit(1);
+    if (only) {
+      await db.update(schema.signupSlots).set({ capacity })
+        .where(eq(schema.signupSlots.id, only.id));
+    } else {
+      // Belt and braces: the slot is made when the sheet is, but a sheet from
+      // before that, or one whose slot was removed by hand, must still work.
+      await db.insert(schema.signupSlots)
+        .values({ sheetId: id, sort: 0, label: LIST_SLOT_LABEL, capacity });
+    }
+    await db.update(schema.signupSheets)
+      .set({ askHeadcount: form.get('askHeadcount') === 'on', updatedAt: nowIso() })
+      .where(eq(schema.signupSheets.id, id));
+    return back('saved=slots');
+  }
+
+  /* -- 3. who has signed up ------------------------------------------------- */
+
+  if (action === 'signup-remove') {
+    await db.delete(schema.signups).where(and(
+      eq(schema.signups.id, Number(form.get('signupId'))),
+      eq(schema.signups.sheetId, id)));
+    return back('saved=removed');
+  }
+
+  if (action === 'signup-save') {
+    const rowId = Number(form.get('signupId'));
+    const name = String(form.get('name') ?? '').trim().slice(0, 80);
+    if (!name) return back('saved=noname');
+    const toSlot = Number(form.get('slotId'));
+    const headRaw = Number(form.get('headcount'));
+    const headcount = Number.isInteger(headRaw) && headRaw > 0 && headRaw < 100 ? headRaw : null;
+    const note = String(form.get('note') ?? '').trim().slice(0, 300) || null;
+
+    const [row] = await db.select().from(schema.signups)
+      .where(and(eq(schema.signups.id, rowId), eq(schema.signups.sheetId, id))).limit(1);
+    if (!row) return back('saved=gone');
+
+    const fields = { name, headcount, note,
+                     remind: form.get('remind') === 'on' };
+
+    if (Number.isInteger(toSlot) && toSlot !== row.slotId) {
+      /*
+       * MOVING SOMEBODY TO ANOTHER DAY needs a seat in the new slot, and the
+       * unique index can still refuse it if the office and a member press
+       * their buttons in the same second. Caught and retried rather than left
+       * to become a 500 — one of the two presses has to lose, and it should
+       * lose politely.
+       */
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await db.update(schema.signups)
+            .set({ ...fields, slotId: toSlot, seat: await freeSeat(toSlot) })
+            .where(eq(schema.signups.id, rowId));
+          return back('saved=moved');
+        } catch { /* somebody took that seat; recompute and try again */ }
+      }
+      return back('saved=busy');
+    }
+
+    await db.update(schema.signups).set(fields).where(eq(schema.signups.id, rowId));
+    return back('saved=signup');
+  }
+
+  /** Somebody rang the office. `created_by` records that staff did this. */
+  if (action === 'signup-add') {
+    const slotId = Number(form.get('slotId'));
+    const name = String(form.get('name') ?? '').trim().slice(0, 80);
+    if (!name || !Number.isInteger(slotId)) return back('saved=noname');
+    const [slot] = await db.select().from(schema.signupSlots)
+      .where(and(eq(schema.signupSlots.id, slotId), eq(schema.signupSlots.sheetId, id))).limit(1);
+    if (!slot) return back('saved=gone');
+
+    const headRaw = Number(form.get('headcount'));
+    const note = String(form.get('note') ?? '').trim().slice(0, 300) || null;
+
+    const before = await db.select({ id: schema.signups.id })
+      .from(schema.signups).where(eq(schema.signups.slotId, slotId));
+    const over = slot.capacity !== null && before.length >= slot.capacity;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const ins = await db.insert(schema.signups).values({
+        sheetId: id, slotId, seat: await freeSeat(slotId),
+        personId: null, name,
+        headcount: Number.isInteger(headRaw) && headRaw > 0 && headRaw < 100 ? headRaw : null,
+        note,
+        // No number and no reminder from this route. Consent is something the
+        // person gives, not something the office ticks on their behalf; if they
+        // want a reminder they can be told to use the link.
+        phoneE164: null, smsConsent: null, smsConsentSource: null, smsConsentAt: null,
+        remind: false,
+        createdBy: user.email,
+        createdAt: nowIso(),
+      }).onConflictDoNothing().returning({ id: schema.signups.id });
+      if (ins[0]) return back(over ? 'saved=over' : 'saved=added');
+    }
+    return back('saved=busy');
+  }
+
+  return back('saved=none');
+}
+
+/* ------------------------------------------------------------- rendering -- */
+
+/*
+ * ORDERED BY DATE FIRST, then by the typed order.
+ *
+ * Both fields are needed and neither alone is enough. A meal train is entirely
+ * dated and belongs in calendar order however the rows were edited; a dish
+ * sheet has no dates at all and belongs in the order staff typed it, which is
+ * what `sort` holds. SQLite puts NULLs first, so on an undated sheet every row
+ * ties on the date and `sort` decides.
+ *
+ * Sorting on `sort` alone shipped a bug worth recording: saving the rows
+ * renumbers them 0..n, a row REFUSED for having sign-ups keeps whatever it had,
+ * and a day somebody had claimed jumped to the bottom of the public sheet. The
+ * ordering is now right by construction rather than by keeping two numbering
+ * schemes in step.
+ */
+const slots = await db.select().from(schema.signupSlots)
+  .where(eq(schema.signupSlots.sheetId, id))
+  .orderBy(asc(schema.signupSlots.onDate), asc(schema.signupSlots.sort),
+           asc(schema.signupSlots.id));
+
+const signups = slots.length
+  ? await db.select().from(schema.signups)
+      .where(eq(schema.signups.sheetId, id))
+      .orderBy(asc(schema.signups.slotId), asc(schema.signups.seat))
+  : [];
+
+const today = localNow(new Date()).date;
+const shut = closedReason(sheet, slots.map((s) => s.onDate), today);
+const kind = SIGNUP_KINDS.find((k) => k.id === sheet.kind);
+const publicUrl = `${Astro.url.origin}/signup/${sheet.token}`;
+
+const q = Astro.url.searchParams;
+const saved = q.get('saved');
+const badBody = q.get('badbody');
+const badRange = q.get('badrange');
+const kept = Number(q.get('kept')) || 0;
+const filled = q.get('filled') === null ? null : Number(q.get('filled')) || 0;
+const trimmed = Number(q.get('trimmed')) || 0;
+const heldBack = Number(q.get('heldback')) || 0;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+// The wording actually in force, so the box shows what will be sent rather
+// than an empty field standing in for a default nobody can see.
+const bodyInForce = reminderBodyFor(sheet.reminderBody);
+const seg = countSegments(sampleReminder(bodyInForce));
+
+/** Three spare rows, so adding a dish never needs a page reload. */
+const editableSlots = sheet.kind === 'list' ? [] : [
+  ...slots,
+  ...Array(3).fill({ id: 0, label: '', capacity: null, onDate: null, detail: null }),
+];
+
+const labelFor = (s: { label: string; onDate: string | null }) =>
+  s.onDate ? dayLabel(s.onDate) : s.label;
+const takenIn = (slotId: number) => signups.filter((x) => x.slotId === slotId);
+const totalHeads = signups.reduce((n, s) => n + (s.headcount ?? 0), 0);
+
+// Sensible defaults for the meal-train range box: a week starting tomorrow,
+// which is what almost every one of these is.
+const firstDated = slots.find((s) => s.onDate)?.onDate ?? null;
+const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
+---
+<AppLayout title={`Sign-ups · ${sheet.title}`} user={user}>
+  <p style="margin:0 0 4px;"><a href="/signups">← All sign-ups</a></p>
+  <h1 style="margin-bottom:2px;">{sheet.title}</h1>
+  <p class="muted" style="margin:0 0 18px;">
+    {kind?.label}
+    {sheet.status === 'draft'
+      ? <> · <strong>Draft</strong> — the link does not work yet.</>
+      : shut
+        ? <> · <strong>Closed</strong> — the link shows the list but takes no more names.</>
+        : <> · <strong>Open</strong> — the link is live.</>}
+  </p>
+
+  {saved === 'details' && <p class="notice notice--ok">Saved.</p>}
+  {saved === 'slots' && <p class="notice notice--ok">Saved.</p>}
+  {saved === 'open' && <p class="notice notice--ok">Open. The link works now — share it below.</p>}
+  {saved === 'close' && <p class="notice">Closed. The link still shows the list, but takes no more names.</p>}
+  {saved === 'draft' && <p class="notice">Back to draft. The link shows nothing at all now.</p>}
+  {saved === 'signup' && <p class="notice notice--ok">Saved.</p>}
+  {saved === 'moved' && <p class="notice notice--ok">Moved.</p>}
+  {saved === 'removed' && <p class="notice notice--ok">Taken off the sheet.</p>}
+  {saved === 'added' && <p class="notice notice--ok">Added.</p>}
+  {saved === 'over' && (
+    <p class="notice">
+      Added — but that one is now over the number you set for it. Raise its
+      limit above, or leave it; the sheet will show it as full.
+    </p>
+  )}
+  {saved === 'busy' && (
+    <p class="notice">
+      Somebody was signing up at the same moment and got there first. Try that
+      once more.
+    </p>
+  )}
+  {saved === 'noname' && <p class="notice">A name is needed.</p>}
+  {saved === 'gone' && <p class="notice">That one is no longer here — somebody removed it.</p>}
+  {badBody && <p class="notice">{badBody}</p>}
+  {badRange && <p class="notice">{badRange}</p>}
+  {filled !== null && filled === 0 && trimmed === 0 && (
+    <p class="notice">
+      The sheet already ran exactly those days, so nothing changed.
+    </p>
+  )}
+  {filled !== null && (filled > 0 || trimmed > 0) && (
+    <p class="notice notice--ok">
+      {filled > 0 && <>Added {plural(filled, 'day', 'days')}. </>}
+      {trimmed > 0 && <>Took off {plural(trimmed, 'day', 'days')} that fell outside the range. </>}
+      Days already on the sheet were left exactly as they were.
+    </p>
+  )}
+  {/* Said out loud rather than done quietly. Somebody has told a family they
+      are bringing that day, and the family has stopped planning for it — a
+      mistyped date must not undo that behind anyone's back. */}
+  {heldBack > 0 && (
+    <p class="notice">
+      {plural(heldBack, 'day is', 'days are')} outside that range but
+      {heldBack === 1 ? ' was' : ' were'} kept, because somebody has already
+      signed up. Move or remove those people further down this page, then set
+      the days again.
+    </p>
+  )}
+  {kept > 0 && (
+    <p class="notice">
+      {kept === 1 ? 'One row was' : `${kept} rows were`} left in place because
+      somebody has already signed up for {kept === 1 ? 'it' : 'them'}. Move or
+      remove those people first, further down this page.
+    </p>
+  )}
+
+  {/* ---- 1. what it is for ------------------------------------------------ */}
+  <div class="card sec">
+    <h2>What it is for</h2>
+    <p class="muted sec__why">
+      The heading and the paragraph at the top of the sheet, as the church will
+      read them.
+    </p>
+    <form method="POST">
+      <label class="field"><span>Title</span>
+        <input name="title" value={sheet.title} maxlength="120" required /></label>
+      <label class="field"><span>The paragraph underneath</span>
+        <textarea name="intro" rows="3"
+          placeholder="The Aldridges are home with the new baby. Meals can be dropped at the door any time after 4pm.">{sheet.intro ?? ''}</textarea></label>
+
+      <div class="row2">
+        <label class="field" style="margin:0;"><span>The day it is for</span>
+          <input type="date" name="eventDate" value={sheet.eventDate ?? ''} /></label>
+        <label class="field" style="margin:0;"><span>Stop taking names after</span>
+          <input type="date" name="closesOn" value={sheet.closesOn ?? ''} /></label>
+      </div>
+      <p class="muted hint">
+        Both optional. A sheet closes itself once every day on it has passed.
+      </p>
+
+      {sheet.kind !== 'list' && (
+        <label class="tick">
+          <input type="checkbox" name="askHeadcount" checked={sheet.askHeadcount} />
+          <span>Ask how many are coming</span>
+        </label>
+      )}
+
+      <h3 class="sub">The reminder text</h3>
+      <p class="muted hint" style="margin-top:0;">
+        Sent at 9am the day before. <code>{'{first}'}</code> becomes their first
+        name and <code>{'{when}'}</code> the day, like "Tue 14 Oct". Only people
+        who asked for a reminder get one.
+      </p>
+      <label class="field">
+        <span class="visually-hidden">Reminder wording</span>
+        <textarea name="reminderBody" rows="3"
+                  placeholder={DEFAULT_REMINDER_BODY}>{sheet.reminderBody ?? ''}</textarea>
+      </label>
+      <p class="muted hint" style="margin-top:-8px;">
+        {/* The same count the validator uses, from the same function, so the
+            screen and the refusal can never disagree. */}
+        {seg.segments === 1
+          ? <>One message ({seg.encoding}), {seg.remainingInSegment} characters spare.</>
+          : <><strong>{seg.segments} messages</strong> — every reminder would be
+              billed {seg.segments} times.</>}
+        {!sheet.reminderBody && <> Leave it blank to use this wording.</>}
+      </p>
+
+      <div class="acts">
+        <button class="btn" type="submit" name="action" value="details">Save</button>
+        {sheet.status !== 'open' && (
+          <button class="btn btn--ghost" type="submit" name="action" value="open">
+            {sheet.status === 'draft' ? 'Open it — make the link work' : 'Open it again'}
+          </button>
+        )}
+        {sheet.status === 'open' && (
+          <button class="btn btn--ghost" type="submit" name="action" value="close">
+            Close it
+          </button>
+        )}
+        {sheet.status !== 'draft' && (
+          <button class="btn btn--ghost" type="submit" name="action" value="draft">
+            Back to draft
+          </button>
+        )}
+      </div>
+    </form>
+  </div>
+
+  {/* ---- 2. what people are signing up for -------------------------------- */}
+  <div class="card sec">
+    <h2>What people are signing up for</h2>
+
+    {sheet.kind === 'meal-train' && (
+      <>
+        <p class="muted sec__why">
+          One day each. Type the span and the days appear.
+        </p>
+        <form method="POST" class="rangeform">
+          <label class="field" style="margin:0;"><span>First day</span>
+            <input type="date" name="startDate" value={firstDated ?? ''} required /></label>
+          <label class="field" style="margin:0;"><span>Last day</span>
+            <input type="date" name="endDate" value={lastDated ?? ''} required /></label>
+          <label class="field" style="margin:0;"><span>Meals a day</span>
+            <input type="number" name="perDay" value="1" min="1" max="19" /></label>
+          <button class="btn" type="submit" name="action" value="fill-days">
+            Set the days
+          </button>
+        </form>
+        <p class="muted hint">
+          Adds the days in this range and takes off any outside it. A day
+          somebody has already claimed is never removed.
+        </p>
+      </>
+    )}
+
+    {sheet.kind === 'dish' && (
+      <p class="muted sec__why">
+        Name the parts — two main dishes, six sides, four desserts — and people
+        sign up against them.
+      </p>
+    )}
+
+    {sheet.kind === 'list' ? (
+      <form method="POST">
+        <p class="muted sec__why">
+          One list of names. Nothing to set up beyond how many you need.
+        </p>
+        <label class="field" style="max-width:280px;">
+          <span>How many people do you need</span>
+          <input type="number" name="capacity" min="1" max="499"
+                 value={slots[0]?.capacity ?? ''} placeholder="No limit" />
+        </label>
+        <label class="tick">
+          <input type="checkbox" name="askHeadcount" checked={sheet.askHeadcount} />
+          <span>Ask how many are coming with them</span>
+        </label>
+        <button class="btn" type="submit" name="action" value="list-cap">Save</button>
+      </form>
+    ) : (
+      <form method="POST">
+        <div class:list={['slotrows', sheet.kind === 'meal-train' && 'slotrows--dated']}>
+          <div class="slotrow slotrow--head">
+            <span class="label">{sheet.kind === 'meal-train' ? 'Day' : 'What'}</span>
+            {sheet.kind === 'meal-train' && <span class="label">Date</span>}
+            <span class="label">How many</span>
+            <span class="label">Taken</span>
+          </div>
+          {editableSlots.map((s: typeof slots[number]) => {
+            const has = s.id ? takenIn(s.id).length : 0;
+            return (
+              <div class="slotrow">
+                <input type="hidden" name="slot_id" value={s.id ?? 0} />
+                <input name="slot_label" value={s.label ?? ''}
+                       placeholder={sheet.kind === 'dish' ? 'Main dish' : 'Tuesday'}
+                       maxlength="80" />
+                {sheet.kind === 'meal-train' && (
+                  <input type="date" name="slot_date" value={s.onDate ?? ''} />
+                )}
+                <input type="number" name="slot_cap" value={s.capacity ?? ''}
+                       min="1" max="499" placeholder="No limit" />
+                <span class="muted taken">{s.id ? (has || '—') : ''}</span>
+              </div>
+            );
+          })}
+        </div>
+        <p class="muted hint">
+          Clear a line to take it off. A line somebody has already signed up for
+          is kept rather than dropped — move those people first.
+          {sheet.kind === 'dish' && <> Leave "how many" blank for no limit.</>}
+        </p>
+        <button class="btn" type="submit" name="action" value="slots">Save</button>
+      </form>
+    )}
+  </div>
+
+  {/* ---- 3. who has signed up --------------------------------------------- */}
+  <div class="card sec">
+    <h2>Who has signed up</h2>
+    <p class="muted sec__why">
+      Fully editable. Change a name, move somebody to another day, take one off,
+      or add somebody who rang the office.
+      {sheet.askHeadcount && totalHeads > 0 && <> <strong>{totalHeads} coming</strong> in total.</>}
+    </p>
+
+    {signups.length === 0 ? (
+      <p class="muted">Nobody yet.</p>
+    ) : (
+      <div class="people">
+        {slots.map((slot) => takenIn(slot.id).map((row) => (
+          <form method="POST" class="prow">
+            <input type="hidden" name="signupId" value={row.id} />
+            <input name="name" value={row.name} maxlength="80" aria-label="Name" />
+            <select name="slotId" aria-label="Which one">
+              {slots.map((s) => (
+                <option value={s.id} selected={s.id === row.slotId}>{labelFor(s)}</option>
+              ))}
+            </select>
+            {sheet.askHeadcount && (
+              <input type="number" name="headcount" value={row.headcount ?? ''}
+                     min="1" max="99" aria-label="How many" class="num" />
+            )}
+            <input name="note" value={row.note ?? ''} maxlength="300"
+                   placeholder="Note" aria-label="Note" />
+            <label class="rem" title={row.phoneE164 || row.personId
+              ? 'Text them the day before' : 'No number on this one, so nothing can be sent'}>
+              <input type="checkbox" name="remind" checked={row.remind}
+                     disabled={!row.phoneE164 && !row.personId} />
+              <span>Remind</span>
+            </label>
+            <button class="btn btn--ghost btn--sm" type="submit"
+                    name="action" value="signup-save">Save</button>
+            <button class="btn btn--ghost btn--sm" type="submit"
+                    name="action" value="signup-remove"
+                    onclick={`return confirm('Take ${row.name.replace(/'/g, '')} off the sheet?')`}
+                    >Remove</button>
+            <span class="who muted">
+              {row.createdBy ? `added by ${row.createdBy}` : row.personId ? 'signed up as a member' : 'signed up themselves'}
+            </span>
+          </form>
+        )))}
+      </div>
+    )}
+
+    {slots.length > 0 && (
+      <form method="POST" class="prow prow--add">
+        <input name="name" placeholder="Name" maxlength="80" required aria-label="Name" />
+        <select name="slotId" aria-label="Which one">
+          {slots.map((s) => {
+            const a = availability(s.capacity, takenIn(s.id).length);
+            return <option value={s.id}>{labelFor(s)}{a.full ? ' (full)' : ''}</option>;
+          })}
+        </select>
+        {sheet.askHeadcount && (
+          <input type="number" name="headcount" min="1" max="99"
+                 aria-label="How many" class="num" />
+        )}
+        <input name="note" placeholder="Note" maxlength="300" aria-label="Note" />
+        <button class="btn" type="submit" name="action" value="signup-add">
+          Add somebody
+        </button>
+      </form>
+    )}
+    <p class="muted hint">
+      Somebody added here gets no reminder text. If they want one, send them
+      the link.
+    </p>
+  </div>
+
+  {/* ---- 4. share it ------------------------------------------------------ */}
+  <div class="card sec">
+    <h2>Share it</h2>
+    <p class="muted sec__why">
+      Anyone with this link can sign up. It is not in the website's menu.
+    </p>
+    <p class="url" id="sheet-url">{publicUrl}</p>
+    <button class="btn" type="button" data-copy="sheet-url">Copy the link</button>
+    {sheet.status === 'draft' && (
+      <p class="notice" style="margin:18px 0 0;">
+        It is still a draft, so this link shows nothing — the same page as a
+        made-up address, on purpose. Open it above first.
+      </p>
+    )}
+    <p class="muted hint">
+      Paste it into the bulletin, into a text, or onto the link-tree the pew tags
+      point at.
+    </p>
+  </div>
+</AppLayout>
+
+<script is:inline>
+  /* Copy the public link. Plain ES5/ES6 — check-inline-scripts.mjs parses this
+     block, and nothing from the server is interpolated into it. */
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-copy]');
+    if (!b) return;
+    var el = document.getElementById(b.getAttribute('data-copy'));
+    if (!el) return;
+    var done = function () {
+      var t = b.textContent;
+      b.textContent = 'Copied';
+      setTimeout(function () { b.textContent = t; }, 1800);
+    };
+    var manual = function () {
+      var r = document.createRange();
+      r.selectNodeContents(el);
+      var s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(el.textContent.trim()).then(done, manual);
+    else manual();
+  });
+</script>
+
+<style>
+  /* Four sections, read top to bottom, in the order somebody thinks in. The
+     numbering is visual only — they are not steps to be completed once. */
+  .sec { margin-bottom: 20px; }
+  .sec__why { margin: -6px 0 16px; font-size: 15px; max-width: 62ch; }
+  .sub { font-size: 15px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+         color: var(--ink-soft); margin: 26px 0 6px; }
+  .hint { font-size: 14px; margin: 8px 0 16px; max-width: 64ch; }
+  .hint code { background: var(--cream-deep); padding: 1px 5px; border-radius: 3px; }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
+  .acts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 18px; }
+
+  .tick { display: flex; gap: 10px; align-items: center; margin: 4px 0 16px; font-size: 15px; }
+  .tick input { width: 20px; height: 20px; accent-color: var(--red); }
+
+  .rangeform { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .rangeform .field { min-width: 150px; }
+
+  /* The slot rows. Same convention as the bulletin's announcements: spare
+     blanks appended, a cleared label is a delete, ids in hidden fields. */
+  .slotrows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+  .slotrow { display: grid; gap: 10px; align-items: center;
+             grid-template-columns: minmax(0,2fr) minmax(0,1fr) 70px; }
+  /* The date column belongs to the whole table, not to rows that happen to
+     contain a date input. Keyed off the input, the HEADER row — which has none
+     — fell back to three columns and dropped "Taken" onto a line of its own. */
+  .slotrows--dated .slotrow { grid-template-columns: minmax(0,2fr) 170px minmax(0,1fr) 70px; }
+  .slotrow--head { padding-bottom: 2px; }
+  .slotrow input { width: 100%; font: inherit; min-height: 44px; padding: 8px 11px;
+                   border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; }
+  .slotrow input:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  .taken { font-size: 14px; text-align: center; }
+
+  .people { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+  .prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+          padding-bottom: 10px; border-bottom: 1px solid var(--hair); }
+  .prow:last-child { border-bottom: 0; }
+  .prow--add { border-top: 1px solid var(--hair); border-bottom: 0;
+               padding-top: 16px; margin-top: 4px; }
+  .prow input, .prow select { font: inherit; min-height: 44px; padding: 8px 11px;
+                              border: 1px solid var(--hair); border-radius: var(--radius);
+                              background: #fff; color: var(--ink); }
+  .prow input[name="name"] { flex: 1 1 160px; min-width: 140px; }
+  .prow input[name="note"] { flex: 2 1 200px; min-width: 140px; }
+  .prow .num { width: 78px; flex: none; }
+  .prow select { flex: 1 1 170px; min-width: 150px; }
+  .prow input:focus-visible, .prow select:focus-visible {
+    outline: 2px solid var(--red); outline-offset: 2px; }
+  .rem { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-soft); }
+  .rem input { width: 18px; height: 18px; min-height: 0; accent-color: var(--red); }
+  /* A row with no number cannot be reminded whatever the box says, so the box
+     says so rather than lying quietly. */
+  .rem input:disabled { opacity: .4; }
+  .who { flex-basis: 100%; font-size: 13px; }
+
+  .btn--sm { min-height: 40px; padding: 7px 14px; font-size: 14px; }
+
+  .url { display: block; font-size: 15px; padding: 12px 14px; margin: 0 0 14px;
+         background: var(--cream-deep); border: 1px solid var(--hair);
+         border-radius: var(--radius); word-break: break-all; }
+
+  @media (max-width: 760px) {
+    .row2 { grid-template-columns: 1fr; }
+    .slotrow, .slotrows--dated .slotrow { grid-template-columns: 1fr; gap: 6px; }
+    .slotrow--head { display: none; }
+    .prow { gap: 6px; }
+    /* Back to the 44px app.css asks for. It says why: these are used
+       one-handed, and 40px was a rule this page quietly broke. */
+    .prow .btn--sm { min-height: 44px; padding: 9px 16px; }
+    /* Save and Remove end up side by side once the row wraps, and Remove takes
+       somebody off a sheet. A thumb's width between them, so the two are not
+       one target with a confirm dialog standing in for aim. */
+    .prow .btn--sm + .btn--sm { margin-left: 10px; }
+  }
+</style>

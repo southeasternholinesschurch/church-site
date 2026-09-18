@@ -1,14 +1,62 @@
 ---
 import AppLayout from '../../layouts/AppLayout.astro';
-import { getDb, schema } from '../../db';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
 import { and, eq, or, like, sql, asc } from 'drizzle-orm';
 import { demoOn, demoPerson } from '../../lib/demo';
 
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
 
+/**
+ * Groups live here now, not on a tab of their own.
+ *
+ * They never were a place you went — they are a way of looking at the people
+ * you are already looking at. A separate screen meant creating a list on one
+ * page, adding people to it on a second, and being unable to see who was in it
+ * anywhere at all. The list of groups is a fold at the bottom of this page,
+ * and picking one filters the table above it.
+ *
+ * /groups still resolves; it redirects here.
+ */
+let groupError: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+  // Back to the same view, fold still open — a search or filter survives the
+  // round trip, which it would not if this redirected to a bare /people, and
+  // the fold has to reopen or the result of the click is invisible.
+  const params = new URLSearchParams(Astro.url.search);
+  params.set('groups', 'open');
+  const back = `${Astro.url.pathname}?${params}#groups`;
+
+  if (action === 'create-group') {
+    const name = String(form.get('name') ?? '').trim();
+    if (!name) groupError = 'Give the group a name.';
+    else {
+      await db.insert(schema.groups)
+        .values({ name, description: String(form.get('description') ?? '').trim() || null,
+                  createdAt: nowIso() })
+        .onConflictDoNothing();
+      return Astro.redirect(back, 303);
+    }
+  }
+
+  if (action === 'delete-group') {
+    const id = Number(form.get('groupId'));
+    // The membership rows go with it via ON DELETE CASCADE; nobody is removed
+    // from the church by deleting a list.
+    if (id) await db.delete(schema.groups).where(eq(schema.groups.id, id));
+    return Astro.redirect(back, 303);
+  }
+}
+
 const q = (Astro.url.searchParams.get('q') ?? '').trim();
 const filter = Astro.url.searchParams.get('filter') ?? '';
+const groupId = Number(Astro.url.searchParams.get('group')) || 0;
+/* Open on arrival when the fold is the reason for arriving: a failed create
+ * needs its error read, and /groups redirects here asking for exactly this. */
+const groupsOpen = Astro.url.searchParams.get('groups') === 'open';
 
 // The archived view is the ONLY one that shows them; every other filter hides
 // them, which is what archiving is for.
@@ -45,6 +93,14 @@ if (filter === 'incomplete') {
   where.push(sql`(birthday is null or birthday = ''
                   or address_street is null or address_street = '')`);
 }
+/* Membership, as a predicate on this table rather than a join — a join would
+   duplicate a row for anyone in the group twice, which cannot happen today but
+   is the kind of thing that starts happening the week a second membership row
+   becomes legal. */
+if (groupId) {
+  where.push(sql`exists (select 1 from people_groups pg
+                          where pg.person_id = people.id and pg.group_id = ${groupId})`);
+}
 
 const demo = demoOn(Astro.url, user);
 const rows = (await db.select().from(schema.people)
@@ -54,12 +110,29 @@ const rows = (await db.select().from(schema.people)
   // Display only — nothing is written, so demo mode cannot corrupt anything.
   .map((r) => demoPerson(r, r.id, demo));
 
+const groups = await db.select({
+  id: schema.groups.id, name: schema.groups.name, description: schema.groups.description,
+  members: sql<number>`(select count(*) from people_groups pg where pg.group_id = groups.id)`,
+  reachable: sql<number>`(
+    select count(*) from people_groups pg
+      join people p on p.id = pg.person_id
+     where pg.group_id = groups.id and p.archived = 0
+       and p.phone_e164 is not null and p.sms_consent = 'opted_in')`,
+}).from(schema.groups).orderBy(asc(schema.groups.name));
+const chosenGroup = groups.find((g) => g.id === groupId) ?? null;
+
 const FILTERS: [string, string][] = [
   ['', 'Everyone'], ['unknown', 'Unconfirmed'], ['adults', 'Adults'],
   ['children', 'Children'], ['no-email', 'No email'],
   ['incomplete', 'Missing details'],
 ];
-const href = (f: string) => `/people${f || q ? '?' : ''}${[f && `filter=${f}`, q && `q=${encodeURIComponent(q)}`].filter(Boolean).join('&')}`;
+/** A link to this same view with one thing changed. Everything else on screen
+ *  — the search, the chip, the group — has to survive being clicked. */
+const href = (f: string, g: number = groupId) => {
+  const parts = [f && `filter=${f}`, q && `q=${encodeURIComponent(q)}`,
+                 g && `group=${g}`].filter(Boolean);
+  return `/people${parts.length ? '?' : ''}${parts.join('&')}`;
+};
 ---
 <AppLayout title="People" user={user}>
   {demo && (
@@ -77,9 +150,32 @@ const href = (f: string) => `/people${f || q ? '?' : ''}${[f && `filter=${f}`, q
   <form method="GET" action="/people" style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
     <input name="q" value={q} placeholder="Search name, email or phone"
            style="flex:1; min-width:220px; min-height:44px; padding:9px 12px; border:1px solid var(--hair); border-radius:6px;" />
+    {/* A dropdown rather than another row of chips: groups are made by the pastor
+        and there is no ceiling on how many there will be, so this has to still
+        work at thirty of them. It submits with the search box, so a group and
+        a search narrow together. */}
+    {groups.length > 0 && (
+      <label class="vh-label">
+        <span class="vh">Group</span>
+        <select name="group" style="min-height:44px; min-width:180px;">
+          <option value="">Any group</option>
+          {groups.map((g) => (
+            <option value={g.id} selected={g.id === groupId}>{g.name}</option>
+          ))}
+        </select>
+      </label>
+    )}
     {filter && <input type="hidden" name="filter" value={filter} />}
     <button class="btn btn--ghost" type="submit">Search</button>
   </form>
+
+  {chosenGroup && (
+    <p class="muted" style="margin:-6px 0 16px; font-size:15px;">
+      Showing <strong>{chosenGroup.name}</strong> only — {chosenGroup.members}
+      {chosenGroup.members === 1 ? ' person' : ' people'} in this group.
+      {' '}<a href={href(filter, 0)}>Show everyone</a>.
+    </p>
+  )}
 
   <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
     {FILTERS.map(([f, label]) => (
@@ -141,6 +237,74 @@ const href = (f: string) => `/people${f || q ? '?' : ''}${[f && `filter=${f}`, q
       </table>
     </div>
   )}
+
+  {/* Making and deleting the lists themselves. A fold, because it is done a
+      handful of times a year while the table above it is read every week.
+      Adding a PERSON to a group is not here — it is on their own page, beside
+      everything else about them. */}
+  <details class="card" id="groups" style="margin-top:26px;" open={groupsOpen || !!groupError}>
+    <summary class="fold">
+      Groups
+      <span class="muted fold__n">
+        {groups.length === 0 ? 'none yet'
+          : `${groups.length} ${groups.length === 1 ? 'list' : 'lists'}`}
+      </span>
+    </summary>
+
+    <p class="muted" style="max-width:58ch; margin:14px 0 18px;">
+      Named lists for sending to part of the church rather than everyone, and for
+      filtering this page. Add somebody to a group from their own page.
+    </p>
+
+    {groupError && <p class="notice">{groupError}</p>}
+
+    <form method="POST" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:22px;">
+      <input type="hidden" name="action" value="create-group" />
+      <label class="field" style="margin:0; flex:1; min-width:190px;">
+        <span>Name</span><input name="name" placeholder="Fairhaven Youth parents" required />
+      </label>
+      <label class="field" style="margin:0; flex:2; min-width:210px;">
+        <span>What it is for</span><input name="description" placeholder="Optional" />
+      </label>
+      <button class="btn" type="submit">Create</button>
+    </form>
+
+    {groups.length === 0 ? (
+      <p class="muted" style="margin:0;">
+        No groups yet. Until there is one, Messaging can only send to everyone.
+      </p>
+    ) : (
+      <div class="t-wrap" style="overflow-x:auto;">
+        <table class="t-stack">
+          <thead><tr><th>Group</th><th>People</th><th>Can be texted</th><th></th></tr></thead>
+          <tbody>
+            {groups.map((g) => (
+              <tr>
+                <td>
+                  <a href={`/people?group=${g.id}`} style="font-weight:600;">{g.name}</a>
+                  {g.description && <><br /><span class="muted" style="font-size:14px;">{g.description}</span></>}
+                </td>
+                <td data-label="People">{g.members}</td>
+                <td data-label="Can be texted">
+                  {g.reachable}
+                  {g.members > g.reachable && (
+                    <span class="muted"> · {g.members - g.reachable} without a number or opt-in</span>
+                  )}
+                </td>
+                <td data-label="">
+                  <form method="POST" onsubmit="return confirm('Delete this group? Nobody is removed from the church — only the list.')">
+                    <input type="hidden" name="action" value="delete-group" />
+                    <input type="hidden" name="groupId" value={g.id} />
+                    <button class="btn btn--ghost" style="min-height:36px; padding:6px 12px;" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </details>
 </AppLayout>
 
 <style>
@@ -157,4 +321,10 @@ const href = (f: string) => `/people${f || q ? '?' : ''}${[f && `filter=${f}`, q
               letter-spacing:.04em; }
   .on  { color:#1e5b28; }
   .off { color:#b6ada0; text-decoration:line-through; }
+
+  /* The group picker needs a name for a screen reader and no name on screen —
+     the "Any group" option already says what it is to everyone else. */
+  .vh-label { display: flex; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap; }
 </style>

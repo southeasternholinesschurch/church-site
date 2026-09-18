@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db';
 import { estimateCost } from './sms';
 
@@ -47,25 +47,41 @@ export interface Audience {
  * The other builder is lib/kids-recipients.ts. It carries the same warning.
  */
 export async function buildAudience(
-  env: { DB: D1Database }, groupId: number | null,
+  env: { DB: D1Database }, groupId: number | null, personIds?: number[] | null,
 ): Promise<Audience> {
   const db = getDb(env);
+  const cols = {
+    id: schema.people.id, firstName: schema.people.firstName,
+    lastName: schema.people.lastName, phoneE164: schema.people.phoneE164,
+    smsConsent: schema.people.smsConsent,
+  };
 
-  const base = groupId
-    ? db.select({
-        id: schema.people.id, firstName: schema.people.firstName,
-        lastName: schema.people.lastName, phoneE164: schema.people.phoneE164,
-        smsConsent: schema.people.smsConsent,
-      }).from(schema.people)
-        .innerJoin(schema.peopleGroups, eq(schema.peopleGroups.personId, schema.people.id))
-        .where(and(eq(schema.people.archived, false), eq(schema.peopleGroups.groupId, groupId)))
-    : db.select({
-        id: schema.people.id, firstName: schema.people.firstName,
-        lastName: schema.people.lastName, phoneE164: schema.people.phoneE164,
-        smsConsent: schema.people.smsConsent,
-      }).from(schema.people).where(eq(schema.people.archived, false));
+  /*
+   * NAMED INDIVIDUALS WIN OVER A GROUP, and an EMPTY LIST IS NOBODY.
+   *
+   * That second sentence is the whole reason this is written out rather than
+   * folded into the ternary below. `personIds` of `[]` must mean "you picked
+   * nobody", but every other shape of "no value" in this function means
+   * "everyone" — so a falsy check here would turn an empty selection into a
+   * text to the entire church. Same ordering as the schedule runner, which
+   * reads recipientIds before groupId.
+   *
+   * Consent is NOT re-implemented for this path: the rows join the same loop
+   * below, so naming somebody by hand is not a way around their opt-out.
+   */
+  const base = personIds
+    ? (personIds.length === 0
+        ? null
+        : db.select(cols).from(schema.people)
+            .where(and(eq(schema.people.archived, false),
+                       inArray(schema.people.id, personIds))))
+    : groupId
+      ? db.select(cols).from(schema.people)
+          .innerJoin(schema.peopleGroups, eq(schema.peopleGroups.personId, schema.people.id))
+          .where(and(eq(schema.people.archived, false), eq(schema.peopleGroups.groupId, groupId)))
+      : db.select(cols).from(schema.people).where(eq(schema.people.archived, false));
 
-  const rows = await base;
+  const rows = base ? await base : [];
 
   const excluded = { noNumber: 0, optedOut: 0, noConsent: 0 };
   const recipients: Recipient[] = [];
@@ -78,7 +94,7 @@ export async function buildAudience(
     recipients.push({ personId: r.id, name: `${r.firstName} ${r.lastName}`, phoneE164: r.phoneE164 });
   }
 
-  // Collapse to handsets. Luke and Nora Kingsley share a mobile; sending twice
+  // Collapse to handsets. Luke and Erin Kingsley share a mobile; sending twice
   // to one phone looks broken and costs twice as much.
   const byPhone = new Map<string, Recipient[]>();
   for (const r of recipients) byPhone.set(r.phoneE164, [...(byPhone.get(r.phoneE164) ?? []), r]);

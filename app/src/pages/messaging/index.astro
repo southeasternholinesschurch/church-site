@@ -1,12 +1,14 @@
 ---
 import AppLayout from '../../layouts/AppLayout.astro';
 import { readForm } from '../../lib/form';
-import { getDb, schema } from '../../db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { buildAudience, monthToDate } from '../../lib/recipients';
 import { isDemoInstance } from '../../lib/demo-instance';
 import { smsConfigured, COST_PER_SEGMENT_USD } from '../../lib/sms';
 import { getBirthdaySettings, setBirthdaySettings } from '../../lib/birthday-settings';
+import { invalidScheduleReason, WEEKDAYS, localNow, CHURCH_TZ } from '../../lib/schedules';
+import Replies from '../../components/Replies.astro';
 
 const user = Astro.locals.user!;
 const env = Astro.locals.runtime.env;
@@ -20,15 +22,86 @@ const db = getDb(env);
  * there is nothing to create each year and nothing to remember.
  */
 let birthdayError: string | null = null;
+let scheduleError: string | null = null;
 if (Astro.request.method === 'POST') {
   const form = await readForm(Astro.request);
-  if (String(form.get('action')) === 'birthdays') {
+  const action = String(form.get('action') ?? '');
+
+  if (action === 'birthdays') {
     birthdayError = await setBirthdaySettings(env, {
       on: form.get('on') === '1',
       time: String(form.get('time') ?? ''),
       body: String(form.get('body') ?? ''),
     }, user.email);
-    if (!birthdayError) return Astro.redirect('/messaging?birthdays=saved', 303);
+    if (!birthdayError) return Astro.redirect('/messaging?birthdays=saved#birthdays', 303);
+  }
+
+  /*
+   * SCHEDULING IS THE SAME FORM AS SENDING.
+   *
+   * It used to be a screen of its own, which meant writing a text and writing
+   * the same text for Saturday were different jobs in different places with
+   * two different audience pickers. They are one job with a "when" on it. The
+   * compose box posts here when "when" is anything but Now; when it is Now the
+   * script intercepts and calls /api/sms/send instead, because sending happens
+   * in slices and a form post cannot do that.
+   *
+   * The audience comes off ONE control. `groupId` is empty for everyone, a
+   * number for a group, or the literal "people" when individuals were ticked.
+   */
+  if (action === 'schedule') {
+    const when = String(form.get('when') ?? '') as 'once' | 'weekly';
+    const raw = String(form.get('groupId') ?? '');
+    const picked = form.getAll('person').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+
+    const draft = {
+      name: String(form.get('name') ?? '').trim(),
+      body: String(form.get('body') ?? '').trim(),
+      kind: when,
+      // Only the chosen audience is stored. Keeping the other would leave a
+      // group id on a schedule that sends to individuals, and the runner reads
+      // them in priority order — so a stale value would silently win.
+      groupId: raw && raw !== 'people' ? Number(raw) : null,
+      recipientIds: raw === 'people' && picked.length ? JSON.stringify(picked) : null,
+      sendAt: when === 'once' ? `${form.get('date') ?? ''}T${form.get('time') ?? ''}` : null,
+      weekday: when === 'weekly' ? Number(form.get('weekday')) : null,
+      localTime: when === 'weekly' ? String(form.get('timeOfDay') ?? '') : null,
+    };
+
+    if (when !== 'once' && when !== 'weekly') {
+      // Only reachable with JavaScript off, where Send was never going to work
+      // either — the meter, the confirmation and the slicing all need it.
+      scheduleError = 'Sending straight away needs JavaScript. Reload the page, '
+        + 'or pick a date and schedule it instead.';
+    } else {
+      scheduleError = invalidScheduleReason({
+        ...draft, recipientIds: picked.length ? picked : null });
+      if (!scheduleError && raw === 'people' && picked.length === 0) {
+        scheduleError = 'Choose at least one person.';
+      }
+    }
+
+    if (!scheduleError) {
+      await db.insert(schema.messageSchedules).values({
+        ...draft, active: true, createdBy: user.email, createdAt: nowIso(),
+      });
+      return Astro.redirect('/messaging?scheduled=saved#scheduled', 303);
+    }
+  }
+
+  if (action === 'schedule-toggle' || action === 'schedule-delete') {
+    const id = Number(form.get('id'));
+    if (id && action === 'schedule-toggle') {
+      await db.update(schema.messageSchedules)
+        .set({ active: String(form.get('active')) === '1' })
+        .where(eq(schema.messageSchedules.id, id));
+    }
+    // Queue rows it already produced are left alone: they are the record of
+    // what was actually sent, and deleting a rule should not rewrite history.
+    if (id && action === 'schedule-delete') {
+      await db.delete(schema.messageSchedules).where(eq(schema.messageSchedules.id, id));
+    }
+    return Astro.redirect('/messaging?scheduled=open#scheduled', 303);
   }
 }
 const birthdays = await getBirthdaySettings(env);
@@ -86,6 +159,91 @@ const byGroup = new Map(groupCounts.map((c) => [c.groupId, c]));
 const audienceFor = (id: number) => byGroup.get(id) ?? EMPTY_GROUP;
 const spend = await monthToDate(env);
 
+/**
+ * The people a text can actually reach, for the "specific people" picker.
+ *
+ * Only opted-in numbers are listed: offering somebody who cannot be texted
+ * would look like it worked and quietly send nothing.
+ *
+ * `handsetIx` is the trick that lets the browser count HANDSETS rather than
+ * ticks without ever being handed a phone number. Each distinct number gets an
+ * opaque index, the checkbox carries the index, and the count is the number of
+ * distinct indices ticked — so ticking a couple who share a mobile reads as
+ * one phone, which is what it will cost and what will arrive.
+ */
+const textable = await db.select({
+  id: schema.people.id, firstName: schema.people.firstName,
+  lastName: schema.people.lastName, phoneE164: schema.people.phoneE164,
+}).from(schema.people)
+  .where(and(eq(schema.people.archived, false), eq(schema.people.smsConsent, 'opted_in'),
+             sql`coalesce(phone_e164, '') != ''`))
+  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+
+const handsetIx = new Map<string, number>();
+for (const p of textable) {
+  if (!handsetIx.has(p.phoneE164!)) handsetIx.set(p.phoneE164!, handsetIx.size);
+}
+
+/** Everything already scheduled, with what each one has actually done. */
+const schedules = await db.select({
+  id: schema.messageSchedules.id, name: schema.messageSchedules.name,
+  body: schema.messageSchedules.body, kind: schema.messageSchedules.kind,
+  groupId: schema.messageSchedules.groupId, recipientIds: schema.messageSchedules.recipientIds,
+  sendAt: schema.messageSchedules.sendAt,
+  weekday: schema.messageSchedules.weekday, localTime: schema.messageSchedules.localTime,
+  active: schema.messageSchedules.active, lastRunAt: schema.messageSchedules.lastRunAt,
+  sent: sql<number>`(select count(*) from scheduled_messages sm
+                      where sm.schedule_id = message_schedules.id and sm.status = 'sent')`,
+  pending: sql<number>`(select count(*) from scheduled_messages sm
+                         where sm.schedule_id = message_schedules.id and sm.status = 'pending')`,
+  failed: sql<number>`(select count(*) from scheduled_messages sm
+                        where sm.schedule_id = message_schedules.id and sm.status = 'failed')`,
+}).from(schema.messageSchedules).orderBy(desc(schema.messageSchedules.id));
+
+const countIds = (raw: string | null) => {
+  try { const v = JSON.parse(raw ?? ''); return Array.isArray(v) ? v.length : 0; } catch { return 0; }
+};
+const audienceLabel = (s: typeof schedules[number]) => {
+  const n = countIds(s.recipientIds);
+  if (n) return n === 1 ? '1 person' : `${n} people`;
+  if (s.groupId) return groups.find((g) => g.id === s.groupId)?.name ?? 'Deleted group';
+  return 'Everyone';
+};
+const whenLabel = (s: typeof schedules[number]) =>
+  s.kind === 'once'
+    ? (s.sendAt ?? '').replace('T', ' at ')
+    : `Every ${WEEKDAYS[s.weekday ?? 0]} at ${s.localTime}`;
+
+const activeSchedules = schedules.filter((s) => s.active).length;
+const pausedSchedules = schedules.length - activeSchedules;
+const scheduleSaved = Astro.url.searchParams.get('scheduled') === 'saved';
+/* Deliberately NOT opened by `scheduleError`. That error is about the compose
+ * box at the top of the page — a missing name, no date — so throwing the list
+ * of existing schedules open in response is a non-sequitur that also pushes the
+ * error further off screen. */
+const schedulesOpen = scheduleSaved || Astro.url.searchParams.get('scheduled') === 'open';
+
+// The church's clock, so "18:00" on the form is unambiguous.
+const nowLocal = localNow(new Date());
+const clock = `${String(Math.floor(nowLocal.minutes / 60)).padStart(2, '0')}:${String(nowLocal.minutes % 60).padStart(2, '0')}`;
+const tzName = CHURCH_TZ.split('/').pop()!.replace('_', ' ');
+
+/*
+ * Enough to label the Replies fold without opening it.
+ *
+ * The whole point of a shut section is that you can tell from the outside
+ * whether it is worth opening, so the count and the date of the newest one are
+ * read here rather than by the component inside it.
+ */
+const [inbox] = await db.select({
+  n: sql<number>`count(*)`,
+  newest: sql<string | null>`max(created_at)`,
+}).from(schema.messageLog).where(eq(schema.messageLog.direction, 'in'));
+const inboundCount = inbox?.n ?? 0;
+const latestReply = inbox?.newest
+  ? new Date(inbox.newest).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  : null;
+
 const recent = await db.select({
   body: schema.messageLog.body,
   createdAt: schema.messageLog.createdAt,
@@ -117,49 +275,12 @@ const sends = [...recent.reduce((m, r) => {
   )}
 
   <div class="card" style="margin-bottom:20px;">
-    <h2 style="margin-top:0;">Automatic birthday texts</h2>
-    <p class="muted" style="margin:-6px 0 14px; max-width:62ch; font-size:15px;">
-      Turn this on once and it runs on its own — each person gets this message
-      on their own birthday, at the time you set. Nothing to schedule and
-      nothing to remember. Birthdays are read from the directory every morning,
-      so ones you add later start working by themselves.
-      {bcover && (
-        <> Right now <strong>{bcover.withBirthday ?? 0}</strong> of {bcover.reachable}
-        {' '}people who can be texted have a birthday on file.</>
-      )}
-    </p>
-    {birthdaysSaved && <p class="notice">Birthday settings saved.</p>}
-    {birthdayError && <p class="notice">{birthdayError}</p>}
-    <form method="POST">
-      <input type="hidden" name="action" value="birthdays" />
-      <div style="display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
-        <label class="field" style="margin:0;">
-          <span>Send them</span>
-          <select name="on">
-            <option value="0" selected={!birthdays.on}>Off</option>
-            <option value="1" selected={birthdays.on}>On</option>
-          </select>
-        </label>
-        <label class="field" style="margin:0;">
-          <span>Time of day</span>
-          <input type="time" name="time" value={birthdays.time} />
-        </label>
-      </div>
-      <label class="field">
-        <span>The message</span>
-        <textarea name="body" rows="3">{birthdays.body}</textarea>
-        <small class="muted">
-          <code>{'{first}'}</code> becomes their first name. Keep it to plain
-          straight quotes — a curly apostrophe triples what every birthday text
-          costs.
-        </small>
-      </label>
-      <button class="btn" type="submit">Save</button>
-    </form>
-  </div>
-
-  <div class="card" style="margin-bottom:20px;">
-    <form id="compose" data-configured={configured ? '1' : ''}>
+    {scheduleSaved && <p class="notice notice--ok">Scheduled. It is in the list below.</p>}
+    {scheduleError && <p class="notice">{scheduleError}</p>}
+    {/* method POST for scheduling; the script cancels it and calls the send API
+        instead when "when" is Now. */}
+    <form id="compose" method="POST" data-configured={configured ? '1' : ''}>
+      <input type="hidden" name="action" value="schedule" />
       <label class="field">
         <span>Send to</span>
         <select name="groupId" id="groupId">
@@ -176,8 +297,30 @@ const sends = [...recent.reduce((m, r) => {
                       data-no-consent={c.noConsent}>{g.name}</option>
             );
           })}
+          {/* A sentinel, not a group id — the handler reads "people" and looks
+              at the ticked boxes instead. Everything else in this list is
+              either "" for everyone or a real group id. */}
+          <option value="people">Specific people…</option>
         </select>
       </label>
+
+      <div id="picker-wrap" style="display:none; margin-bottom:16px;">
+        <input id="pfilter" class="pfilter" type="search"
+               placeholder="Type a name to narrow the list…" />
+        <div class="picker">
+          {textable.map((p) => (
+            <label class="pick" data-name={`${p.firstName} ${p.lastName}`.toLowerCase()}>
+              <input type="checkbox" name="person" value={p.id}
+                     data-h={handsetIx.get(p.phoneE164!)} />
+              <span>{p.firstName} {p.lastName}</span>
+            </label>
+          ))}
+        </div>
+        <p class="muted" style="margin:8px 0 0; font-size:14px;">
+          {textable.length} people can be texted. Anyone without a number, or who
+          has not opted in, is not on this list.
+        </p>
+      </div>
 
       <p class="muted" id="audience" style="margin:-8px 0 16px; font-size:15px;"
          data-handsets={everyone.handsets.length}>
@@ -192,7 +335,7 @@ const sends = [...recent.reduce((m, r) => {
       <label class="field">
         <span>Message</span>
         <textarea name="body" id="body" rows="5"
-                  placeholder="This is Pastor the pastor with Fairhaven Community Church…"></textarea>
+                  placeholder="This is the pastor with Fairhaven Community…"></textarea>
       </label>
 
       {/* Guidance, not a hardcoded prefix. A2P rules want the sender
@@ -201,6 +344,49 @@ const sends = [...recent.reduce((m, r) => {
         Say who you are somewhere in the message. Recipients see a number they do
         not recognise, and identifying yourself is both courteous and what the
         carriers expect.
+      </p>
+
+      {/* WHEN. The one control that used to be a separate screen.
+          Everything above this — who it goes to, what it says, what it costs —
+          is identical whether it leaves now or on Saturday, which is exactly
+          why keeping two forms meant maintaining the same form twice. */}
+      <div class="row">
+        <label class="field" style="margin:0; flex:1; min-width:200px;">
+          <span>When</span>
+          <select name="when" id="when">
+            <option value="now">Send it now</option>
+            <option value="once">Later, on a date</option>
+            <option value="weekly">Every week</option>
+          </select>
+        </label>
+
+        <label class="field w w-later" style="margin:0; flex:2; min-width:220px; display:none;">
+          <span>Name it</span>
+          <input name="name" id="sched-name" placeholder="Saturday service reminder" />
+          <small class="muted">So you can find it in the list below. Never texted.</small>
+        </label>
+      </div>
+
+      <div class="row w w-once" style="display:none;">
+        <label class="field" style="margin:0;"><span>Date</span><input type="date" name="date" /></label>
+        <label class="field" style="margin:0;"><span>Time</span><input type="time" name="time" value="09:00" /></label>
+      </div>
+
+      <div class="row w w-weekly" style="display:none;">
+        <label class="field" style="margin:0;">
+          <span>Day</span>
+          <select name="weekday">
+            {WEEKDAYS.map((d, i) => <option value={i} selected={i === 6}>{d}</option>)}
+          </select>
+        </label>
+        <label class="field" style="margin:0;"><span>Time</span><input type="time" name="timeOfDay" value="18:00" /></label>
+      </div>
+
+      <p class="muted w w-later" style="display:none; margin:-4px 0 14px; font-size:14px;">
+        Checked every five minutes, so it goes out within a few minutes of the
+        time you set. Times are {tzName} time; it is currently {clock}.
+        {' '}<code>{'{first}'}</code> becomes their first name and
+        {' '}<code>{'{name}'}</code> their full name.
       </p>
 
       <div id="meter" class="meter">
@@ -244,6 +430,136 @@ const sends = [...recent.reduce((m, r) => {
       </ul>
     )}
   </div>
+
+  {/* What is already scheduled. Creating one is the compose box at the top of
+      this page, so this fold is only the list and the two things you do to a
+      row: pause it, or delete it. */}
+  <details class="card" id="scheduled" style="margin-bottom:20px;" open={schedulesOpen}>
+    <summary class="fold">
+      Scheduled texts
+      <span class="muted fold__n">
+        {schedules.length === 0 ? 'nothing scheduled'
+          : `${activeSchedules} active${pausedSchedules ? ` · ${pausedSchedules} paused` : ''}`}
+      </span>
+    </summary>
+
+    {schedules.length === 0 ? (
+      <p class="muted" style="margin:16px 0 0;">
+        Nothing scheduled yet. Write a text above and set <em>When</em> to a date
+        or to every week.
+      </p>
+    ) : (
+      <div class="t-wrap" style="overflow-x:auto; margin-top:16px;">
+        <table class="t-stack">
+          <thead><tr><th>Scheduled text</th><th>When</th><th>Sends to</th><th>Activity</th><th></th></tr></thead>
+          <tbody>
+            {schedules.map((s) => (
+              <tr style={s.active ? '' : 'opacity:.55;'}>
+                <td>
+                  <strong>{s.name}</strong>{!s.active && <span class="muted"> · paused</span>}
+                  <br /><span class="muted" style="font-size:14px;">{s.body}</span>
+                </td>
+                <td data-label="When">
+                  {whenLabel(s)}
+                  {s.lastRunAt && <><br /><span class="muted" style="font-size:13px;">last ran {s.lastRunAt}</span></>}
+                </td>
+                <td data-label="Sends to">{audienceLabel(s)}</td>
+                <td data-label="Activity">
+                  {s.sent} sent
+                  {s.pending > 0 && <span class="muted"> · {s.pending} queued</span>}
+                  {s.failed > 0 && <><br /><span style="color:#b3261e;">{s.failed} failed</span></>}
+                </td>
+                <td data-label="">
+                  <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <form method="POST">
+                      <input type="hidden" name="action" value="schedule-toggle" />
+                      <input type="hidden" name="id" value={s.id} />
+                      <input type="hidden" name="active" value={s.active ? '0' : '1'} />
+                      <button class="btn btn--ghost" style="min-height:36px; padding:6px 12px;" type="submit">
+                        {s.active ? 'Pause' : 'Resume'}
+                      </button>
+                    </form>
+                    <form method="POST" onsubmit="return confirm('Delete this scheduled text? Anything it has already sent stays in the record.')">
+                      <input type="hidden" name="action" value="schedule-delete" />
+                      <input type="hidden" name="id" value={s.id} />
+                      <button class="btn btn--ghost" style="min-height:36px; padding:6px 12px;" type="submit">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </details>
+
+  {/* Replies had a tab of their own on the nav bar. They belong here: reading
+      what came back and writing the next message are the same sitting. Shut by
+      default, with the count on the fold so there is no need to open it to
+      know whether anything is waiting. */}
+  <details class="card" id="replies" style="margin-bottom:20px;">
+    <summary class="fold">
+      Replies
+      <span class="muted fold__n">
+        {inboundCount === 0 ? 'none yet'
+          : `${inboundCount} received${latestReply ? ` · latest ${latestReply}` : ''}`}
+      </span>
+    </summary>
+    <div style="margin-top:16px;">
+      <Replies user={user} limit={8} moreHref="/messaging/inbox" />
+    </div>
+  </details>
+
+  {/* A standing arrangement that is set once a year at most, so it sits at the
+      bottom, shut. It opens by itself after a save or an error — a confirmation
+      nobody can see is not a confirmation. */}
+  <details class="card" id="birthdays" open={birthdaysSaved || !!birthdayError}>
+    <summary class="fold">
+      Automatic birthday texts
+      <span class="muted fold__n">{birthdays.on ? `on · ${birthdays.time}` : 'off'}</span>
+    </summary>
+    <div style="margin-top:16px;">
+      <p class="muted" style="margin:-6px 0 14px; max-width:62ch; font-size:15px;">
+        Turn this on once and it runs on its own — each person gets this message
+        on their own birthday, at the time you set. Nothing to schedule and
+        nothing to remember. Birthdays are read from the directory every morning,
+        so ones you add later start working by themselves.
+        {bcover && (
+          <> Right now <strong>{bcover.withBirthday ?? 0}</strong> of {bcover.reachable}
+          {' '}people who can be texted have a birthday on file.</>
+        )}
+      </p>
+      {birthdaysSaved && <p class="notice">Birthday settings saved.</p>}
+      {birthdayError && <p class="notice">{birthdayError}</p>}
+      <form method="POST">
+        <input type="hidden" name="action" value="birthdays" />
+        <div style="display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
+          <label class="field" style="margin:0;">
+            <span>Send them</span>
+            <select name="on">
+              <option value="0" selected={!birthdays.on}>Off</option>
+              <option value="1" selected={birthdays.on}>On</option>
+            </select>
+          </label>
+          <label class="field" style="margin:0;">
+            <span>Time of day</span>
+            <input type="time" name="time" value={birthdays.time} />
+          </label>
+        </div>
+        <label class="field">
+          <span>The message</span>
+          <textarea name="body" rows="3">{birthdays.body}</textarea>
+          <small class="muted">
+            <code>{'{first}'}</code> becomes their first name. Keep it to plain
+            straight quotes — a curly apostrophe triples what every birthday text
+            costs.
+          </small>
+        </label>
+        <button class="btn" type="submit">Save</button>
+      </form>
+    </div>
+  </details>
 </AppLayout>
 
 <style>
@@ -252,6 +568,17 @@ const sends = [...recent.reduce((m, r) => {
            border-radius: var(--radius); }
   #meter-seg { font-weight: 700; }
   .meter--split #meter-seg { color: var(--red); }
+
+  .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .pfilter { width:100%; max-width:340px; margin-bottom:8px; }
+  /* Scrolls rather than running to 75 rows — the picker has to stay a control
+     on the page, not become the page. */
+  .picker { max-height:230px; overflow-y:auto; border:1px solid var(--hair);
+            border-radius:var(--radius); padding:6px 10px; background:#fff; }
+  .pick { display:flex; gap:9px; align-items:center; padding:5px 0; font-size:15px; cursor:pointer; }
+  .pick input { width:16px; height:16px; flex:none; }
+  .pick[hidden] { display:none; }
+
 </style>
 
 <script>
@@ -267,46 +594,116 @@ const sends = [...recent.reduce((m, r) => {
   // Cast via unknown, as the existing lookup below does — the DOM lib's
   // HTMLElement and HTMLSelectElement do not overlap enough for a direct cast.
   const groupSel = document.getElementById('groupId') as unknown as HTMLSelectElement;
+  const whenSel = document.getElementById('when') as unknown as HTMLSelectElement;
+  const nameField = document.getElementById('sched-name') as HTMLInputElement;
+  const pickerWrap = document.getElementById('picker-wrap') as HTMLElement;
+  const picks = [...document.querySelectorAll<HTMLElement>('.pick')];
   const configured =
     (document.getElementById('compose') as HTMLFormElement).dataset.configured === '1';
 
+  const pickedBoxes = () =>
+    [...document.querySelectorAll<HTMLInputElement>('input[name="person"]:checked')];
+
+  /**
+   * Which shape the ONE form is in at this moment.
+   *
+   * Sending now and scheduling are the same fields with a different verb, so
+   * rather than two forms there is one and this decides what it looks like:
+   * which time fields are on screen, whether the name is required, what the
+   * button says, and — the part that matters — whether submitting posts the
+   * page or is intercepted and streamed to the send API.
+   */
+  function syncWhen() {
+    const mode = whenSel.value;                 // 'now' | 'once' | 'weekly'
+    const later = mode !== 'now';
+    for (const el of document.querySelectorAll<HTMLElement>('.w')) {
+      const show = el.classList.contains(`w-${mode}`)
+        || (later && el.classList.contains('w-later'));
+      el.style.display = show ? (el.classList.contains('row') ? 'flex' : 'block') : 'none';
+    }
+    // Required only while it is on screen, or the browser refuses to submit a
+    // form over a field nobody can see and says nothing about why.
+    nameField.required = later;
+    const date = document.querySelector<HTMLInputElement>('input[name="date"]')!;
+    date.required = mode === 'once';
+    body.required = later;
+
+    sendBtn.textContent = later ? 'Schedule it' : 'Send';
+    renderAudience();
+  }
+
+  /** The picker only exists when "specific people" is chosen. */
+  function syncAudienceControl() {
+    pickerWrap.style.display = groupSel.value === 'people' ? 'block' : 'none';
+    renderAudience();
+  }
+
   /**
    * Keep the audience line, the cost estimate and the confirm dialog in step
-   * with the group that is actually selected.
+   * with the audience that is actually selected.
    *
-   * Every count is already on the <option> as a data attribute, so choosing a
-   * group costs no request. Before this, the line was rendered once for
+   * Every group's counts are already on its <option> as data attributes, so
+   * choosing one costs no request. Before this, the line was rendered once for
    * "everyone" and never updated — so a group with nobody in it displayed the
    * whole church's phone count, the dialog asked to confirm sending to that
    * many, and the only thing that knew better was the API, which refused the
    * send after the fact with "Nobody in that group can be texted."
    *
-   * Send is disabled outright at zero. There is nothing to confirm.
+   * Ticked individuals are counted by HANDSET, not by tick: `data-h` is an
+   * opaque index per distinct phone number, so a couple sharing a mobile reads
+   * as one phone — which is what it costs and what arrives.
+   *
+   * Send is disabled outright at zero. There is nothing to confirm. Scheduling
+   * is NOT disabled at zero: a weekly text to a group that is empty today is a
+   * reasonable thing to set up before filling the group.
    */
   function renderAudience() {
-    const o = groupSel.selectedOptions[0];
-    const n = Number(o?.dataset.handsets ?? 0);
-    const people = Number(o?.dataset.people ?? 0);
-
+    const later = whenSel.value !== 'now';
+    let n: number, people: number;
     const notes: string[] = [];
-    if (people !== n) notes.push(`${people} people — some share a phone`);
-    for (const [count, label] of [
-      [Number(o?.dataset.noNumber ?? 0), 'with no number on file'],
-      [Number(o?.dataset.optedOut ?? 0), 'opted out'],
-      [Number(o?.dataset.noConsent ?? 0), 'not asked yet'],
-    ] as [number, string][]) if (count) notes.push(`${count} ${label}`);
+
+    if (groupSel.value === 'people') {
+      const boxes = pickedBoxes();
+      people = boxes.length;
+      n = new Set(boxes.map((b) => b.dataset.h)).size;
+      if (people !== n) notes.push(`${people} people — some share a phone`);
+    } else {
+      const o = groupSel.selectedOptions[0];
+      n = Number(o?.dataset.handsets ?? 0);
+      people = Number(o?.dataset.people ?? 0);
+      if (people !== n) notes.push(`${people} people — some share a phone`);
+      for (const [count, label] of [
+        [Number(o?.dataset.noNumber ?? 0), 'with no number on file'],
+        [Number(o?.dataset.optedOut ?? 0), 'opted out'],
+        [Number(o?.dataset.noConsent ?? 0), 'not asked yet'],
+      ] as [number, string][]) if (count) notes.push(`${count} ${label}`);
+    }
 
     const strong = document.createElement('strong');
     strong.textContent = String(n);
     aud.replaceChildren(strong, ` ${n === 1 ? 'phone' : 'phones'}`);
-    if (n === 0) aud.append(' — nobody here can be texted, so there is nothing to send');
+    if (n === 0) {
+      aud.append(groupSel.value === 'people'
+        ? ' — nobody ticked yet'
+        : ' — nobody here can be texted, so there is nothing to send');
+    }
     if (notes.length) aud.append(` · ${notes.join(' · ')}`);
 
     aud.dataset.handsets = String(n);
-    sendBtn.disabled = !configured || n === 0;
+    sendBtn.disabled = later ? false : (!configured || n === 0);
     paint();
   }
-  groupSel.addEventListener('change', renderAudience);
+
+  groupSel.addEventListener('change', syncAudienceControl);
+  whenSel.addEventListener('change', syncWhen);
+  for (const p of picks) p.querySelector('input')?.addEventListener('change', renderAudience);
+
+  // Narrow a 75-name list to the one you want without scrolling it.
+  const pfilter = document.getElementById('pfilter') as HTMLInputElement | null;
+  pfilter?.addEventListener('input', () => {
+    const q = pfilter.value.trim().toLowerCase();
+    for (const p of picks) p.hidden = q ? !(p.dataset.name ?? '').includes(q) : false;
+  });
 
   function paint() {
     const info = countSegments(body.value);
@@ -331,15 +728,28 @@ const sends = [...recent.reduce((m, r) => {
   }
 
   body.addEventListener('input', paint);
-  // Not paint(): a reload can restore a previously chosen group, and the line
-  // must describe THAT group rather than the server's initial "everyone".
-  renderAudience();
+  // Not paint(): a reload can restore a previously chosen group, when, or set
+  // of ticks, and the form must describe THAT rather than the server's initial
+  // "everyone, now". syncWhen calls through to the other two.
+  syncAudienceControl();
+  syncWhen();
 
   document.getElementById('compose')!.addEventListener('submit', async (e) => {
+    /*
+     * Scheduling is an ordinary form post — let it through untouched.
+     *
+     * Only an immediate send is intercepted, and it has to be: the API sends a
+     * window at a time (see the loop below) and a form post cannot make the
+     * repeated calls that requires.
+     */
+    if (whenSel.value !== 'now') return;
+
     e.preventDefault();
     const text = body.value.trim();
     if (!text) return;
-    const groupId = (document.getElementById('groupId') as unknown as HTMLSelectElement).value || null;
+    const toPeople = groupSel.value === 'people';
+    const groupId = toPeople ? null : (groupSel.value || null);
+    const personIds = toPeople ? pickedBoxes().map((b) => Number(b.value)) : null;
     const info = countSegments(text);
     const n = handsets();
     if (!confirm(`Send this to ${n} phone${n === 1 ? '' : 's'}?\n\n`
@@ -371,7 +781,7 @@ const sends = [...recent.reduce((m, r) => {
     while (offset !== null) {
       const res = await fetch('/api/sms/send', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body: text, groupId, offset }),
+        body: JSON.stringify({ body: text, groupId, personIds, offset }),
       });
       const data = await res.json().catch(() => ({})) as SendReply;
       if (!res.ok) {

@@ -14,18 +14,33 @@ const path = Astro.url.pathname;
  * The staff chrome. Fairhaven Kids volunteers never see this layout at all — they get
  * KidsLayout, and the middleware never lets them reach a page that renders
  * this one.
+ *
+ * Five tabs came off this bar on 2026-09-17, and none of the pages went with
+ * them — a link is not a permission, and every one of these URLs still works
+ * if it is typed or bookmarked:
+ *
+ *   /messaging/numbers    Checking which numbers are textable. A setup job that
+ *                         has been done; unlinked rather than deleted so it is
+ *                         there the next time a batch of numbers is imported.
+ *   /messaging/inbox      Replies. Now also at the bottom of /messaging, which
+ *                         is where they actually get read.
+ *   /messaging/scheduled  Redirects to /messaging. Scheduling is a "when" on
+ *                         the compose box now, not a second form.
+ *   /groups               Redirects to /people, where groups now live.
+ *   /attendance/trends    Redirects to /attendance, carrying its kind filter.
+ *                         The chart is a fold under the table it describes.
+ *
+ * The rule each of these follows: a tab is for a JOB, not for a second half of
+ * one. Five of the fourteen here were extra doors into a job that already had
+ * a door.
  */
 const NAV: [string, string][] = [
   ['/', 'Dashboard'],
   ['/people', 'People'],
   ['/attendance', 'Attendance'],
-  ['/attendance/trends', 'Trends'],
   ['/messaging', 'Messaging'],
-  ['/messaging/scheduled', 'Scheduled'],
-  ['/messaging/numbers', 'Numbers'],
-  ['/messaging/inbox', 'Replies'],
-  ['/groups', 'Groups'],
   ['/bulletin', 'Bulletin'],
+  ['/signups', 'Sign-ups'],
   ['/website', 'Website'],
   ['/kids', 'Fairhaven Kids'],
   ['/staff', 'Access'],
@@ -95,10 +110,6 @@ const home = user ? homeFor(user.role) : '/';
             {nav.map(([href, label]) => (
               <a href={href} aria-current={path === href || (href !== '/' && path.startsWith(href)) ? 'page' : undefined}>{label}</a>
             ))}
-            <span class="bar__who">{user.name ?? user.email}</span>
-            <form method="POST" action="/auth/logout" style="margin:0">
-              <button class="bar__nav" style="background:none;border:0;color:rgba(244,239,231,.82);font:inherit;font-size:15px;cursor:pointer;padding:0">Sign out</button>
-            </form>
           </nav>
         </div>
       </header>
@@ -107,6 +118,19 @@ const home = user ? homeFor(user.role) : '/';
     <main class="wrap" style="padding-block: 28px 60px; position: relative; z-index: 1;">
       <slot />
     </main>
+
+    {/* Your name and the way out, off the bar and down here. See the note on
+        .acct in app.css for why. */}
+    {user && (
+      <footer class="acct">
+        <div class="wrap acct__in">
+          <span>Signed in as {user.name ?? user.email}</span>
+          <form method="POST" action="/auth/logout">
+            <button type="submit">Sign out</button>
+          </form>
+        </div>
+      </footer>
+    )}
 
     <style>
       /* The church building, behind the dashboard only.
@@ -135,7 +159,7 @@ const home = user ? homeFor(user.role) : '/';
        * page never sit directly on photography. */
       .backdrop::after {
         content: ""; position: absolute; inset: 0;
-        /* Only a soft landing under the app bar, then out of the way. the pastor
+        /* Only a soft landing under the app bar, then out of the way. The pastor
            faded this image himself before handing it over; stacking a heavy
            scrim on top of that washes the building out to nothing, which is
            what the first attempt did. */
@@ -148,6 +172,11 @@ const home = user ? homeFor(user.role) : '/';
       /* Cards sit ON the photograph, so they stop being translucent here —
        * otherwise the numbers are read against a moving picture. */
       .has-backdrop .card { background: rgba(255,255,255,.94); backdrop-filter: blur(2px); }
+      /* And so does the footer. The contrast figure quoted in app.css is tan
+       * against CREAM; against a photograph of a building it is whatever that
+       * pixel happens to be. The cream is put back underneath it here rather
+       * than darkening the text, which would undo the point of it being quiet. */
+      .has-backdrop .acct { background: var(--cream); }
     </style>
   </body>
 </html>

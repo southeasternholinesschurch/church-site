@@ -1,0 +1,146 @@
+---
+import { getDb, schema } from '../db';
+import { demoOn, demoPerson, demoBody } from '../lib/demo';
+import { desc, eq } from 'drizzle-orm';
+import { CHURCH_TZ } from '../lib/services';
+import { smsConfigured } from '../lib/sms';
+import type { Role } from '../lib/permissions';
+
+/**
+ * Replies, grouped by the number they came from.
+ *
+ * Without this the whole thing is a megaphone: texts go out, people answer,
+ * and the answers land in a table nobody opens. Somebody replying to a
+ * broadcast with a prayer request is exactly the message a church most needs
+ * to see.
+ *
+ * This was a page of its own with a tab on the nav bar. It is a COMPONENT now
+ * because replies are read in the middle of messaging, not as an errand —
+ * /messaging shows the last few at the bottom, and /messaging/inbox still
+ * renders the whole lot for when there is a backlog to work through.
+ */
+interface Props {
+  user: { email: string; name: string | null; role: Role };
+  /** How many to render. The in-page copy on /messaging shows far fewer. */
+  limit?: number;
+  /** Shown under the list when there are more than `limit`. */
+  moreHref?: string;
+}
+const { user, limit = 100, moreHref } = Astro.props;
+
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+const demo = demoOn(Astro.url, user);
+const inbound = await db.select({
+  id: schema.messageLog.id,
+  personId: schema.messageLog.personId,
+  phoneE164: schema.messageLog.phoneE164,
+  body: schema.messageLog.body,
+  createdAt: schema.messageLog.createdAt,
+  firstName: schema.people.firstName,
+  lastName: schema.people.lastName,
+  needsProfile: schema.people.needsProfile,
+})
+  .from(schema.messageLog)
+  .leftJoin(schema.people, eq(schema.messageLog.personId, schema.people.id))
+  .where(eq(schema.messageLog.direction, 'in'))
+  // One more than asked for, purely to know whether to offer the full list.
+  .orderBy(desc(schema.messageLog.id)).limit(limit + 1)
+  // An inbound text can say anything at all, so in demo mode the BODY is
+  // replaced too, not only the sender's name.
+  .then((rs) => rs.map((r) => ({
+    ...demoPerson(r, r.personId ?? r.id, demo),
+    body: demoBody(r.id, demo, r.body),
+  })));
+
+const more = inbound.length > limit;
+const rows = more ? inbound.slice(0, limit) : inbound;
+
+const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
+  dateStyle: 'medium', timeStyle: 'short', timeZone: CHURCH_TZ,
+});
+const configured = smsConfigured(env);
+---
+{demo && <p class="demo-flag">Demo mode — the people shown are invented. Counts and dates are real.</p>}
+
+{rows.length === 0 ? (
+  <p class="muted" style="margin:0;">Nobody has texted in yet.</p>
+) : (
+  <>
+    <div class="msgs">
+      {rows.map((m) => (
+        <div class="msg">
+          <div class="msg__head">
+            <span class="msg__who">
+              {m.personId
+                ? <a href={`/people/${m.personId}`}>{m.firstName} {m.lastName}</a>
+                : <span class="muted">Unknown number</span>}
+              {m.needsProfile && <> <span class="chip chip--warn">needs a name</span></>}
+            </span>
+            <span class="msg__num muted">{m.phoneE164}</span>
+            <span class="msg__at muted">{when(m.createdAt)}</span>
+          </div>
+          <p class="msg__body">{m.body || <em class="muted">(no text)</em>}</p>
+          {configured && (
+            <form class="msg__reply" data-to={m.phoneE164}>
+              <input name="reply" placeholder="Reply from the church number…" />
+              <button class="btn btn--ghost" type="submit">Send</button>
+              <span class="msg__status muted"></span>
+            </form>
+          )}
+        </div>
+      ))}
+    </div>
+    {more && moreHref && (
+      <p style="margin:16px 0 0;"><a href={moreHref}>See every reply →</a></p>
+    )}
+  </>
+)}
+
+<style>
+  /* Each reply is a bordered block rather than a .card, because this now
+     renders INSIDE a card on /messaging and a card within a card is two
+     borders saying one thing. */
+  .msgs { display: flex; flex-direction: column; gap: 12px; }
+  .msg { border: 1px solid var(--hair); border-radius: var(--radius); padding: 14px 16px; }
+  .msg__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 8px; }
+  .msg__who { font-weight: 600; }
+  .msg__num, .msg__at { font-size: 13px; }
+  .msg__at { margin-left: auto; }
+  .msg__body { margin: 0 0 12px; font-size: 17px; line-height: 1.6; }
+  .msg__reply { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .msg__reply input { flex: 1; min-width: 200px; font: inherit; min-height: 42px;
+    padding: 8px 12px; border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; }
+  .msg__status { font-size: 14px; }
+  @media (max-width: 700px) { .msg__at { margin-left: 0; width: 100%; } }
+
+  /* Unmistakable: a screenshot of invented data mistaken for real data is the
+     one way this feature could do harm. */
+  .demo-flag { background:#fdf0d9; border-left:4px solid #b8860b; color:#5c4405;
+               padding:10px 14px; margin:0 0 18px; font-size:14px; border-radius:3px; }
+</style>
+
+<script>
+  // Replies go from the church number, so a conversation stays with the church
+  // rather than landing on whichever volunteer happened to answer.
+  document.querySelectorAll('.msg__reply').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = form as HTMLFormElement;
+      const input = f.querySelector('input') as HTMLInputElement;
+      const status = f.querySelector('.msg__status')!;
+      const body = input.value.trim();
+      if (!body) return;
+      status.textContent = 'Sending…';
+      const res = await fetch('/api/sms/send', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body, to: (f as HTMLElement).dataset.to }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; sent?: number };
+      if (!res.ok || !data.sent) { status.textContent = data.error ?? 'Did not send.'; return; }
+      status.textContent = 'Sent.';
+      input.value = '';
+    });
+  });
+</script>

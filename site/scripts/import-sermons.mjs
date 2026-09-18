@@ -119,7 +119,7 @@ function optional(part) {
 
 /**
  * Both title formats:
- *   "August 23, 2026 | Sunday Morning Worship | Pastor the pastor | The Narrow Gate"
+ *   "August 23, 2026 | Sunday Morning Worship | Pastor Reeve | The Narrow Gate"
  *   "August 23, 2026 Sunday Morning Worship"   (legacy — existing uploads)
  */
 function parseServiceTitle(title) {

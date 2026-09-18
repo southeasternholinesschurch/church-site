@@ -23,7 +23,7 @@ and the app at `app.example.org`.
 
 ---
 
-## Current state (2026-09-04)
+## Current state (2026-09-17)
 
 Both halves are live and in use.
 
@@ -44,7 +44,18 @@ database, attendance and visitor check-in, trends, groups, the bulletin editor w
 publish button, SMS broadcast and replies through Twilio, the Monday singing reminder
 on a cron, and the member directory with photo upload and member self-edit. Since
 2026-09-04 it also carries **scheduled texts**, **automatic birthday texts** and a
-**number checker** — see "Scheduled and automatic texts" below.
+**number checker** — see "Scheduled and automatic texts" below. Since 2026-09-17 it
+also carries **sign-up sheets** — see that section below.
+
+**The nav bar is nine tabs and was ten more.** Four screens were folded into the
+page that already asked their question, which is worth knowing before hunting for a
+URL that has gone: Scheduled and Replies are now part of `/messaging`, Trends is a
+fold on `/attendance`, and Groups is a fold on `/people` with a picker beside the
+search box. `/messaging/inbox`, `/messaging/numbers` and `/attendance/trends` still
+render — they are off the bar, not deleted, and remain perfectly good bookmarks.
+`/groups` redirects to `/people?groups=open`. The signed-in name and Sign out moved
+off the bar to a tan line at the foot of every page (AppLayout only — the children's
+section and the directory keep theirs, for reasons in that commit).
 
 **The directory has real data.** On 2026-09-04 the printed church directory was
 imported from a CSV: birthdays went 16 -> 97, anniversaries 3 -> 43, addresses 17 -> 91.
@@ -71,7 +82,7 @@ procedure, the verification recipe, and a log of every bug this build hit.
            route for /api/live-status). NOT the Astro Cloudflare adapter.
 /app       Astro SSR on @astrojs/cloudflare → Cloudflare Workers. D1 (SQLite) for data,
            R2 for member photos. Staff auth via Google OAuth; members via SMS magic link.
-/workers   Three small Cloudflare Workers:
+/workers   Two small Cloudflare Workers:
              rebuild-cron/  — daily cron that triggers a site rebuild
              sms-cron/      — hourly cron that POSTs /api/sms/run-due in the app
 /docs      This file, plus anything else operational
@@ -110,7 +121,7 @@ None of these are committed. Set them where noted.
   Two traps here, both of which cost time the first time round — read this before rotating
   the key:
 
-  1. **The Worker is named `southeaster-holiness-church-site-1`**, after the repo — NOT
+  1. **The Worker is named `yourchurch-site-1`**, after the repo — NOT
      `your-church-site`, which is what `site/wrangler.jsonc` says. Workers Builds
      ignores that field and uses the project name, so deploys are unaffected, but anything
      run from the CLI (`npx wrangler secret put …`) targets the name in the config and will
@@ -264,7 +275,7 @@ and set the `seh_session` cookie to its id. For a member session, mint a row in
 The rest of this section is the record of how each piece was set up, 2026-08-29.
 
 1. ✅ **Repo pushed** to the church-owned GitHub account, via a dedicated SSH deploy key.
-2. ✅ **Cloudflare project created**: `southeaster-holiness-church-site-1`, connected to the
+2. ✅ **Cloudflare project created**: `yourchurch-site-1`, connected to the
    GitHub repo. Root directory `site`, build command `npm run build`, deploy command
    `npx wrangler deploy` (Cloudflare's own default for this project type — see below).
    **Live at https://example.org since 2026-08-31.**
@@ -319,7 +330,9 @@ is not live until someone runs that.
 
 *Staff* sign in with Google and get the dashboard: people, attendance, trends,
 messaging, groups, the bulletin editor. `src/middleware.ts` is deny-by-default — every
-route requires a staff session unless its prefix is listed in `PUBLIC_PREFIXES`.
+route requires a staff session unless its prefix is listed in `PUBLIC_PREFIXES`,
+which lives in `src/lib/public-paths.ts` so that the list can be tested without
+standing up a request.
 
 *Members* never sign in at all. They receive a personal link by text, tap it once, and
 that device is remembered for 90 days. Their sessions live in `member_sessions`, a
@@ -333,6 +346,15 @@ check the column; two tables cannot be confused.
 `Astro.locals.user`.** Anything under `/directory/*` that needs the staff user must
 call `readSession()` itself. This silently broke the directory's "staff can view it
 too" fallback for weeks — it was written, it typechecked, and it never once ran.
+
+**`PUBLIC_PREFIXES` is matched with `startsWith`, and two of the entries are two
+characters apart.** The sign-up sheets are public at `/signup/{token}`; the staff builder
+that creates them is `/signups`. `'/signup/'` does not match `/signups`. `'/signup'`
+would, and would hand the whole back end to the internet. The list and the match were
+lifted out of the middleware into `lib/public-paths.ts` for exactly this — a list inside
+the middleware cannot be tested without standing up a request, and `test/signups.test.ts`
+now holds that pair apart. Add a prefix there, not in the middleware, and add the test
+with it.
 
 **Never use `new Date('YYYY-MM-DD')` on a birthday or anniversary.** It parses as UTC
 midnight, which in Fairhaven is the evening *before*, so every date renders a day
@@ -530,19 +552,34 @@ block, the tight policy goes on blocking unpkg and the CMS breaks with no clue w
 
 ## Scheduled and automatic texts
 
-Three separate things, deliberately not one screen.
+**Writing a text and scheduling one are the same job, so they are one form.**
+`/messaging` has a single compose box with one audience picker, one segment meter and a
+**when**: send it now, once on a date, or every week. Choosing anything but "now"
+reveals a name and the time fields and turns Send into Schedule it. `/messaging/scheduled`
+no longer exists as a screen — it was a second form asking the same two questions and
+adding only the third.
 
-**Scheduled texts** (`/messaging/scheduled`) — write a text now, send it later: once on
-a date, or every week. Audience is one of three, read in this order: **named
-individuals**, then **a group**, then **everyone who can be texted**. Only the chosen
-one is stored, because the runner reads them in that priority order and a leftover
-group id would silently win.
+Sending **now** is intercepted and streamed to `/api/sms/send` in slices, because a
+plain form post cannot make the repeated calls the 50-subrequest cap forces. Scheduling
+is an ordinary post and goes straight through.
 
-**Automatic birthday texts** (a card on `/messaging`) — a switch, a time of day and the
-message. NOT a schedule: a birthday text is a standing arrangement, not something you
-sit down and arrange each year. Off until switched on. `{first}` is required in the
-wording; saving is refused without it, because a birthday text with no name in it reads
-like a bulk mailout.
+Audience is one of three, read in this order: **named individuals**, then **a group**,
+then **everyone who can be texted**. Only the chosen one is stored, because the runner
+reads them in that priority order and a leftover group id would silently win. The picker
+counts **handsets, not ticks** — a couple sharing a mobile is one phone, which is what
+it costs and what arrives — and each checkbox carries an opaque index rather than the
+number itself.
+
+⚠️ **In `buildAudience`, an empty list of named people means NOBODY**, where every other
+empty value in that function means everyone. Getting it backwards texts the whole church.
+It is written into the code rather than left to be found.
+
+**Automatic birthday texts** (a fold at the bottom of `/messaging`) — a switch, a time
+of day and the message. NOT a schedule: a birthday text is a standing arrangement, not
+something you sit down and arrange each year. Off until switched on. `{first}` is
+required in the wording; saving is refused without it, because a birthday text with no
+name in it reads like a bulk mailout. The fold opens itself after a save or an error,
+because a confirmation nobody can see is not a confirmation.
 
 **Nothing is worked out in advance.** A rule is expanded into per-recipient rows only
 when it comes DUE, so the audience is whoever qualifies at send time. That is what makes
@@ -610,6 +647,73 @@ null and the section is simply absent — it must never take the bulletin down.
 `eventWhen()` omits the date on single-day events because `EventCard` prints a stacked
 date block beside it; the bulletin has no such block and passes `withDate: true`. Without
 that, "Coming Up" said "Sunday · 6:00 PM" with no way to tell which Sunday.
+
+## Sign-up sheets
+
+Three kinds of paper sheet come off the foyer table: a **meal train** across a span of
+days, a **list** of names for an event or a volunteer call, and a **pitch-in** where
+staff decide the parts first and people sign up against them.
+
+They are one thing underneath — a list of **slots** with a capacity, that people
+**claim**. The kind decides only how the slots get made and what the form asks for.
+The public page, the taken/available display, the corrections and the reminders are
+written once. There is no third feature here to maintain.
+
+**Built at `/signups`, reached at `/signup/{token}`.** Deliberately not in the website's
+menu: the link goes in the bulletin, in a text, or on the link-tree the pew NFC tags
+point at. The token is 128 bits, the same as a directory invite.
+
+- `/signups` — the list, and where one is created. Copy the link from here.
+- `/signups/{id}` — one page, four sections in the order you think in: what it is for,
+  what people are signing up for, who has signed up (editable — the office takes changes
+  by phone), and how to share it.
+- `/signup/{token}` — the public sheet, on `PublicLayout.astro`. No client JavaScript
+  anywhere but the copy button; each open slot is a `<details>` holding its own small
+  form. A sheet with one slot does not fold at all — there is nothing to choose between.
+
+**Two families being told they both have Tuesday is the one failure this cannot have**,
+so the database is the guard and not a count taken beforehand: `UNIQUE (slot_id, seat)`,
+compute the next seat, insert on-conflict-do-nothing, and if nothing comes back somebody
+was quicker. That is also why slots are child rows rather than a JSON column like
+`bulletins.announcements` — a slot is pointed at by sign-ups made from different phones
+at the same moment, so it needs an id that survives an edit to the row above it.
+
+**A sheet shuts itself once every day on it has passed.** Nobody remembers to press
+Close, and a link in an old bulletin should not go on collecting meals for a family who
+stopped needing them a month ago. A draft renders the same page as a token that never
+existed, so the page cannot be used to test tokens.
+
+**Setting the days is a set, not a fill.** Narrowing a meal train's range takes the
+dropped days back off — except a day somebody has already claimed, which is never
+removed and is called out on the page instead. Undated rows are left alone, and a range
+the app refuses (a mistyped year, a backwards span) changes nothing at all.
+
+### The reminder, and the consent obligation
+
+A person can ask to be texted the day before their day. The window runs from **09:00 the
+day before to 09:00 on the day** — a grace day, on the same reasoning as the singing
+reminder: a cron outage should mean a late reminder, not a silent one. Past that, no text
+and a visible `skipped` row. `source_key` is `signup:{id}`, and the unique index on it is
+the only thing preventing a second text.
+
+The body is validated as **one GSM-7 segment with the placeholders filled in**, not as
+written — `{first}` is seven characters and a real name can be eleven, so a template
+approved as typed slips into a second segment for a third of the church, quietly, on
+every reminder ever sent.
+
+**This made `signups` a third table holding a phone number and a consent decision**, and
+`lib/consent.ts` had said there were two. It has changed, and this is the part to be
+careful with:
+
+- A **member whose number is on file and already opted in** has nothing new stored. The
+  reminder reads their number from `people` at send time, so a change of number follows
+  them and a STOP stops them.
+- **Everyone else** gets a tick-box whose *label is the consent wording*. Unticked, or a
+  number that has already asked not to be texted, and nothing is stored at all.
+- A **STOP now reaches all three tables**, it turns off `remind` (the field the expansion
+  actually reads — recording the consent and leaving the flag set is an opt-out that
+  reads as handled in the log and texts the person anyway the next morning), and it
+  **cancels what is already queued**, which the table updates do nothing about.
 
 ## Importing member data (the printed directory, Breeze, anything else)
 

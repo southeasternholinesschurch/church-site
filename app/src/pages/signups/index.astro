@@ -1,0 +1,254 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { desc, inArray } from 'drizzle-orm';
+import { randomToken } from '../../lib/auth';
+import { localNow } from '../../lib/schedules';
+import {
+  closedReason, dayLabel, isSignupKind, LIST_SLOT_LABEL, sheetSummary, SIGNUP_KINDS,
+} from '../../lib/signups';
+
+/**
+ * The sheets, and where one is made.
+ *
+ * Staff-only by the middleware, which needs no change for this: an `editor`
+ * already reaches everything outside ADMIN_ONLY, and the kids roles are
+ * allow-listed to /kids alone. So admins and secretaries get this and Fairhaven Kids
+ * volunteers do not, which is right — a meal train is church office work.
+ *
+ * IF AN ENDPOINT IS EVER ADDED UNDER /api/signups/, IT MUST BE LISTED IN
+ * lib/permissions.ts TOO. There is a comment there about the time gating only
+ * /website left an editor able to post straight to /api/site.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const title = String(form.get('title') ?? '').trim().slice(0, 120);
+  const kind = String(form.get('kind') ?? '');
+
+  if (title && isSignupKind(kind)) {
+    const made = await db.insert(schema.signupSheets).values({
+      // 16 bytes, 128 bits — the same as a directory invite, and for the same
+      // reason: the link IS the security.
+      token: randomToken(16),
+      title, kind,
+      status: 'draft',
+      createdBy: user.email,
+      createdAt: nowIso(), updatedAt: nowIso(),
+    }).returning({ id: schema.signupSheets.id });
+
+    /*
+     * A plain list has ONE implicit slot, and it is made here rather than
+     * lazily on first view. A page that writes on GET can run twice from one
+     * double-tap and leave two slots where there should be one, and "how many
+     * people do you need?" would then quietly mean twice what it says.
+     */
+    if (kind === 'list') {
+      await db.insert(schema.signupSlots).values({
+        sheetId: made[0]!.id, sort: 0, label: LIST_SLOT_LABEL, capacity: null,
+      });
+    }
+
+    /*
+     * Straight into the editor. Never leave somebody on a list wondering what
+     * happened — the bulletin's "Start it" does the same, and it is the
+     * difference between a tool that flows and one that feels disjointed.
+     */
+    return Astro.redirect(`/signups/${made[0]!.id}`, 303);
+  }
+  return Astro.redirect('/signups?bad=1', 303);
+}
+
+const sheets = await db.select().from(schema.signupSheets)
+  .orderBy(desc(schema.signupSheets.id)).limit(40);
+
+/*
+ * Slots and sign-ups for the whole page in two queries, counted in JS.
+ *
+ * A church runs a handful of these a year, so the rows are few; two queries
+ * that always cost the same beat one per sheet, which is the shape that quietly
+ * becomes forty.
+ */
+const ids = sheets.map((s) => s.id);
+const slots = ids.length
+  ? await db.select({
+      id: schema.signupSlots.id, sheetId: schema.signupSlots.sheetId,
+      onDate: schema.signupSlots.onDate, capacity: schema.signupSlots.capacity,
+    }).from(schema.signupSlots).where(inArray(schema.signupSlots.sheetId, ids))
+  : [];
+const signups = ids.length
+  ? await db.select({ id: schema.signups.id, sheetId: schema.signups.sheetId })
+      .from(schema.signups).where(inArray(schema.signups.sheetId, ids))
+  : [];
+
+const today = localNow(new Date()).date;
+const origin = Astro.url.origin;
+
+const rows = sheets.map((s) => {
+  const mine = slots.filter((x) => x.sheetId === s.id);
+  const taken = signups.filter((x) => x.sheetId === s.id).length;
+  const shut = closedReason(s, mine.map((x) => x.onDate), today);
+  const dates = mine.map((x) => x.onDate).filter((d): d is string => !!d).sort();
+  return {
+    sheet: s,
+    summary: sheetSummary(s.kind, mine, taken),
+    shut,
+    when: dates.length
+      ? (dates.length === 1 ? dayLabel(dates[0])
+         : `${dayLabel(dates[0])} – ${dayLabel(dates[dates.length - 1])}`)
+      : s.eventDate ? dayLabel(s.eventDate) : '—',
+    url: `${origin}/signup/${s.token}`,
+  };
+});
+
+// Open first — a sheet still collecting is the one somebody came here about.
+// Drafts next, because an unfinished one is work waiting; closed last.
+const rank = (r: typeof rows[number]) =>
+  r.sheet.status === 'draft' ? 1 : r.shut ? 2 : 0;
+rows.sort((a, b) => rank(a) - rank(b));
+---
+<AppLayout title="Sign-ups" user={user}>
+  <h1>Sign-ups</h1>
+  <p class="muted" style="margin:-6px 0 22px; max-width:64ch;">
+    A sheet lives at its own link. Put that link in the bulletin, in a text, or
+    on the pew link-tree. It is not in the website's menu.
+  </p>
+
+  {Astro.url.searchParams.get('bad') === '1' && (
+    <p class="notice">Give it a name and pick which kind it is.</p>
+  )}
+
+  <div class="card" style="margin-bottom:26px;">
+    <h2>Start a sheet</h2>
+    <form method="POST">
+      <label class="field" style="max-width:520px;">
+        <span>What is it called</span>
+        <input name="title" required maxlength="120"
+               placeholder="Meals for the Aldridge family" />
+      </label>
+      <fieldset class="kinds">
+        <legend class="label">Which kind</legend>
+        {SIGNUP_KINDS.map((k, i) => (
+          <label class="kind">
+            <input type="radio" name="kind" value={k.id} required checked={i === 0} />
+            <span>
+              <strong>{k.label}</strong>
+              <em>{k.blurb}</em>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <button class="btn" type="submit">Start it</button>
+      <span class="muted" style="margin-left:12px; font-size:14px;">
+        It starts as a draft. The link does nothing until you open it.
+      </span>
+    </form>
+  </div>
+
+  <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+    <table class="t-stack">
+      <thead>
+        <tr><th>Sheet</th><th>Kind</th><th>When</th><th>Signed up</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 ? (
+          <tr><td colspan="6" class="muted" style="padding:22px;">None yet.</td></tr>
+        ) : rows.map((r) => (
+          <tr>
+            <td>
+              {r.sheet.title}
+              {/* What the copy button reads from. Hidden rather than printed:
+                  the address is long, and the row is already dense. */}
+              <span class="visually-hidden" id={`u${r.sheet.id}`}>{r.url}</span>
+            </td>
+            <td data-label="Kind">
+              {SIGNUP_KINDS.find((k) => k.id === r.sheet.kind)?.label ?? r.sheet.kind}
+            </td>
+            <td data-label="When">{r.when}</td>
+            <td data-label="Signed up">{r.summary}</td>
+            <td data-label="Status">
+              {r.sheet.status === 'draft'
+                ? <span class="chip chip--warn">draft</span>
+                : r.shut
+                  ? <span class="chip">closed</span>
+                  : <span class="chip chip--open">open</span>}
+            </td>
+            <td data-label="">
+              {r.sheet.status !== 'draft' && (
+                <button class="btn btn--ghost btn--sm" type="button"
+                        data-copy={`u${r.sheet.id}`}>Copy link</button>
+              )}
+              <a href={`/signups/${r.sheet.id}`} style="margin-left:10px;">Edit</a>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AppLayout>
+
+<script is:inline>
+  /*
+   * The one piece of client JavaScript in this feature, and it does one thing.
+   *
+   * Plain ES5/ES6 — scripts/check-inline-scripts.mjs parses every is:inline
+   * block, and TypeScript syntax in here would sail past `astro check` and
+   * throw in front of whoever opened the page.
+   *
+   * Every value it touches comes from a data-* attribute or the DOM. Nothing
+   * from the server is interpolated into this script body.
+   */
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-copy]');
+    if (!b) return;
+    var el = document.getElementById(b.getAttribute('data-copy'));
+    if (!el) return;
+    var done = function () {
+      var t = b.textContent;
+      b.textContent = 'Copied';
+      setTimeout(function () { b.textContent = t; }, 1800);
+    };
+    // The clipboard API needs a gesture and a secure context and has both
+    // here. If it still refuses, select the text so the reader can copy it by
+    // hand rather than being left with a dead button.
+    var manual = function () {
+      var r = document.createRange();
+      r.selectNodeContents(el);
+      var s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(el.textContent.trim()).then(done, manual);
+    else manual();
+  });
+</script>
+
+<style>
+  .kinds { border:0; padding:0; margin:0 0 18px; }
+  .kinds legend { padding:0; margin-bottom:8px; color:var(--ink-soft); }
+  /* Three choices with a line of description each. "List" and "dish" mean
+     nothing until somebody says what they are for, and this is the one
+     decision on the sheet that is awkward to change later. */
+  .kind { display:flex; gap:12px; align-items:flex-start; padding:12px 14px;
+          border:1px solid var(--hair); border-radius:var(--radius);
+          margin-bottom:8px; cursor:pointer; background:#fff; max-width:640px; }
+  .kind:hover { background:var(--cream-deep); }
+  .kind input { flex:none; width:20px; height:20px; margin-top:3px; accent-color:var(--red); }
+  .kind strong { display:block; }
+  .kind em { display:block; font-style:normal; font-size:14px; color:var(--ink-soft);
+             line-height:1.45; }
+  .kind:has(input:checked) { border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+
+  .btn--sm { min-height:36px; padding:6px 14px; font-size:14px; }
+  .chip--open { background:#e8f2eb; color:#16532c; }
+
+  /* 36px is fine beside a mouse and not beside a thumb — app.css asks for 44
+     and says why. Below the breakpoint the table has already become stacked
+     blocks, so there is room for it. */
+  @media (max-width: 700px) {
+    .btn--sm { min-height:44px; padding:10px 18px; }
+  }
+</style>

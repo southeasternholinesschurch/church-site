@@ -71,7 +71,7 @@ export interface ParsedServiceTitle {
 /**
  * TITLING CONVENTION for the YouTube channel
  * ------------------------------------------
- *   August 23, 2026 | Sunday Morning Worship | Pastor the pastor | The Narrow Gate
+ *   August 23, 2026 | Sunday Morning Worship | Pastor Reeve | The Narrow Gate
  *        date       |        service         |        speaker       |  sermon title
  *
  * Rules, in full:

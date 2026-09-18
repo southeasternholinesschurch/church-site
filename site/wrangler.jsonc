@@ -27,7 +27,7 @@
   // stale value writes secrets to a Worker that serves no traffic and reports
   // success. That cost an afternoon on 2026-08-31 — the livestream API key
   // went to the wrong Worker and the endpoint kept saying it was unconfigured.
-  "name": "southeaster-holiness-church-site-1",
+  "name": "yourchurch-site-1",
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-28",
   "assets": {

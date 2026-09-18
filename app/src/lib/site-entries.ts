@@ -153,7 +153,7 @@ export async function removeEntry(
   await deleteFile(env, path, file.sha, commitMessage(`${COLLECTIONS[id].label}: remove ${slug}`, who));
 }
 
-/** "Pastor the pastor" -> "pastor-the-pastor", which becomes the filename. */
+/** "Pastor Reeve" -> "pastor-reeve", which becomes the filename. */
 export const toSlug = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);

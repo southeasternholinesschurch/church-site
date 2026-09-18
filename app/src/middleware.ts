@@ -3,36 +3,16 @@ import { readSession, type SessionUser } from './lib/session';
 import { demoUser, isDemoInstance } from './lib/demo-instance';
 import { canAccess, homeFor } from './lib/permissions';
 import { readKioskDevice } from './lib/kiosk';
+import { isPublicPath } from './lib/public-paths';
 
-/**
+/*
  * Everything is private except the login flow.
  *
- * Deny by default and name the exceptions — the opposite (listing the pages to
- * protect) means a route added later is public until someone remembers. This
- * app holds the congregation's contact details; forgetting is not an
- * acceptable failure mode.
+ * The list itself, and the matching, live in lib/public-paths.ts so they can be
+ * tested without standing up a request — which matters because one entry
+ * (`/signup/`) sits two characters away from the staff sign-up builder at
+ * `/signups`. Read the note at the top of that file before adding anything.
  */
-const PUBLIC_PREFIXES = [
-  '/login', '/auth/', '/_astro/', '/favicon',
-  // Must be readable WITHOUT a session, or a crawler is redirected to /login
-  // and never sees the disallow it came for.
-  '/robots.txt',
-  // Twilio's callback. It cannot carry a session, so it is public — and it
-  // validates Twilio's HMAC signature itself before touching anything. That
-  // check is the ONLY thing protecting it; do not add another public path here
-  // without an equivalent.
-  '/api/sms/webhook',
-  // Called by the reminder cron Worker, which has no session. Guarded by a
-  // shared secret it checks itself.
-  '/api/sms/run-due',
-  // Read-only bulletin feed for the public site's build. Returns published
-  // bulletins only, which are public documents by nature.
-  '/api/bulletin/current',
-  // The member directory is NOT staff-only — members are not staff. It runs
-  // its own check (readMemberSession) and shows nothing without one, so it
-  // must bypass the staff gate rather than be protected by it.
-  '/directory',
-];
 
 /**
  * Security response headers, applied to everything this middleware returns.
@@ -95,7 +75,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const env = context.locals.runtime?.env as
     { DB: D1Database; DEMO_INSTANCE?: string; DEMO_ROLE?: string } | undefined;
 
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return harden(await next());
+  if (isPublicPath(pathname)) return harden(await next());
 
   // No binding means the app is misconfigured, not that the visitor is allowed.
   if (!env?.DB) return harden(new Response('Database not configured', { status: 500 }));

@@ -14,7 +14,7 @@ AI agent working on their behalf.
 ```
 site/       the public website        — Astro, static, Cloudflare Workers
 app/        the staff + members app   — Astro SSR, D1 database, R2 photos
-workers/    three small cron Workers  — site rebuild, texting, CMS OAuth proxy
+workers/    two small cron Workers    — site rebuild, texting
 docs/       architecture and history
 ```
 
@@ -23,9 +23,14 @@ Contact, Give, Bulletin. Sermons import themselves nightly from YouTube. Events
 come from a calendar you already keep. The livestream page knows when you are
 live.
 
-**The staff app** — people, attendance, groups, trends, a bulletin editor,
-texting (broadcasts, replies, scheduled, automatic birthdays), and a members'
-directory reached by a personal link.
+**The staff app** — people and groups, attendance and trends, a bulletin editor,
+texting (broadcasts, replies, scheduled, automatic birthdays), sign-up sheets,
+and a members' directory reached by a personal link.
+
+**Sign-up sheets** — a meal train across a span of days, a list of names for an
+event, or a pitch-in with the dishes named. One link you put in the bulletin, a
+text, or a QR code on the pews; people see at a glance which days are taken, and
+can ask to be texted the day before their own.
 
 **A children's ministry section** — optional, and off until you switch it on.
 Volunteers who see the children and nothing else in the app, class registers

@@ -1,0 +1,581 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { readMemberSession } from '../../lib/directory';
+import { numberConsent } from '../../lib/consent';
+import { toE164 } from '../../lib/sms';
+import { localNow } from '../../lib/schedules';
+import {
+  availability, closedReason, dayLabel, nextSeat, SIGNUP_KINDS, slotStatus,
+} from '../../lib/signups';
+
+/**
+ * A sign-up sheet, as the church sees it.
+ *
+ * PUBLIC — reached by a link in the bulletin, in a text, or off the pew NFC
+ * tags, by people who have never signed into anything. `/signup/` is in
+ * lib/public-paths.ts; read the note at the top of that file, because the
+ * trailing slash is what keeps the staff builder at `/signups` private.
+ *
+ * FULL NAMES ARE SHOWN to anyone holding the link. The pastor's call, and the right
+ * one: it is how a family avoids bringing lasagne two nights running, and it is
+ * what the paper sheet on the foyer table already did. The page is noindex, it
+ * carries no addresses or phone numbers, and the link is the only way in.
+ *
+ * NO CLIENT JAVASCRIPT. Each open slot is a <details> holding its own small
+ * form, which is native HTML that works on every phone in the building and
+ * avoids rendering seven copies of a form into the page.
+ */
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const token = (Astro.params.token ?? '').trim();
+
+/*
+ * EVERY failure renders the identical page — unknown token, draft, deleted.
+ *
+ * The rule /directory/join/[token].astro already follows, and it matters more
+ * here: a page that says "that sheet is a draft" is a way to test which tokens
+ * were ever real. A stranger gets one answer and learns nothing from it.
+ */
+const [sheet] = token
+  ? await db.select().from(schema.signupSheets)
+      .where(eq(schema.signupSheets.token, token)).limit(1)
+  : [];
+const visible = sheet && sheet.status !== 'draft';
+
+/*
+ * The member session, if the browser happens to carry one.
+ *
+ * A COURTESY, NEVER THE PATH IN. Only people who have opened their texted
+ * directory invite have this cookie, which is a minority of the congregation
+ * and none of the neighbours — so the typed-name form stays primary and this
+ * only ever saves somebody the typing.
+ */
+const member = visible ? await readMemberSession(env, Astro.cookies) : null;
+
+/** The member's own record, for the number already on file. Only read when
+ *  there is a member; nothing about anybody else is loaded on this page. */
+const [me] = member
+  ? await db.select({
+      phoneE164: schema.people.phoneE164, smsConsent: schema.people.smsConsent,
+    }).from(schema.people).where(eq(schema.people.id, member.personId)).limit(1)
+  : [];
+
+const today = localNow(new Date()).date;
+
+if (visible && Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+  const slotId = Number(form.get('slotId'));
+
+  const slots = await db.select().from(schema.signupSlots)
+    .where(eq(schema.signupSlots.sheetId, sheet.id));
+  const shut = closedReason(sheet, slots.map((s) => s.onDate), today);
+
+  // A closed sheet accepts nothing, however the request got here. The read-only
+  // rendering below is presentation; this is the rule.
+  if (shut) return Astro.redirect(`/signup/${token}?shut=1`, 303);
+
+  /* -- a member taking their own sign-up back, or editing the note ---------- */
+  if ((action === 'cancel' || action === 'amend') && member) {
+    const id = Number(form.get('signupId'));
+    /*
+     * Scoped to THIS person and THIS sheet in the query itself, not checked
+     * after loading. A member may edit their own sign-up and nothing else, and
+     * the safest way to express that is a WHERE clause that cannot match
+     * anybody else's row whatever id was submitted.
+     */
+    const own = and(
+      eq(schema.signups.id, id),
+      eq(schema.signups.sheetId, sheet.id),
+      eq(schema.signups.personId, member.personId),
+    );
+    if (action === 'cancel') {
+      await db.delete(schema.signups).where(own);
+      return Astro.redirect(`/signup/${token}?cancelled=1`, 303);
+    }
+    const note = String(form.get('note') ?? '').trim().slice(0, 300);
+    await db.update(schema.signups).set({ note: note || null }).where(own);
+    return Astro.redirect(`/signup/${token}?amended=1`, 303);
+  }
+
+  /* -- claiming a slot ------------------------------------------------------ */
+  if (action === 'claim') {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot) return Astro.redirect(`/signup/${token}`, 303);
+
+    const asMember = form.get('mode') === 'member' && member;
+    const name = asMember
+      ? `${member!.firstName} ${member!.lastName}`.trim()
+      : String(form.get('name') ?? '').trim().slice(0, 80);
+    if (!name) return Astro.redirect(`/signup/${token}?noname=${slot.id}`, 303);
+
+    const headRaw = Number(form.get('headcount'));
+    const headcount = sheet.askHeadcount && Number.isInteger(headRaw)
+      && headRaw > 0 && headRaw < 100 ? headRaw : null;
+    const note = String(form.get('note') ?? '').trim().slice(0, 300) || null;
+
+    /*
+     * THE CONSENT DECISION. Three cases, in this order, and the only part of
+     * this feature that carries a compliance obligation.
+     */
+    let phoneE164: string | null = null;
+    let smsConsent: 'opted_in' | null = null;
+    let remind = false;
+    let consentFlag = '';
+
+    const wantsReminder = form.get('remind') === 'on' || form.get('consent') === 'on';
+
+    if (wantsReminder && asMember && me?.phoneE164 && me.smsConsent === 'opted_in') {
+      /*
+       * 1. A RECOGNISED MEMBER WHO IS ALREADY OPTED IN. Nothing new is stored:
+       *    no number on this row, no consent record. The reminder is sent to
+       *    the number on their `people` row, read again at send time, so a
+       *    member who changes their number is reached at the new one and a
+       *    member who texts STOP is not reached at all.
+       */
+      remind = true;
+    } else if (wantsReminder) {
+      const typed = toE164(String(form.get('phone') ?? ''));
+      if (!typed) {
+        // The SIGN-UP still stands. Refusing the whole submission over a
+        // mistyped number would lose the thing that actually matters — the day
+        // is claimed — and they can ring the office about the reminder.
+        consentFlag = '&phone=bad';
+      } else {
+        const state = await numberConsent(db, typed);
+        if (state === 'opted_out') {
+          /*
+           * 2a. THIS NUMBER HAS ASKED NOT TO BE TEXTED. Not offered, not sent,
+           *     and NOT STORED — nothing new is recorded about a number whose
+           *     owner asked to be left alone. Said plainly on the next page
+           *     rather than silently ignored.
+           */
+          consentFlag = '&phone=stop';
+        } else if (state === 'opted_in') {
+          /*
+           * 2b. A NUMBER WE ALREADY KNOW, and it has consent. The number is
+           *     stored so the reminder knows where to go; `sms_consent` is left
+           *     NULL because we did not gather consent here — theirs already
+           *     exists on the row that holds it, and copying it would create a
+           *     second record to keep in step.
+           */
+          phoneE164 = typed;
+          remind = true;
+        } else if (form.get('consent') === 'on') {
+          /*
+           * 3. A NUMBER WE DO NOT KNOW, and the tick-box WHOSE LABEL IS THE
+           *    CONSENT WORDING was ticked. That label names the church and says
+           *    it is a single reminder about this one sign-up. Only now is a
+           *    number stored at all.
+           */
+          phoneE164 = typed;
+          smsConsent = 'opted_in';
+          remind = true;
+        }
+        // Unticked and unknown: no number is stored. Not a partial record.
+      }
+    }
+
+    /*
+     * CLAIMING THE SEAT.
+     *
+     * Compute the next seat, insert, and if nothing comes back SOMEBODY BEAT
+     * YOU. The unique index on (slot_id, seat) is the guard — never a count
+     * taken beforehand, because two phones read the same count in the same
+     * moment and that is exactly how two families are both told they have
+     * Tuesday. One retry, then say plainly that it has just filled.
+     */
+    let claimedId: number | null = null;
+    let full = false;
+    for (let attempt = 0; attempt < 3 && !claimedId && !full; attempt++) {
+      const taken = await db.select({ seat: schema.signups.seat })
+        .from(schema.signups).where(eq(schema.signups.slotId, slot.id));
+      const seat = nextSeat(taken.map((t) => t.seat), slot.capacity);
+      if (seat === null) { full = true; break; }
+      const ins = await db.insert(schema.signups).values({
+        sheetId: sheet.id, slotId: slot.id, seat,
+        personId: asMember ? member!.personId : null,
+        name, headcount, note,
+        phoneE164, smsConsent,
+        smsConsentSource: smsConsent ? 'signup-sheet' : null,
+        smsConsentAt: smsConsent ? nowIso() : null,
+        remind,
+        // Null: they did this themselves. Staff additions carry an email.
+        createdBy: null,
+        createdAt: nowIso(),
+      }).onConflictDoNothing().returning({ id: schema.signups.id });
+      if (ins[0]) claimedId = ins[0].id;
+    }
+
+    if (!claimedId) return Astro.redirect(`/signup/${token}?full=${slot.id}`, 303);
+    return Astro.redirect(
+      `/signup/${token}?added=${slot.id}${remind ? '&remind=1' : ''}${consentFlag}`, 303);
+  }
+
+  return Astro.redirect(`/signup/${token}`, 303);
+}
+
+/* ------------------------------------------------------------- rendering -- */
+
+/* Dated slots in calendar order, undated ones in the order staff typed them.
+ * The same ordering the builder uses, and it must stay the same — see the note
+ * there. */
+const slots = visible
+  ? await db.select().from(schema.signupSlots)
+      .where(eq(schema.signupSlots.sheetId, sheet.id))
+      .orderBy(asc(schema.signupSlots.onDate), asc(schema.signupSlots.sort),
+               asc(schema.signupSlots.id))
+  : [];
+
+const taken = visible && slots.length
+  ? await db.select({
+      id: schema.signups.id, slotId: schema.signups.slotId, name: schema.signups.name,
+      note: schema.signups.note, headcount: schema.signups.headcount,
+      personId: schema.signups.personId, seat: schema.signups.seat,
+    }).from(schema.signups)
+      .where(inArray(schema.signups.slotId, slots.map((s) => s.id)))
+      .orderBy(asc(schema.signups.seat))
+  : [];
+
+const shut = visible ? closedReason(sheet, slots.map((s) => s.onDate), today) : null;
+
+const q = Astro.url.searchParams;
+const added = Number(q.get('added')) || 0;
+const fullSlot = Number(q.get('full')) || 0;
+const noName = Number(q.get('noname')) || 0;
+// "not you?" — drops a recognised member to the typed-name form for one visit,
+// for the husband filling it in on his wife's phone.
+const notMe = q.get('me') === 'no';
+const identified = member && !notMe;
+
+const memberCanUseFile = Boolean(me?.phoneE164 && me.smsConsent === 'opted_in');
+
+const forSlot = (slotId: number) => taken.filter((t) => t.slotId === slotId);
+const addedSlot = slots.find((s) => s.id === added);
+const kindLabel = SIGNUP_KINDS.find((k) => k.id === sheet?.kind)?.label ?? 'Sign-up';
+/** A meal-train slot's label is its day; everything else names itself. */
+const labelFor = (s: { label: string; onDate: string | null }) =>
+  s.onDate ? dayLabel(s.onDate) : s.label;
+
+/**
+ * Does this row need a label of its own?
+ *
+ * Everywhere except a plain list, yes — a day, a dish, a named job. A LIST HAS
+ * ONE IMPLICIT SLOT and the page heading has already said what it is for, so
+ * its label was a large "Sign up" sitting where a heading goes, reading like a
+ * button that is not one. The row leads with its status instead.
+ */
+const showLabel = (s: { label: string; onDate: string | null }) =>
+  !(sheet!.kind === 'list' && slots.length === 1);
+---
+{!visible ? (
+  <PublicLayout title="Sign-up link">
+    <h1>This link is no longer valid</h1>
+    {/* Deliberately identical wording for every failure. A sheet that was
+        never real, one still in draft and one that has been taken down must be
+        indistinguishable, or this page becomes a way to test tokens. */}
+    <p class="muted">
+      Sign-up sheets come down once they are finished with. Ask at the church
+      office and we will point you at the right one.
+    </p>
+  </PublicLayout>
+) : (
+  <PublicLayout title={sheet.title} eyebrow={kindLabel}>
+    <h1>{sheet.title}</h1>
+    {sheet.intro && <p class="lede">{sheet.intro}</p>}
+
+    {shut && (
+      <p class="notice">
+        {shut} Thank you to everyone who signed up.
+      </p>
+    )}
+    {q.get('shut') === '1' && (
+      <p class="notice">This sign-up closed before that could be saved.</p>
+    )}
+    {added > 0 && addedSlot && (
+      <p class="notice notice--ok">
+        Thank you — you have <strong>{labelFor(addedSlot)}</strong>.
+        {q.get('remind') === '1' && <> We will text you a reminder the day before.</>}
+      </p>
+    )}
+    {q.get('phone') === 'bad' && (
+      <p class="notice">
+        You are on the sheet, but that phone number could not be read, so no
+        reminder is set. Ring the church office if you would like one.
+      </p>
+    )}
+    {q.get('phone') === 'stop' && (
+      <p class="notice">
+        You are on the sheet. That number has asked us not to send it texts, so
+        no reminder is set for it.
+      </p>
+    )}
+    {fullSlot > 0 && (
+      <p class="notice">
+        Somebody claimed that one a moment before you did. Please pick another.
+      </p>
+    )}
+    {noName > 0 && <p class="notice">Please put a name in, so we know who to thank.</p>}
+    {q.get('cancelled') === '1' && <p class="notice notice--ok">Taken off the sheet.</p>}
+    {q.get('amended') === '1' && <p class="notice notice--ok">Saved.</p>}
+
+    <ul class="slots">
+      {slots.length === 0 && (
+        <li class="slot"><div class="slot__sum"><span class="slot__lbl muted">
+          Nothing to sign up for yet.
+        </span></div></li>
+      )}
+      {slots.map((slot) => {
+        const mine = forSlot(slot.id);
+        const avail = availability(slot.capacity, mine.length);
+        const open = !shut && !avail.full;
+        const status = slotStatus(slot.capacity, mine.map((t) => t.name), Boolean(shut));
+
+        /*
+         * WITH ONE SLOT THERE IS NOTHING TO CHOOSE BETWEEN, so nothing is
+         * folded away.
+         *
+         * <details> earns its place on a meal train: seven days, and rendering
+         * seven copies of the form would bury the one thing the page is for.
+         * A plain list has ONE slot, and collapsing it left the whole page
+         * reading "1 still open." and nothing else — a sentence with no verb,
+         * where a volunteer cannot tell whether they are meant to press
+         * something or whether it is broken. The pastor's words: it might cause
+         * people to be unsure what to do.
+         *
+         * Opened out it is the names and a box to put yours in, which is what
+         * a sign-up sheet has always looked like on the foyer table.
+         */
+        const alone = slots.length === 1;
+
+        const head = (
+          <>
+            {showLabel(slot) && <span class="slot__lbl">{labelFor(slot)}</span>}
+            <span class:list={['slot__st', !showLabel(slot) && 'slot__st--lead']}>
+              {status.text}
+            </span>
+          </>
+        );
+
+        const body = (
+          <div class="slot__body">
+            {slot.detail && <p class="muted slot__detail">{slot.detail}</p>}
+            {mine.length > 0 && (
+              <ul class="names">
+                {mine.map((t) => (
+                  <li>{t.name}{t.headcount ? ` · ${t.headcount}` : ''}
+                    {t.note && <span class="muted"> — {t.note}</span>}</li>
+                ))}
+              </ul>
+            )}
+            <form method="POST" class="claim">
+              <input type="hidden" name="action" value="claim" />
+              <input type="hidden" name="slotId" value={slot.id} />
+              {identified ? (
+                <>
+                  <input type="hidden" name="mode" value="member" />
+                  <p class="asme">
+                    {/* One expression, not two with a space between them.
+                        Astro collapses the whitespace between adjacent
+                        expressions, which rendered this as "CalebWhitfield" —
+                        the first thing a member sees on the page, and it read
+                        like a broken mail merge. */}
+                    Signing up as <strong>{`${member!.firstName} ${member!.lastName}`}</strong>
+                    {' '}<a href={`/signup/${token}?me=no`}>not you?</a>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <input type="hidden" name="mode" value="typed" />
+                  <label class="field">
+                    <span>Your name</span>
+                    <input name="name" autocomplete="name" required maxlength="80" />
+                  </label>
+                </>
+              )}
+
+              {sheet.askHeadcount && (
+                <label class="field">
+                  <span>How many are coming</span>
+                  <input type="number" name="headcount" min="1" max="99" inputmode="numeric" />
+                </label>
+              )}
+
+              <label class="field">
+                <span>Anything we should know (optional)</span>
+                <input name="note" maxlength="300"
+                       placeholder={sheet.kind === 'meal-train'
+                         ? 'Bringing chicken and dumplings, about 6pm'
+                         : 'Optional'} />
+              </label>
+
+              {/*
+                THE REMINDER, and the one part of this page with a compliance
+                obligation behind it.
+
+                A member whose number is already on file and already opted in is
+                offered the reminder outright — nothing new is stored, and the
+                tick-box is a preference rather than a consent. Everybody else
+                gets the number box and a tick-box WHOSE LABEL IS THE CONSENT
+                WORDING: it names the church, says it is one reminder about this
+                sign-up, and says how to stop. Unticked means no number is kept
+                at all. See lib/consent.ts.
+              */}
+              {identified && memberCanUseFile ? (
+                <label class="tick">
+                  <input type="checkbox" name="remind" />
+                  <span>Text me a reminder the day before, at the number the
+                        church already has for me.</span>
+                </label>
+              ) : (
+                <>
+                  <label class="field">
+                    <span>Mobile number, if you would like a reminder</span>
+                    <input type="tel" name="phone" autocomplete="tel"
+                           placeholder="(317) 555-0142" />
+                  </label>
+                  <label class="tick">
+                    <input type="checkbox" name="consent" />
+                    <span>
+                      Yes — text me one reminder the day before, from
+                      Fairhaven Community Church, at this number. Just this
+                      sign-up, nothing else. Reply STOP any time.
+                    </span>
+                  </label>
+                </>
+              )}
+
+              <button class="btn" type="submit">
+                {sheet.kind === 'meal-train' ? 'I will take this day' : 'Put me down'}
+              </button>
+            </form>
+          </div>
+        );
+
+        return (
+          <li class="slot">
+            {open ? (alone ? (
+              <div class="slot__alone">
+                <div class="slot__sum slot__sum--plain">{head}</div>
+                {body}
+              </div>
+            ) : (
+              <details open={added === slot.id || fullSlot === slot.id || noName === slot.id}>
+                <summary>{head}</summary>
+                {body}
+              </details>
+            )) : (
+              <div class="slot__static">
+                <div class="slot__sum slot__sum--static">{head}</div>
+                {/* A row that can no longer be signed up for has lost its form,
+                    so this list is the only thing left showing who is on it.
+                    Stacked rather than comma-joined into the line above: four
+                    names in a right-hand column is unreadable, and it was how a
+                    full sheet came to look like a broken one. */}
+                {status.stacked && (
+                  <ul class="names names--static">
+                    {mine.map((t) => (
+                      <li>{t.name}{t.headcount ? ` · ${t.headcount}` : ''}
+                        {t.note && <span class="muted"> — {t.note}</span>}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* A member may change or take back their OWN sign-up, because we
+                know who they are. Anonymous sign-ups cannot: they ring the
+                office, and staff fix it on the back end. */}
+            {member && !shut && mine.filter((t) => t.personId === member.personId).map((t) => (
+              <form method="POST" class="own">
+                <input type="hidden" name="signupId" value={t.id} />
+                <input type="hidden" name="slotId" value={slot.id} />
+                <input name="note" value={t.note ?? ''} maxlength="300"
+                       aria-label="Your note" placeholder="Your note" />
+                <button class="btn btn--ghost" type="submit" name="action" value="amend">Save</button>
+                <button class="btn btn--ghost" type="submit" name="action" value="cancel"
+                        onclick="return confirm('Take your name off this one?')">Cancel mine</button>
+              </form>
+            ))}
+          </li>
+        );
+      })}
+    </ul>
+
+    {!shut && (
+      <p class="muted after">
+        Anything wrong, or need to swap? Ring the church office and we will sort
+        it out.
+      </p>
+    )}
+  </PublicLayout>
+)}
+
+<style>
+  .slots { list-style:none; margin:0; padding:0; }
+  .slot { background:var(--cream); border:1px solid var(--hair);
+          border-radius:var(--radius-lg); margin-bottom:10px; overflow:hidden; }
+
+  /* The row itself, whether or not it opens. One shape, so an available day
+     and a full one line up down the page. */
+  summary, .slot__sum {
+    display:flex; gap:14px; align-items:baseline; justify-content:space-between;
+    padding:16px clamp(14px,4vw,20px); cursor:pointer; list-style:none;
+  }
+  .slot__sum--static { cursor:default; }
+  summary::-webkit-details-marker { display:none; }
+  summary:focus-visible { outline:2px solid var(--red); outline-offset:-2px; }
+  .slot__lbl { font-family:var(--font-display); font-size:21px; line-height:1.15; }
+  .slot__st { flex:none; font-size:15px; color:var(--ink-soft); text-align:right; }
+  /* A taken day should read as settled rather than as a row still asking to be
+     pressed — the whole point of the sheet is telling the two apart at a
+     glance, from a phone, in a hurry. */
+  .slot__sum--static { background:rgba(26,21,18,.035); }
+
+  details[open] summary { border-bottom:1px solid var(--hair); }
+  details[open] .slot__st { color:var(--red-deep); }
+  .slot__body { padding:18px clamp(14px,4vw,20px) 20px; }
+  .slot__detail { margin:0 0 12px; font-size:15px; }
+
+  /* The header of a lone slot, which is never folded away. It reads as the
+     top of the card rather than as something to press: no pointer, no toggle,
+     and the same hairline a <details> gets when it is open. */
+  .slot__sum--plain { cursor:default; border-bottom:1px solid var(--hair); }
+  .slot__alone .slot__st { color:var(--red-deep); }
+
+  /* When a row leads with its status — a plain list, which has no label of
+     its own — the status takes the heading's weight and side. */
+  .slot__st--lead { flex:1; text-align:left; font-family:var(--font-display);
+                    font-size:21px; line-height:1.15; color:var(--ink); }
+  .slot__static .names--static { padding:0 clamp(14px,4vw,20px) 16px; margin:0; }
+  .slot__static .slot__sum--static { padding-bottom:10px; }
+
+  .names { list-style:none; margin:0 0 16px; padding:0; font-size:16px; }
+  .names li { padding:4px 0; border-bottom:1px solid var(--hair); }
+  .names li:last-child { border-bottom:0; }
+
+  .asme { margin:0 0 16px; font-size:16px; }
+  .asme a { margin-left:6px; font-size:15px; }
+
+  /* The consent tick-box. Deliberately roomy: its LABEL is the consent
+     wording, so it has to be read, not skimmed past. */
+  .tick { display:flex; gap:12px; align-items:flex-start; margin:4px 0 20px;
+          font-size:15px; color:var(--ink-soft); line-height:1.5; }
+  .tick input { flex:none; width:22px; height:22px; margin-top:2px; accent-color:var(--red); }
+
+  .own { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+         padding:0 clamp(14px,4vw,20px) 16px; }
+  .own input { flex:1; min-width:180px; font:inherit; min-height:44px; padding:9px 12px;
+               border:1px solid var(--hair); border-radius:var(--radius); background:#fff; }
+  .own .btn { min-height:44px; padding:9px 16px; font-size:15px; }
+
+  .after { margin-top:24px; font-size:15px; }
+
+  @media (max-width: 460px) {
+    summary, .slot__sum { flex-direction:column; gap:4px; }
+    .slot__st { text-align:left; }
+  }
+</style>
