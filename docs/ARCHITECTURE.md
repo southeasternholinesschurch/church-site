@@ -734,6 +734,36 @@ Four rules, each learned the hard way:
    Kaylee/Kayleigh, Margery/Marguerite. Fuzzy-match and confirm each, or the import silently
    creates duplicate people.
 
+### The public demo site
+
+Separate from the flag above. **demo.fairhavenchurch.org** is its own
+Worker (`changeme-demo`) with its own database of invented people, so a pastor
+considering this can click through the whole app without an account and without
+seeing anybody real. `DEMO_INSTANCE=1` removes sign-in and refuses every Twilio
+call at the point of sending; the Worker also holds no Twilio credentials and no
+R2 bucket, so there are two independent reasons a visitor cannot text a real
+person.
+
+**It is the one thing here that does NOT deploy on a push.** Bring it up to date
+with:
+
+```
+cd app && node scripts/refresh-demo.mjs
+```
+
+That migrates the demo database, regenerates the invented congregation, builds,
+and deploys — in that order, because forgetting the last one is how the demo
+came to be running old code with none of the children's-ministry tables, showing
+an app with no children's ministry in it.
+
+**A new feature needs seed data as well as code.** `scripts/seed-demo.mjs` is
+where the invented congregation lives, and a tab with nothing in it is the same
+failure in a milder form. The sign-up sheets seed four of them — part-filled,
+nearly full, and one whose days have all passed so it is shut without anybody
+having pressed Close — because what is worth showing about that feature is the
+states a sheet can be in. Their dates are computed at reseed rather than written
+down, so re-running the command above makes them current again.
+
 ## Editing content (Decap CMS)
 
 Visit `/admin` on the deployed site (not meaningful on localhost until the OAuth Worker is

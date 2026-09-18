@@ -56,6 +56,7 @@ out.push('DELETE FROM message_log; DELETE FROM scheduled_messages; DELETE FROM m
 out.push('DELETE FROM people_groups; DELETE FROM groups; DELETE FROM directory_invites;');
 out.push('DELETE FROM kid_class_teachers; DELETE FROM kid_guardians; DELETE FROM kid_profiles;');
 out.push('DELETE FROM kid_classes; DELETE FROM kid_routes;');
+out.push('DELETE FROM signups; DELETE FROM signup_slots; DELETE FROM signup_sheets;');
 out.push('DELETE FROM people; DELETE FROM bulletins; DELETE FROM app_settings;');
 // Anyone a visitor added through the Access screen. The demo has no sign-in,
 // so these rows do nothing — but leaving them means the screen fills up with
@@ -350,5 +351,138 @@ out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES
   ('birthday_texts_on','1',datetime('now'),'demo@example.org'),
   ('birthday_texts_time','09:00',datetime('now'),'demo@example.org'),
   ('birthday_texts_body','Happy birthday, {first}! We thank God for you today and we are praying for you. - The Pastoral Team',datetime('now'),'demo@example.org');`);
+
+/* ------------------------------------------------------- sign-up sheets --
+ *
+ * Four of them, because the interesting thing about this feature is the STATES
+ * a sheet can be in, and one sheet can only be in one of them. A meal train
+ * part-filled, a volunteer list with places left, a pitch-in with two of its
+ * four parts full, and one whose days have all passed — which is shut without
+ * anybody having pressed Close, and is the behaviour most worth showing.
+ *
+ * DATES ARE RELATIVE TO THE RESEED, not written down. A demo with a meal train
+ * dated last March is a demo of a closed sheet, and the whole point of the
+ * public page is the taken/available display on a live one. Re-run
+ * refresh-demo.mjs and it is current again.
+ */
+const DEMO_WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const DEMO_MONTHS = ['January','February','March','April','May','June','July',
+  'August','September','October','November','December'];
+/* Noon UTC, never new Date(iso) — that is UTC midnight, which in Indianapolis is
+ * the evening BEFORE. Same note as addDaysIso in lib/signups.ts. */
+const inDays = (n) => {
+  const d = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+/* The same wording the builder writes when it sets the days — see dayLabel(). */
+const dayName = (iso) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  return `${DEMO_WEEKDAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${DEMO_MONTHS[d.getUTCMonth()]}`;
+};
+
+const adultsPool = people.filter((x) => x.kind === 'adult');
+let sheetId = 0, slotId = 0;
+const sheet = (o) => {
+  sheetId++;
+  out.push(`INSERT INTO signup_sheets (id, token, title, intro, kind, status, event_date,
+    closes_on, ask_headcount, reminder_body, created_by, created_at, updated_at) VALUES
+    (${sheetId}, '${fakeToken().slice(0, 32)}', ${q(o.title)}, ${q(o.intro)}, ${q(o.kind)},
+     ${q(o.status ?? 'open')}, ${q(o.eventDate ?? null)}, NULL, ${o.headcount ? 1 : 0}, NULL,
+     'demo@example.org', datetime('now','-9 days'), datetime('now','-9 days'));`);
+  return sheetId;
+};
+const slot = (sh, sort, label, onDate, capacity, takers) => {
+  slotId++;
+  out.push(`INSERT INTO signup_slots (id, sheet_id, sort, label, detail, on_date, capacity)
+    VALUES (${slotId}, ${sh}, ${sort}, ${q(label)}, NULL, ${q(onDate)},
+            ${capacity === null ? 'NULL' : capacity});`);
+  takers.forEach((t, i) => {
+    // Seats are 1-based and unique per slot — see nextSeat() in lib/signups.ts.
+    out.push(`INSERT INTO signups (sheet_id, slot_id, seat, person_id, name, headcount,
+      note, phone_e164, sms_consent, sms_consent_source, sms_consent_at, remind,
+      created_by, created_at) VALUES (${sh}, ${slotId}, ${i + 1},
+      ${t.personId ?? 'NULL'}, ${q(t.name)}, ${t.headcount ?? 'NULL'}, ${q(t.note ?? null)},
+      ${q(t.phone ?? null)}, ${q(t.phone ? 'opted_in' : null)},
+      ${q(t.phone ? 'signup-sheet' : null)}, ${t.phone ? "datetime('now','-5 days')" : 'NULL'},
+      ${t.remind ? 1 : 0}, NULL, datetime('now','-5 days'));`);
+  });
+};
+/* A member the app recognised: no number and no consent stored on the row. The
+ * reminder reads their number from `people` at send time, so a change of number
+ * follows them and a STOP stops them. Somebody who typed their name gets the
+ * tick-box instead, and that is the only case that stores anything. */
+const member = (p, extra = {}) => ({ personId: p.id, name: `${p.first} ${p.last}`, ...extra });
+const guest = (p, extra = {}) => ({ name: `${p.first} ${p.last}`, ...extra });
+
+// 1. A meal train, running from four days out. Four of seven days taken.
+const mealFamily = adultsPool[3];
+const meals = sheet({
+  title: `Meals for the ${mealFamily.last} family`,
+  intro: `The ${mealFamily.last}s are home with their new baby. Meals can be left at the door any time after 4pm — there is a cool box on the porch if nobody answers.`,
+  kind: 'meal-train',
+});
+const mealTakers = [
+  member(adultsPool[6], { remind: 1, note: 'Chicken and rice, enough for four.' }),
+  member(adultsPool[11]),
+  null,
+  guest(adultsPool[17], { phone: '+13175550188', remind: 1 }),
+  null,
+  member(adultsPool[22], { note: 'Will bring a pudding as well.' }),
+  null,
+];
+mealTakers.forEach((t, i) => {
+  const day = inDays(4 + i);
+  slot(meals, i, dayName(day), day, 1, t ? [t] : []);
+});
+
+// 2. A volunteer list. One slot, so the public page does not fold it away.
+const workday = sheet({
+  title: 'Autumn workday — volunteers needed',
+  intro: 'Saturday morning, 8am until we are done. Bring gloves. Rakes and ladders are provided, and there is coffee.',
+  kind: 'list',
+  eventDate: inDays(12),
+});
+slot(workday, 0, 'Sign up', inDays(12), 8, [
+  member(adultsPool[1]), member(adultsPool[8]), guest(adultsPool[14]),
+  member(adultsPool[19]), member(adultsPool[25], { note: 'Can bring a trailer.' }),
+]);
+
+// 3. A pitch-in, with two of its four parts full.
+const dinner = sheet({
+  title: 'Harvest fellowship dinner',
+  intro: 'Straight after the evening service. Bring your dish warm if you can — there are only two ovens in the kitchen.',
+  kind: 'dish',
+  eventDate: inDays(18),
+  headcount: true,
+});
+const d = inDays(18);
+slot(dinner, 0, 'Main dish', d, 2, [
+  member(adultsPool[2], { headcount: 4, note: 'Beef and noodles.' }),
+  member(adultsPool[9], { headcount: 2, note: 'Ham.' }),
+]);
+slot(dinner, 1, 'Salad or side', d, 6, [
+  member(adultsPool[4], { headcount: 3 }), guest(adultsPool[13], { headcount: 2 }),
+  member(adultsPool[21], { headcount: 5, note: 'Green beans.' }),
+]);
+slot(dinner, 2, 'Bread or rolls', d, 3, [member(adultsPool[16], { headcount: 2 })]);
+slot(dinner, 3, 'Dessert', d, 4, [
+  member(adultsPool[5], { headcount: 2 }), member(adultsPool[12], { headcount: 4 }),
+  guest(adultsPool[18], { headcount: 1 }), member(adultsPool[24], { headcount: 3, note: 'Two pies.' }),
+]);
+
+// 4. Every day on it has passed, so it is shut and says so — without anybody
+//    having pressed Close. Nobody remembers to press Close.
+const past = adultsPool[30];
+const done = sheet({
+  title: `Meals for the ${past.last} family`,
+  intro: `${past.first} is home from hospital and doing well. Thank you to everybody who cooked.`,
+  kind: 'meal-train',
+});
+[7, 6, 5, 4].forEach((back, i) => {
+  const day = inDays(-back);
+  slot(done, i, dayName(day), day, 1, [member(adultsPool[(i * 7) % adultsPool.length])]);
+});
+
 
 console.log(out.join('\n'));
