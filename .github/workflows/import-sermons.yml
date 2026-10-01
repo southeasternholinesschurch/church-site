@@ -18,12 +18,27 @@ name: Import sermons
 #
 # Quota is not a concern: ~30 units a night against a 10,000/day allowance.
 
+# NO SCHEDULE HERE, AND THAT IS DELIBERATE.
+#
+# A fresh copy of this template has no YouTube channel and no YOUTUBE_API_KEY,
+# so a daily cron does nothing but fail every morning and mail whoever owns the
+# repository. It did exactly that here, every day for weeks, until the only
+# person receiving them had learned to ignore the subject line — at which point
+# a real failure would have arrived looking identical.
+#
+# TO TURN IT ON, once the channel is yours:
+#   1. Set CHANNEL_ID in site/scripts/import-sermons.mjs
+#   2. Add the YOUTUBE_API_KEY secret (Settings -> Secrets and variables ->
+#      Actions). docs/transcripts.md covers the Google side.
+#   3. Run it by hand from the Actions tab and check what it filed.
+#   4. Then add the schedule back:
+#        schedule:
+#          - cron: '0 9 * * *'   # 09:00 UTC daily
+#
+# Step 3 before step 4. The first run against a real channel is the one that
+# tells you whether your service titles parse, and that is worth watching.
 on:
-  schedule:
-    # 09:00 UTC daily (~4–5am Fairhaven). Uploads lag the service by days,
-    # so a daily check catches everything without hammering the feed.
-    - cron: '0 9 * * *'
-  workflow_dispatch: # so it can also be run by hand from the Actions tab
+  workflow_dispatch: # run it by hand from the Actions tab
 
 # The job's whole purpose is to commit; nothing else is needed.
 permissions:
@@ -62,7 +77,15 @@ jobs:
         # shows up as a red X rather than as months of missing services.
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        run: node scripts/import-sermons.mjs --write --prune --strict
+        #
+        # NO --prune. It removes archive entries whose video has gone from the
+        # channel, which sounds tidy and is not: a sermon page can hold hours of
+        # reviewed, hand-edited text, and a video that is briefly unlisted or
+        # re-uploaded reads exactly like a deleted one. Upstream this flag very
+        # nearly took 3,540 reviewed words off a sermon that was simply
+        # retitled. Remove entries by hand, in the dashboard, where you can see
+        # what you are removing.
+        run: node scripts/import-sermons.mjs --write --strict
 
       - name: Import transcripts
         working-directory: site
