@@ -1,0 +1,35 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+
+/**
+ * Setup — the screens a director visits a few times a year.
+ *
+ * They used to sit in the main bar beside Attendance, which is what a volunteer
+ * opens every week. Gathering them here keeps that bar to the three things done
+ * constantly, and leaves one obvious place to look when something needs setting
+ * up. Each screen guards itself; so does the middleware. This page only links.
+ */
+const user = Astro.locals.user!;
+if (user.role === 'kids') return Astro.redirect('/kids', 302);
+
+const ITEMS = [
+  { name: 'Classes & routes', href: '/kids/classes',
+    note: 'The age groups, who teaches them, the bus routes and their captains, and the Fairhaven Bucks amount.' },
+  { name: 'Cards', href: '/kids/cards',
+    note: 'Write and issue children’s cards.' },
+  { name: 'Check-in tablets', href: '/kids/kiosk',
+    note: 'Register and pair a tablet for door check-in. Not in use yet.' },
+];
+---
+<KidsLayout title="Setup" user={user}>
+  <h1>Setup</h1>
+  <p class="k-muted" style="margin:-4px 0 22px;">Set once, then left alone.</p>
+  <div class="k-tiles">
+    {ITEMS.map((i) => (
+      <a class="k-tile" href={i.href}>
+        <div class="k-tile__name">{i.name}</div>
+        <div class="k-tile__note">{i.note}</div>
+      </a>
+    ))}
+  </div>
+</KidsLayout>

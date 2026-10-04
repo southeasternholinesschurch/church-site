@@ -69,7 +69,7 @@ refuses('kids', '//people');
 // Class structure and the Fairhaven Bucks credit amount. Deliberately short: the
 // director/teacher line is about what you can RESTRUCTURE, not what you can see
 // or record.
-for (const p of ['/kids/classes', '/kids/settings', '/kids/kiosk', '/kids/cards']) {
+for (const p of ['/kids/classes', '/kids/settings', '/kids/setup', '/kids/kiosk', '/kids/cards']) {
   refuses('kids', p);
   allows('kids-director', p);
 }

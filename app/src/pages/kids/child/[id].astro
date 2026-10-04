@@ -503,6 +503,12 @@ const consentLabel: Record<string, string> = {
   {error && <div class="k-card" style="border-left:5px solid #b01818; margin-bottom:18px;"><strong>{error}</strong></div>}
   {saved && SAVED[saved] && <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">{SAVED[saved]}</div>}
 
+  {!profile && (
+    <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:18px;">
+      Not in Fairhaven Kids yet. <a href="#details" style="color:var(--k-ink); font-weight:700;">Add them below →</a>
+    </div>
+  )}
+
   {/* Allergies first, above everything else, in red. Not a field in a form
       somebody scrolls to — the one thing that has to be seen without looking. */}
   {profile?.allergies && (
@@ -512,214 +518,6 @@ const consentLabel: Record<string, string> = {
       {profile.medicalNotes && <p class="k-muted" style="margin:8px 0 0;">{profile.medicalNotes}</p>}
     </div>
   )}
-
-  <div class="k-two">
-    <div>
-      <div class="k-card" style="margin-bottom:18px;">
-        <h2 style="margin-top:0;">In Fairhaven Kids</h2>
-        <form method="POST">
-          <input type="hidden" name="action" value="save-profile" />
-
-          <label class="k-field"><span>Class</span>
-            <select name="classId">
-              <option value="">— not in a class —</option>
-              {classRows.map((c) => (
-                <option value={c.id} selected={profile?.classId === c.id}>
-                  {c.name}{c.active ? '' : ' (not running)'}
-                </option>
-              ))}
-            </select>
-          </label>
-          {/* A SUGGESTION, never applied on its own. Class is a stored fact
-              because most bus children have no birthday to derive one from. */}
-          {suggested && outgrown && (
-            <p style="margin:-6px 0 14px; color:#a3540a; font-size:14px;">
-              Their age suggests <strong>{suggested.name}</strong>.
-            </p>
-          )}
-          {suggested && !profile?.classId && (
-            <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
-              Their age suggests {suggested.name}.
-            </p>
-          )}
-
-          <label class="k-field"><span>Bus route</span>
-            <select name="routeId">
-              {/* Most children walk in with their family, so no route is the
-                  normal answer and it is listed first. */}
-              <option value="">— no route —</option>
-              {routeRows.map((r) => (
-                <option value={r.id} selected={profile?.routeId === r.id}>
-                  {r.name}{r.active ? '' : ' (not running)'}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label class="k-field"><span>Allergies</span>
-            <input name="allergies" value={profile?.allergies ?? ''}
-                   placeholder="Peanuts — EpiPen in the office" autocomplete="off" /></label>
-          <label class="k-field"><span>Medical notes</span>
-            <textarea name="medicalNotes" rows="2">{profile?.medicalNotes ?? ''}</textarea></label>
-
-          <button class="k-btn" type="submit">{profile ? 'Save' : 'Add to Fairhaven Kids'}</button>
-        </form>
-      </div>
-    </div>
-
-    <div>
-      <div class="k-card" style="margin-bottom:18px;">
-        <h2 style="margin-top:0;">Photo</h2>
-        {child.photoKey || photosEnabled(env) ? (
-          <>
-            {child.photoKey && (
-              <img src={`/kids/photo/${child.id}?v=${encodeURIComponent(child.photoKey.slice(-8))}`}
-                   alt="" width="150" height="150"
-                   style="border-radius:12px; object-fit:cover; display:block; margin-bottom:12px;" />
-            )}
-            <form method="POST" enctype="multipart/form-data" style="margin:0;">
-              <input type="hidden" name="action" value="photo" />
-              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp"
-                     style="font-size:14px; max-width:100%;" />
-              <button class="k-btn k-btn--quiet" type="submit" style="margin-top:10px;">Upload</button>
-            </form>
-            {child.photoKey && (
-              <form method="POST" style="margin:8px 0 0;">
-                <input type="hidden" name="action" value="photo-remove" />
-                <button class="k-btn k-btn--quiet" type="submit">Remove photo</button>
-              </form>
-            )}
-          </>
-        ) : (
-          <p class="k-muted" style="margin:0;">Photo storage is not switched on in this environment.</p>
-        )}
-      </div>
-    </div>
-  </div>
-
-  <h2 style="margin:28px 0 12px;">Fairhaven Bucks</h2>
-  <div class="k-card" style="margin-bottom:18px;">
-    <div class="k-label" style="color:var(--k-ink-soft);">Balance</div>
-    <p style="margin:2px 0 16px; font-size:34px; font-weight:800; line-height:1;">
-      {balance}<span style="font-size:16px; font-weight:600; color:var(--k-ink-soft); margin-left:8px;">bucks</span>
-    </p>
-
-    <div class="k-bucks">
-      <form method="POST" class="k-bucks__form">
-        <input type="hidden" name="action" value="award" />
-        <div class="k-bucks__row">
-          <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="5" required
-                 aria-label="Bucks to award" />
-          <input name="note" placeholder="What for?" autocomplete="off" aria-label="What for" />
-          <button class="k-btn" type="submit">Award</button>
-        </div>
-      </form>
-      <form method="POST" class="k-bucks__form">
-        <input type="hidden" name="action" value="spend" />
-        <div class="k-bucks__row">
-          <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="5" required
-                 aria-label="Bucks to spend" />
-          <input name="note" placeholder="On what?" autocomplete="off" aria-label="On what" />
-          <button class="k-btn k-btn--quiet" type="submit">Spend</button>
-        </div>
-      </form>
-    </div>
-
-    {recent.length > 0 && (
-      <div style="margin-top:18px; border-top:1px solid rgba(13,27,69,.1); padding-top:14px;">
-        <div class="k-label" style="color:var(--k-ink-soft); margin-bottom:8px;">Recent</div>
-        {recent.map((e) => (
-          <div class="k-entry">
-            <span class="k-entry__delta" class:list={[e.delta < 0 && 'is-down']}>
-              {e.delta > 0 ? `+${e.delta}` : e.delta}
-            </span>
-            <span class="k-entry__what">
-              {REASON_LABEL[e.reason] ?? e.reason}
-              {e.note && <span class="k-muted"> · {e.note}</span>}
-            </span>
-            <span class="k-entry__when k-muted">{e.createdAt.slice(0, 10)}</span>
-            {/* Attendance credits are undone by unticking the register, not
-                here — see the handler for why a correction would strand them. */}
-            {e.reason !== 'attendance' && (
-              <form method="POST" style="margin:0;">
-                <input type="hidden" name="action" value="undo-entry" />
-                <input type="hidden" name="entryId" value={e.id} />
-                <button class="k-undo" type="submit"
-                        onclick="return confirm('Undo this entry?')">undo</button>
-              </form>
-            )}
-          </div>
-        ))}
-        {ledger.length > recent.length && (
-          <p class="k-muted" style="margin:10px 0 0; font-size:14px;">
-            and {ledger.length - recent.length} older {ledger.length - recent.length === 1 ? 'entry' : 'entries'}
-          </p>
-        )}
-      </div>
-    )}
-  </div>
-
-  <h2 style="margin:28px 0 12px;">Card</h2>
-  <div class="k-card" style="margin-bottom:18px;">
-    {liveCard ? (
-      <>
-        <p style="margin-top:0;">
-          Issued {liveCard.issuedAt.slice(0, 10)}
-          {liveCard.issuedBy && <span class="k-muted"> by {liveCard.issuedBy}</span>}
-        </p>
-        {canIssueCards(user.role) ? (
-          <>
-            {/* The URL to write to the tag. Shown only to whoever may issue
-                cards — it IS the credential, and a teacher has no reason to
-                read one off a screen. */}
-            <div class="k-label" style="color:var(--k-ink-soft);">Write this to the tag</div>
-            <input readonly value={cardUrl} onclick="this.select()" class="k-token" />
-            <p class="k-muted" style="margin:8px 0 14px; font-size:14px;">
-              Tapping it on a phone opens this page, already signed in. A found
-              card shows a sign-in screen and nothing else.
-            </p>
-            <form method="POST" style="display:inline-block; margin:0 8px 0 0;">
-              <input type="hidden" name="action" value="revoke-card" />
-              <input type="hidden" name="cardId" value={liveCard.id} />
-              <button class="k-btn k-btn--quiet" type="submit"
-                      onclick="return confirm('Revoke this card? It will stop working immediately.')">
-                Revoke</button>
-            </form>
-            <form method="POST" style="display:inline-block; margin:0;">
-              <input type="hidden" name="action" value="issue-card" />
-              <button class="k-btn k-btn--quiet" type="submit"
-                      onclick="return confirm('Issue a replacement? The current card stops working.')">
-                Replace</button>
-            </form>
-          </>
-        ) : (
-          <p class="k-muted" style="margin-bottom:0;">
-            Ask a director if this card needs replacing.
-          </p>
-        )}
-      </>
-    ) : (
-      <>
-        <p class="k-muted" style="margin-top:0;">No card issued.</p>
-        {canIssueCards(user.role) ? (
-          <form method="POST" style="margin:0;">
-            <input type="hidden" name="action" value="issue-card" />
-            <button class="k-btn" type="submit">Issue a card</button>
-          </form>
-        ) : (
-          <p class="k-muted" style="margin-bottom:0;">A director can issue one.</p>
-        )}
-      </>
-    )}
-
-    {cards.filter((c) => !c.active).length > 0 && canIssueCards(user.role) && (
-      <p class="k-muted" style="margin:14px 0 0; font-size:14px;">
-        {cards.filter((c) => !c.active).length} earlier
-        {cards.filter((c) => !c.active).length === 1 ? ' card has' : ' cards have'} been revoked
-        and no longer open anything.
-      </p>
-    )}
-  </div>
 
   <h2 style="margin:28px 0 12px;">Guardians</h2>
 
@@ -842,6 +640,215 @@ const consentLabel: Record<string, string> = {
       ))}
     </details>
   )}
+
+
+  <h2 style="margin:28px 0 12px;">Fairhaven Bucks</h2>
+  <div class="k-card" style="margin-bottom:18px;">
+    <div class="k-label" style="color:var(--k-ink-soft);">Balance</div>
+    <p style="margin:2px 0 16px; font-size:34px; font-weight:800; line-height:1;">
+      {balance}<span style="font-size:16px; font-weight:600; color:var(--k-ink-soft); margin-left:8px;">bucks</span>
+    </p>
+
+    <div class="k-bucks">
+      <form method="POST" class="k-bucks__form">
+        <input type="hidden" name="action" value="award" />
+        <div class="k-bucks__row">
+          <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="5" required
+                 aria-label="Bucks to award" />
+          <input name="note" placeholder="What for?" autocomplete="off" aria-label="What for" />
+          <button class="k-btn" type="submit">Award</button>
+        </div>
+      </form>
+      <form method="POST" class="k-bucks__form">
+        <input type="hidden" name="action" value="spend" />
+        <div class="k-bucks__row">
+          <input name="amount" type="number" min="1" max={MAX_AMOUNT} placeholder="5" required
+                 aria-label="Bucks to spend" />
+          <input name="note" placeholder="On what?" autocomplete="off" aria-label="On what" />
+          <button class="k-btn k-btn--quiet" type="submit">Spend</button>
+        </div>
+      </form>
+    </div>
+
+    {recent.length > 0 && (
+      <div style="margin-top:18px; border-top:1px solid rgba(13,27,69,.1); padding-top:14px;">
+        <div class="k-label" style="color:var(--k-ink-soft); margin-bottom:8px;">Recent</div>
+        {recent.map((e) => (
+          <div class="k-entry">
+            <span class="k-entry__delta" class:list={[e.delta < 0 && 'is-down']}>
+              {e.delta > 0 ? `+${e.delta}` : e.delta}
+            </span>
+            <span class="k-entry__what">
+              {REASON_LABEL[e.reason] ?? e.reason}
+              {e.note && <span class="k-muted"> · {e.note}</span>}
+            </span>
+            <span class="k-entry__when k-muted">{e.createdAt.slice(0, 10)}</span>
+            {/* Attendance credits are undone by unticking the register, not
+                here — see the handler for why a correction would strand them. */}
+            {e.reason !== 'attendance' && (
+              <form method="POST" style="margin:0;">
+                <input type="hidden" name="action" value="undo-entry" />
+                <input type="hidden" name="entryId" value={e.id} />
+                <button class="k-undo" type="submit"
+                        onclick="return confirm('Undo this entry?')">undo</button>
+              </form>
+            )}
+          </div>
+        ))}
+        {ledger.length > recent.length && (
+          <p class="k-muted" style="margin:10px 0 0; font-size:14px;">
+            and {ledger.length - recent.length} older {ledger.length - recent.length === 1 ? 'entry' : 'entries'}
+          </p>
+        )}
+      </div>
+    )}
+  </div>
+
+  <div class="k-two" id="details" style="margin-top:28px;">
+    <div>
+      <div class="k-card" style="margin-bottom:18px;">
+        <h2 style="margin-top:0;">Details</h2>
+        <form method="POST">
+          <input type="hidden" name="action" value="save-profile" />
+
+          <label class="k-field"><span>Class</span>
+            <select name="classId">
+              <option value="">— not in a class —</option>
+              {classRows.map((c) => (
+                <option value={c.id} selected={profile?.classId === c.id}>
+                  {c.name}{c.active ? '' : ' (not running)'}
+                </option>
+              ))}
+            </select>
+          </label>
+          {/* A SUGGESTION, never applied on its own. Class is a stored fact
+              because most bus children have no birthday to derive one from. */}
+          {suggested && outgrown && (
+            <p style="margin:-6px 0 14px; color:#a3540a; font-size:14px;">
+              Their age suggests <strong>{suggested.name}</strong>.
+            </p>
+          )}
+          {suggested && !profile?.classId && (
+            <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
+              Their age suggests {suggested.name}.
+            </p>
+          )}
+
+          <label class="k-field"><span>Bus route</span>
+            <select name="routeId">
+              {/* Most children walk in with their family, so no route is the
+                  normal answer and it is listed first. */}
+              <option value="">— no route —</option>
+              {routeRows.map((r) => (
+                <option value={r.id} selected={profile?.routeId === r.id}>
+                  {r.name}{r.active ? '' : ' (not running)'}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label class="k-field"><span>Allergies</span>
+            <input name="allergies" value={profile?.allergies ?? ''}
+                   placeholder="Peanuts — EpiPen in the office" autocomplete="off" /></label>
+          <label class="k-field"><span>Medical notes</span>
+            <textarea name="medicalNotes" rows="2">{profile?.medicalNotes ?? ''}</textarea></label>
+
+          <button class="k-btn" type="submit">{profile ? 'Save' : 'Add to Fairhaven Kids'}</button>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="k-card" style="margin-bottom:18px;">
+        <h2 style="margin-top:0;">Photo</h2>
+        {child.photoKey || photosEnabled(env) ? (
+          <>
+            {child.photoKey && (
+              <img src={`/kids/photo/${child.id}?v=${encodeURIComponent(child.photoKey.slice(-8))}`}
+                   alt="" width="150" height="150"
+                   style="border-radius:12px; object-fit:cover; display:block; margin-bottom:12px;" />
+            )}
+            <form method="POST" enctype="multipart/form-data" style="margin:0;">
+              <input type="hidden" name="action" value="photo" />
+              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp"
+                     style="font-size:14px; max-width:100%;" />
+              <button class="k-btn k-btn--quiet" type="submit" style="margin-top:10px;">Upload</button>
+            </form>
+            {child.photoKey && (
+              <form method="POST" style="margin:8px 0 0;">
+                <input type="hidden" name="action" value="photo-remove" />
+                <button class="k-btn k-btn--quiet" type="submit">Remove photo</button>
+              </form>
+            )}
+          </>
+        ) : (
+          <p class="k-muted" style="margin:0;">Photo storage is not switched on in this environment.</p>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <h2 style="margin:28px 0 12px;">Card <span class="k-muted" style="font-size:14px; font-weight:400;">· setup</span></h2>
+  <div class="k-card" style="margin-bottom:18px;">
+    {liveCard ? (
+      <>
+        <p style="margin-top:0;">
+          Issued {liveCard.issuedAt.slice(0, 10)}
+          {liveCard.issuedBy && <span class="k-muted"> by {liveCard.issuedBy}</span>}
+        </p>
+        {canIssueCards(user.role) ? (
+          <>
+            {/* The URL to write to the tag. Shown only to whoever may issue
+                cards — it IS the credential, and a teacher has no reason to
+                read one off a screen. */}
+            <div class="k-label" style="color:var(--k-ink-soft);">Write this to the tag</div>
+            <input readonly value={cardUrl} onclick="this.select()" class="k-token" />
+            <p class="k-muted" style="margin:8px 0 14px; font-size:14px;">
+              Tapping it on a phone opens this page, already signed in. A found
+              card shows a sign-in screen and nothing else.
+            </p>
+            <form method="POST" style="display:inline-block; margin:0 8px 0 0;">
+              <input type="hidden" name="action" value="revoke-card" />
+              <input type="hidden" name="cardId" value={liveCard.id} />
+              <button class="k-btn k-btn--quiet" type="submit"
+                      onclick="return confirm('Revoke this card? It will stop working immediately.')">
+                Revoke</button>
+            </form>
+            <form method="POST" style="display:inline-block; margin:0;">
+              <input type="hidden" name="action" value="issue-card" />
+              <button class="k-btn k-btn--quiet" type="submit"
+                      onclick="return confirm('Issue a replacement? The current card stops working.')">
+                Replace</button>
+            </form>
+          </>
+        ) : (
+          <p class="k-muted" style="margin-bottom:0;">
+            Ask a director if this card needs replacing.
+          </p>
+        )}
+      </>
+    ) : (
+      <>
+        <p class="k-muted" style="margin-top:0;">No card issued.</p>
+        {canIssueCards(user.role) ? (
+          <form method="POST" style="margin:0;">
+            <input type="hidden" name="action" value="issue-card" />
+            <button class="k-btn" type="submit">Issue a card</button>
+          </form>
+        ) : (
+          <p class="k-muted" style="margin-bottom:0;">A director can issue one.</p>
+        )}
+      </>
+    )}
+
+    {cards.filter((c) => !c.active).length > 0 && canIssueCards(user.role) && (
+      <p class="k-muted" style="margin:14px 0 0; font-size:14px;">
+        {cards.filter((c) => !c.active).length} earlier
+        {cards.filter((c) => !c.active).length === 1 ? ' card has' : ' cards have'} been revoked
+        and no longer open anything.
+      </p>
+    )}
+  </div>
 
   {canLinkChurchRecords(user.role) && !child.archived && (
     <div class="k-card" style="margin-bottom:18px;">

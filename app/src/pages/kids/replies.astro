@@ -1,5 +1,6 @@
 ---
 import KidsLayout from '../../layouts/KidsLayout.astro';
+import KidsMessageTabs from '../../components/KidsMessageTabs.astro';
 import { getDb, schema, nowIso } from '../../db';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
@@ -190,6 +191,7 @@ const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
 });
 ---
 <KidsLayout title="Replies" user={user}>
+  <KidsMessageTabs active="replies" />
   <h1>Replies</h1>
   <p class="k-muted" style="margin:-4px 0 22px; max-width:640px;">
     What Fairhaven Kids families have texted back. These also appear in the church's main

@@ -1,0 +1,19 @@
+---
+/**
+ * Texts and Replies are one job — talking to families — so they share one slot
+ * in the nav and switch here, rather than taking two.
+ */
+interface Props { active: 'send' | 'replies' }
+const { active } = Astro.props;
+---
+<div class="k-tabs" role="tablist">
+  <a href="/kids/messaging" aria-current={active === 'send' ? 'page' : undefined}>Send a text</a>
+  <a href="/kids/replies" aria-current={active === 'replies' ? 'page' : undefined}>Replies</a>
+</div>
+
+<style>
+  .k-tabs { display:flex; gap:8px; margin:0 0 18px; }
+  .k-tabs a { text-decoration:none; font-weight:700; font-size:15px; padding:8px 16px;
+    border-radius:999px; border:1px solid var(--k-line); color:var(--k-muted); }
+  .k-tabs a[aria-current="page"] { background:var(--k-orange); border-color:var(--k-orange); color:#fff; }
+</style>

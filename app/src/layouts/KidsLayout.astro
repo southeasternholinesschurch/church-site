@@ -20,25 +20,24 @@ const { title, user } = Astro.props;
 const path = Astro.url.pathname;
 
 /**
- * Only pages that exist. Entries are added here as each one lands, so the bar
- * never offers a volunteer a link to a 404 — the whole section is new and
- * "it's broken" is a much worse first impression than "it's not here yet".
- * The landing page lists what is still coming.
+ * Three things a volunteer does, and one place for everything a director sets up
+ * once and leaves alone. The logo is the way home, so there is no "Home" link.
+ *
+ * `also` lists the pages that live UNDER a link, so it stays highlighted while
+ * you are on them — Replies sits beside Messages, and the setup screens under
+ * Setup, rather than each taking a slot in a bar that wraps on a phone.
+ *
+ * Filtered by canAccess below, so a teacher never sees Setup. The page refuses
+ * anyone without the capability regardless; a hidden link is not access control.
  */
-const NAV: [string, string][] = [
-  ['/kids', 'Home'],
-  ['/kids/children', 'Children'],
-  ['/kids/attendance', 'Attendance'],
-  // Filtered by canAccess below, so a teacher never sees it.
-  ['/kids/classes', 'Classes'],
-  ['/kids/kiosk', 'Kiosk'],
-  ['/kids/cards', 'Cards'],
-  // Any kids role may open it; the page refuses anyone without the capability,
-  // because a path allowlist cannot express a flag.
-  ['/kids/messaging', 'Texts'],
-  ['/kids/replies', 'Replies'],
+const NAV: { href: string; label: string; also?: string[] }[] = [
+  { href: '/kids/attendance', label: 'Attendance', also: ['/kids/register'] },
+  { href: '/kids/children', label: 'Children', also: ['/kids/child'] },
+  { href: '/kids/messaging', label: 'Messages', also: ['/kids/replies'] },
+  { href: '/kids/setup', label: 'Setup', also: ['/kids/classes', '/kids/kiosk', '/kids/cards'] },
 ];
-const nav = NAV.filter(([href]) => canAccess(user.role, href));
+const under = (base: string) => path === base || path.startsWith(`${base}/`);
+const nav = NAV.filter((n) => canAccess(user.role, n.href));
 
 /** Staff came DOWN into this section and need the way back. A volunteer has no
  *  such link, because there is nowhere for it to lead. */
@@ -74,8 +73,8 @@ const showWayBack = !isKidsRole(user.role);
           <img src="/kids-logo-white.png" alt="Fairhaven Kids" width="450" height="220" />
         </a>
         <nav class="k-bar__nav">
-          {nav.map(([href, label]) => (
-            <a href={href} aria-current={path === href || (href !== '/kids' && path.startsWith(`${href}/`)) ? 'page' : undefined}>{label}</a>
+          {nav.map((n) => (
+            <a href={n.href} aria-current={[n.href, ...(n.also ?? [])].some(under) ? 'page' : undefined}>{n.label}</a>
           ))}
           {showWayBack && <a href="/" class="k-bar__up">← Staff dashboard</a>}
           <span class="k-bar__who">{user.name ?? user.email}</span>

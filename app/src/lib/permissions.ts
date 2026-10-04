@@ -53,6 +53,9 @@ export const KIDS_ROOT = '/kids';
 const KIDS_DIRECTOR_ONLY = [
   '/kids/classes',
   '/kids/settings',
+  // The hub that links to the structural screens below. Director-only for the
+  // same reason they are, so a teacher is not offered a door they cannot open.
+  '/kids/setup',
   // Registering a check-in tablet, and pairing one. §4 lists it with the other
   // structural acts a teacher may not do.
   '/kids/kiosk',
