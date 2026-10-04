@@ -11,7 +11,7 @@
  *
  *   npm test
  */
-import { ageOn, suggestClass, classMismatch } from '../src/lib/kids.ts';
+import { ageOn, suggestClass, classMismatch, parseView, formatView } from '../src/lib/kids.ts';
 import type { AgeClass } from '../src/lib/kids.ts';
 import { likelyKidsKind, kindHasClasses } from '../src/lib/services.ts';
 
@@ -84,6 +84,18 @@ eq('the eve of it is a Wednesday',        likelyKidsKind('2025-12-31'), 'kids-we
 
 eq('the Wednesday club has no classes',   kindHasClasses('kids-wednesday'), false);
 eq('the Sunday classes do',               kindHasClasses('kids-sunday'), true);
+
+// ---- the remembered attendance view ----
+eq('view: all', parseView('all'), { kind: 'all' });
+eq('view: class', parseView('class:3'), { kind: 'class', id: 3 });
+eq('view: route', parseView('route:12'), { kind: 'route', id: 12 });
+eq('view: null is not chosen', parseView(null), null);
+eq('view: empty is not chosen', parseView(''), null);
+eq('view: junk is not chosen', parseView('class:abc'), null);
+eq('view: zero id refused', parseView('route:0'), null);
+eq('view: trailing junk refused', parseView('class:3;drop'), null);
+eq('view: unknown kind refused', parseView('person:3'), null);
+eq('view: round trip', formatView(parseView('route:7')!), 'route:7');
 
 console.log(fail ? `\n${fail} FAILED` : '\nall passed');
 if (fail) process.exit(1);

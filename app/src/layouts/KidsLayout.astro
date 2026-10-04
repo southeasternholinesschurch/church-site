@@ -28,7 +28,7 @@ const path = Astro.url.pathname;
 const NAV: [string, string][] = [
   ['/kids', 'Home'],
   ['/kids/children', 'Children'],
-  ['/kids/register', 'Registers'],
+  ['/kids/attendance', 'Attendance'],
   // Filtered by canAccess below, so a teacher never sees it.
   ['/kids/classes', 'Classes'],
   ['/kids/kiosk', 'Kiosk'],
@@ -75,7 +75,7 @@ const showWayBack = !isKidsRole(user.role);
         </a>
         <nav class="k-bar__nav">
           {nav.map(([href, label]) => (
-            <a href={href} aria-current={path === href ? 'page' : undefined}>{label}</a>
+            <a href={href} aria-current={path === href || (href !== '/kids' && path.startsWith(`${href}/`)) ? 'page' : undefined}>{label}</a>
           ))}
           {showWayBack && <a href="/" class="k-bar__up">← Staff dashboard</a>}
           <span class="k-bar__who">{user.name ?? user.email}</span>

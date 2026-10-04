@@ -62,3 +62,27 @@ export function classMismatch(
   if (!s) return null;
   return s.id !== currentClassId;
 }
+
+/**
+ * Which slice of the children an attendance page is showing.
+ *
+ * Remembered per account as a short string — 'all', 'class:3', 'route:2' — so a
+ * teacher or bus captain picks once and the page opens on it from then on. It is
+ * a convenience filter and nothing more: whatever the view, the server still
+ * only lets a volunteer mark enrolled children.
+ */
+export type AttendanceView =
+  | { kind: 'all' }
+  | { kind: 'class'; id: number }
+  | { kind: 'route'; id: number };
+
+/** Anything that is not exactly one of the three shapes is "not chosen". */
+export function parseView(raw: string | null | undefined): AttendanceView | null {
+  if (!raw) return null;
+  if (raw === 'all') return { kind: 'all' };
+  const m = /^(class|route):([1-9]\d{0,8})$/.exec(raw);
+  return m ? { kind: m[1] as 'class' | 'route', id: Number(m[2]) } : null;
+}
+
+export const formatView = (v: AttendanceView): string =>
+  v.kind === 'all' ? 'all' : `${v.kind}:${v.id}`;

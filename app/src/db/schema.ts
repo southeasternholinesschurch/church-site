@@ -234,6 +234,13 @@ export const staff = sqliteTable('staff', {
    * church's money and speak in its name" is no.
    */
   kidsCanText: integer('kids_can_text', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * The group this person takes attendance for — 'all', 'class:<id>' or
+   * 'route:<id>' — remembered so the attendance page opens on it. A preference
+   * rather than a relationship, so it is text and not a foreign key; see
+   * lib/kids.ts parseView. NULL until they choose.
+   */
+  kidsView: text('kids_view'),
   active: integer('active', { mode: 'boolean' }).notNull().default(true),
   createdAt: text('created_at').notNull(),
   lastLoginAt: text('last_login_at'),
