@@ -1,0 +1,326 @@
+---
+import KidsLayout from '../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../db';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { readForm } from '../../lib/form';
+import { churchToday, formatDate } from '../../lib/services';
+import { comingSunday, isComingAnswer, parseStop, routeOrder, type ComingAnswer } from '../../lib/kids';
+
+/**
+ * "Calling" — the worksheet for the day-before calls.
+ *
+ * Somebody rings each family on Saturday, asks whether the children are
+ * coming, and taps Coming, Maybe or No beside each child. The answers then show
+ * as a quiet colour on Sunday's attendance list (see attendance/[serviceId]),
+ * which is what the van workers drive by.
+ *
+ * EVERY child is listed, not just the yes's: the list is always in flux, and a
+ * "no" at noon becomes a "yes" at four. The answer is colour — green, amber,
+ * red — and a child nobody has reached has NO colour, which is a real state and
+ * is not the same as "no".
+ *
+ * THE WEEKLY RESET IS THE DATE. An answer belongs to the Sunday it was for
+ * (comingSunday), so on Monday the key moves on and everyone is unanswered
+ * again. Nothing is cleared and no job runs; last week's rows simply stop
+ * being the ones this page reads.
+ *
+ * DRIVING ORDER. Each route lists in the order it is driven, by a stop number
+ * on the child's profile. "Arrange order" beside a route turns its rows into
+ * number boxes; anyone who can make the calls can set it, and it is the route's
+ * order for everybody, the bus attendance list included.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const week = comingSunday(churchToday());
+
+// ---- writes ------------------------------------------------------------------
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+
+  if (String(form.get('action') ?? '') === 'save-order') {
+    const routeId = Number(form.get('routeId') ?? 0);
+    if (Number.isInteger(routeId) && routeId > 0) {
+      // Only children on THIS route are written, whatever ids the form carries:
+      // a number typed against a child must not reorder somebody else's route.
+      const onRoute = await db.select({ id: schema.kids.id }).from(schema.kids)
+        .where(eq(schema.kids.routeId, routeId));
+      const at = nowIso();
+      const writes = onRoute.map((k) => db.update(schema.kids)
+        .set({ routeStop: parseStop(form.get(`stop-${k.id}`)), updatedAt: at })
+        .where(and(eq(schema.kids.id, k.id), eq(schema.kids.routeId, routeId))));
+      // One batch, so a save is all of the route or none of it.
+      const [first, ...rest] = writes;
+      if (first) await db.batch([first, ...rest]);
+    }
+    return Astro.redirect(`${Astro.url.pathname}#r${routeId}`, 303);
+  }
+
+  const kidId = Number(form.get('kidId') ?? 0);
+  const answer = String(form.get('answer') ?? '');
+  const wantsJson = Astro.request.headers.get('x-kids-coming') === 'json';
+
+  let ok = false;
+  let result: ComingAnswer | null = null;
+  if (Number.isInteger(kidId) && kidId > 0 && (answer === 'clear' || isComingAnswer(answer))) {
+    // Only an enrolled child: a person id from anywhere else in the
+    // congregation must not become a row on a children's list.
+    const [enrolled] = await db.select({ id: schema.kids.id }).from(schema.kids)
+      .where(and(eq(schema.kids.id, kidId), eq(schema.kids.archived, false))).limit(1);
+    if (enrolled) {
+      ok = true;
+      if (answer === 'clear') {
+        // Back to "not asked" — for a tap on the wrong child.
+        await db.delete(schema.kidComing).where(and(
+          eq(schema.kidComing.kidId, kidId), eq(schema.kidComing.week, week)));
+      } else {
+        result = answer as ComingAnswer;
+        await db.insert(schema.kidComing)
+          .values({ kidId, week, answer: result,
+                    staffId: user.id > 0 ? user.id : null, updatedAt: nowIso() })
+          .onConflictDoUpdate({
+            target: [schema.kidComing.kidId, schema.kidComing.week],
+            set: { answer: result, staffId: user.id > 0 ? user.id : null, updatedAt: nowIso() },
+          });
+      }
+    }
+  }
+  if (wantsJson) {
+    return new Response(JSON.stringify({ ok, answer: result }),
+      { status: ok ? 200 : 400, headers: { 'content-type': 'application/json' } });
+  }
+  return Astro.redirect(Astro.url.pathname, 303);
+}
+
+// ---- the list ----------------------------------------------------------------
+const kids = await db.select({
+  id: schema.kids.id,
+  firstName: schema.kids.firstName,
+  lastName: schema.kids.lastName,
+  street: schema.kids.addressStreet,
+  routeId: schema.kids.routeId,
+  routeStop: schema.kids.routeStop,
+  routeName: schema.kidRoutes.name,
+  answer: schema.kidComing.answer,
+  /* Whoever is to be rung: the primary grown-up, else the first one on file. */
+  guardian: sql<string | null>`(select name from kid_guardians g where g.kid_id = kids.id order by g.is_primary desc, g.id limit 1)`,
+  phone: sql<string | null>`(select phone from kid_guardians g where g.kid_id = kids.id order by g.is_primary desc, g.id limit 1)`,
+  phoneE164: sql<string | null>`(select phone_e164 from kid_guardians g where g.kid_id = kids.id order by g.is_primary desc, g.id limit 1)`,
+}).from(schema.kids)
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kids.routeId))
+  .leftJoin(schema.kidComing, and(
+    eq(schema.kidComing.kidId, schema.kids.id),
+    eq(schema.kidComing.week, week)))
+  .where(eq(schema.kids.archived, false))
+  .orderBy(asc(schema.kids.addressStreet), asc(schema.kids.firstName));
+
+const routes = await db.select({ id: schema.kidRoutes.id, name: schema.kidRoutes.name })
+  .from(schema.kidRoutes).where(eq(schema.kidRoutes.active, true))
+  .orderBy(asc(schema.kidRoutes.name));
+
+const count = (list: typeof kids, a: string | null) => list.filter((k) => (k.answer ?? null) === a).length;
+// By route, with the children who are on none of them last. Derived by
+// subtraction so a child on a route that was later made inactive still appears.
+const groups = [
+  ...routes.map((r) => ({ key: `r${r.id}`, routeId: r.id as number | null, name: r.name,
+                         kids: kids.filter((k) => k.routeId === r.id).sort(routeOrder) })),
+];
+const placed = new Set(groups.flatMap((g) => g.kids.map((k) => k.id)));
+groups.push({ key: 'none', routeId: null, name: routes.length ? 'No route yet' : 'All children',
+              kids: kids.filter((k) => !placed.has(k.id)) });
+const shownGroups = groups.filter((g) => g.kids.length > 0);
+// The one route being arranged, if any. Anything that is not a listed route is
+// simply "not arranging".
+const arrangeParam = Number(Astro.url.searchParams.get('arrange') ?? 0);
+const arranging = routes.some((r) => r.id === arrangeParam) ? arrangeParam : null;
+const tel = (p: string | null) => (p ? p.replace(/[^\d+]/g, '') : '');
+const ANSWERS: { id: ComingAnswer; label: string }[] = [
+  { id: 'yes', label: 'Coming' }, { id: 'maybe', label: 'Maybe' }, { id: 'no', label: 'No' },
+];
+---
+<KidsLayout title="Calling" user={user}>
+  <h1 style="margin-bottom:4px;">Calling</h1>
+  <p class="k-muted" style="margin:0 0 16px;">
+    Is each child coming {formatDate(week)}? · starts fresh every Monday · no colour = not asked yet
+  </p>
+
+  <div class="cm-sum" id="sum">
+    <span class="cm-chip cm-chip--yes"><b data-n="yes">{count(kids, 'yes')}</b> yes</span>
+    <span class="cm-chip cm-chip--maybe"><b data-n="maybe">{count(kids, 'maybe')}</b> maybe</span>
+    <span class="cm-chip cm-chip--no"><b data-n="no">{count(kids, 'no')}</b> no</span>
+    <span class="cm-chip"><b data-n="none">{count(kids, null)}</b> not asked</span>
+  </div>
+
+  {kids.length === 0 && (
+    <div class="k-card"><p class="k-muted" style="margin:0;">
+      No children in Fairhaven Kids yet. Add them from <a href="/kids/children">the children list</a>.
+    </p></div>
+  )}
+
+  {shownGroups.map((g) => (
+    <section id={g.key}>
+      <div class="k-label k-muted cm-head">
+        <span>{g.name} <span style="opacity:.7; font-weight:600;">
+          · {count(g.kids, 'yes')} yes · {count(g.kids, 'maybe')} maybe · {count(g.kids, 'no')} no · {count(g.kids, null)} not asked
+        </span></span>
+        {g.routeId !== null && arranging !== g.routeId && (
+          <a class="cm-arrange" href={`?arrange=${g.routeId}#${g.key}`}>Arrange order</a>
+        )}
+      </div>
+      {g.routeId !== null && arranging === g.routeId ? (
+      <form method="POST" action={Astro.url.pathname} class="k-card cm-order">
+        <input type="hidden" name="action" value="save-order" />
+        <input type="hidden" name="routeId" value={g.routeId} />
+        <p class="cm-sub" style="margin:2px 4px 10px; font-size:13px;">
+          Number the stops in the order you drive them. Brothers and sisters at the
+          same house get the same number. Leaving gaps (10, 20, 30) makes room to
+          fit a new family in later. Anyone left blank goes to the bottom.
+        </p>
+        {g.kids.map((k) => (
+          <label class="cm-orow">
+            <input type="number" inputmode="numeric" min="1" max="9999" step="1"
+                   name={`stop-${k.id}`} value={k.routeStop ?? ''}
+                   aria-label={`Stop number for ${k.firstName} ${k.lastName}`} />
+            <span class="cm-who">
+              <span class="cm-name">{k.firstName} {k.lastName}</span>
+              <span class="cm-sub" style="display:block;">{k.street ?? 'No address'}</span>
+            </span>
+          </label>
+        ))}
+        <div style="display:flex; gap:14px; align-items:center; margin:12px 4px 4px;">
+          <button type="submit" class="k-btn">Save order</button>
+          <a class="k-btn k-btn--quiet" href={`${Astro.url.pathname}#${g.key}`}>Cancel</a>
+        </div>
+      </form>
+      ) : (
+      <div class="k-card" style="padding:6px;">
+        {g.kids.map((k) => (
+          <div class:list={['cm-row', k.answer && `is-${k.answer}`]} data-person={k.id}>
+            <div class="cm-who">
+              <div class="cm-name">
+                {k.firstName} {k.lastName}
+                <span class="cm-state" data-state>{k.answer ?? ''}</span>
+              </div>
+              <div class="cm-sub">{k.routeStop !== null && g.routeId !== null && <b>Stop {k.routeStop} · </b>}{k.street ?? 'No address'}</div>
+              {(k.guardian || k.phone) && (
+                <div class="cm-sub">{k.guardian ?? ''}
+                  {k.phone && <> <a href={`tel:${tel(k.phone)}`}>{k.phone}</a></>}</div>
+              )}
+            </div>
+            <form method="POST" class="cm-btns">
+              <input type="hidden" name="kidId" value={k.id} />
+              {ANSWERS.map((a) => (
+                <button type="submit" name="answer"
+                        value={k.answer === a.id ? 'clear' : a.id}
+                        data-answer={a.id}
+                        class:list={['cm-btn', `cm-btn--${a.id}`, k.answer === a.id && 'on']}
+                        aria-pressed={k.answer === a.id ? 'true' : 'false'}>{a.label}</button>
+              ))}
+            </form>
+          </div>
+        ))}
+      </div>
+      )}
+    </section>
+  ))}
+</KidsLayout>
+
+<style>
+  .cm-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin:22px 0 10px; }
+  .cm-arrange { font-size:13px; text-transform:none; letter-spacing:0; font-weight:700; white-space:nowrap; }
+  .cm-order { padding:10px; }
+  .cm-orow { display:flex; align-items:center; gap:12px; padding:6px 4px; }
+  .cm-orow + .cm-orow { border-top:1px solid rgba(13,27,69,.08); }
+  .cm-orow input { width:72px; flex:none; font:inherit; font-size:18px; font-weight:700; text-align:center;
+                   padding:8px 6px; border:2px solid rgba(13,27,69,.25); border-radius:8px; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; text-decoration:none; }
+  .k-btn--quiet { background:transparent; color:var(--k-ink-soft);
+                  border:1px solid rgba(13,27,69,.22); font-weight:600; }
+  .cm-sum { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .cm-chip { font-size:14px; font-weight:700; padding:6px 12px; border-radius:999px;
+             background:rgba(255,255,255,.12); color:var(--k-text); }
+  .cm-chip--yes { background:#1f9d55; color:#fff; }
+  .cm-chip--maybe { background:#f2b705; color:#3a2a00; }
+  .cm-chip--no { background:#c0392b; color:#fff; }
+
+  .cm-row { display:flex; align-items:center; gap:10px; justify-content:space-between;
+            padding:8px 10px; border-radius:8px; border-left:5px solid transparent; }
+  .cm-row + .cm-row { margin-top:3px; }
+  /* Colour AND a word, so it still reads in glare and for colour-blind eyes. */
+  .cm-row.is-yes   { background:#e3f4e8; border-left-color:#1f9d55; }
+  .cm-row.is-maybe { background:#fff3cd; border-left-color:#f2b705; }
+  .cm-row.is-no    { background:#fde4e4; border-left-color:#c0392b; }
+  .cm-who { flex:1; min-width:0; }
+  .cm-name { font-weight:700; font-size:16px; color:var(--k-ink); }
+  /* Small on purpose: the address is there to be read, not to compete with the name. */
+  .cm-sub { font-size:12px; line-height:1.35; color:var(--k-ink-soft); }
+  .cm-sub a { color:var(--k-ink); font-weight:600; }
+  .cm-state { margin-left:8px; font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .is-yes .cm-state { color:#14683a; } .is-maybe .cm-state { color:#7a5a00; } .is-no .cm-state { color:#9b1c10; }
+  /* One joined three-way toggle rather than three separate buttons. */
+  .cm-btns { display:flex; margin:0; flex:none; border-radius:9px; overflow:hidden;
+             border:2px solid rgba(13,27,69,.2); background:#fff; }
+  .cm-btn { font:inherit; font-size:14px; font-weight:700; min-width:58px; padding:10px 9px; border:0;
+            background:#fff; color:var(--k-ink-soft); cursor:pointer; }
+  .cm-btn + .cm-btn { border-left:1px solid rgba(13,27,69,.15); }
+  .cm-btn--yes.on   { background:#1f9d55; color:#fff; }
+  .cm-btn--maybe.on { background:#f2b705; color:#3a2a00; }
+  .cm-btn--no.on    { background:#c0392b; color:#fff; }
+</style>
+
+<script is:inline>
+  /*
+   * Progressive enhancement: every button is a real form post that works with no
+   * JavaScript. With script the same post goes by fetch and the row is painted
+   * from the SERVER's answer — never optimistically, because a colour that
+   * appears and is not saved sends a van to the wrong house.
+   * Tapping the lit button again returns the child to "not asked".
+   */
+  (function () {
+    var SUM = ['yes', 'maybe', 'no', 'none'];
+    function recount() {
+      var n = { yes: 0, maybe: 0, no: 0, none: 0 };
+      document.querySelectorAll('.cm-row').forEach(function (r) {
+        var a = ['yes', 'maybe', 'no'].filter(function (x) { return r.classList.contains('is-' + x); })[0] || 'none';
+        n[a]++;
+      });
+      SUM.forEach(function (k) {
+        var el = document.querySelector('#sum [data-n="' + k + '"]');
+        if (el) el.textContent = n[k];
+      });
+    }
+    document.querySelectorAll('.cm-btns').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        var btn = e.submitter;
+        if (!btn) return;                       // let the plain post happen
+        e.preventDefault();
+        var row = form.closest('.cm-row');
+        var buttons = form.querySelectorAll('.cm-btn');
+        buttons.forEach(function (b) { b.disabled = true; });
+        var body = new URLSearchParams();
+        body.set('kidId', form.querySelector('input[name="kidId"]').value);
+        body.set('answer', btn.value);
+        fetch(location.pathname, {
+          method: 'POST',
+          headers: { 'x-kids-coming': 'json', 'content-type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.ok) { form.submit(); return; }
+            ['yes', 'maybe', 'no'].forEach(function (x) { row.classList.toggle('is-' + x, d.answer === x); });
+            buttons.forEach(function (b) {
+              var on = b.getAttribute('data-answer') === d.answer;
+              b.classList.toggle('on', on);
+              b.setAttribute('aria-pressed', String(on));
+              b.value = on ? 'clear' : b.getAttribute('data-answer');
+            });
+            row.querySelector('[data-state]').textContent = d.answer || '';
+            recount();
+          })
+          .catch(function () { form.submit(); })
+          .then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+      });
+    });
+  })();
+</script>

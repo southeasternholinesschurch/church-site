@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb, schema, nowIso } from '../../db';
 import { tally } from '../../lib/tally';
+import { archivePeople } from '../../lib/archive';
 
 /**
  * Every write the check-in screen makes, in one endpoint.
@@ -98,12 +99,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     case 'archive-person': {
       const personId = Number(body.personId);
       if (!personId) return json({ error: 'bad person' }, 400);
-      // ARCHIVED, NEVER DELETED. Attendance rows reference this person; a hard
-      // delete would cascade and silently change historical totals. Archiving
-      // removes them from the list and the directory, and can be undone.
-      await db.update(schema.people)
-        .set({ archived: true, includeInDirectory: false, updatedAt: nowIso() })
-        .where(eq(schema.people.id, personId));
+      // ARCHIVED, NEVER DELETED — lib/archive.ts holds the write and the whole
+      // of the reasoning. Shared with the person's own page and the batch
+      // archive on /people so all three cannot drift apart again.
+      await archivePeople(db, [personId]);
       if (serviceId) await db.delete(schema.attendance)
         .where(and(eq(schema.attendance.serviceId, serviceId), eq(schema.attendance.personId, personId)));
       return json({ archived: true, ...(await counts(db, serviceId)) });

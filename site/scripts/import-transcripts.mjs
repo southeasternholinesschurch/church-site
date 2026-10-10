@@ -83,7 +83,18 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
   process.exit(1);
 }
 
-/** Refresh tokens do not expire on their own; access tokens last an hour. */
+/**
+ * Access tokens last an hour. Refresh tokens last until revoked — PROVIDED the
+ * OAuth app is published.
+ *
+ * While the app sits in "Testing" publishing status, Google expires every
+ * refresh token it issues after SEVEN DAYS. That is not documented anywhere
+ * near where you set it up, and this comment used to say the opposite. Minted
+ * 2026-09-11 10:13, last good run 2026-09-18 09:05, dead from the 19th: four
+ * days of empty fetches before anyone looked.
+ *
+ * Publishing the app is what stops that clock. Re-minting alone buys a week.
+ */
 async function accessToken() {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -96,7 +107,19 @@ async function accessToken() {
     }),
   });
   const body = await res.json();
-  if (!res.ok) throw new Error(`token refresh failed ${res.status}: ${body.error_description ?? body.error}`);
+  if (!res.ok) {
+    const why = body.error_description ?? body.error ?? 'no reason given';
+    // invalid_grant is the common one and it reads like a mystery, so say what
+    // it actually means and what to do, here, where the person is looking.
+    const advice = /expired|revoked|invalid_grant/i.test(String(why))
+      ? '\n\nThe refresh token is no longer valid. If the Google Cloud OAuth app'
+        + ' is still in "Testing" status, Google expires its tokens after seven'
+        + ' days — publish the app first, or this recurs next week. Then re-mint'
+        + ' with scripts/youtube-auth.mjs and update GOOGLE_REFRESH_TOKEN.'
+        + '\nFull steps: docs/transcripts.md'
+      : '';
+    throw new Error(`token refresh failed ${res.status}: ${why}${advice}`);
+  }
   return body.access_token;
 }
 

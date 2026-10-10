@@ -69,13 +69,13 @@ refuses('kids', '//people');
 // Class structure and the Fairhaven Bucks credit amount. Deliberately short: the
 // director/teacher line is about what you can RESTRUCTURE, not what you can see
 // or record.
-for (const p of ['/kids/classes', '/kids/settings', '/kids/kiosk', '/kids/cards']) {
+for (const p of ['/kids/classes', '/kids/settings', '/kids/setup', '/kids/kiosk', '/kids/cards']) {
   refuses('kids', p);
   allows('kids-director', p);
 }
 
 // ---- a teacher or bus worker can add and edit children --------------------
-// the pastor, 2026-09-08. A bus worker meets a child on the route on a Sunday
+// The pastor, 2026-09-08. A bus worker meets a child on the route on a Sunday
 // morning; if adding them needs a director, the child goes unrecorded.
 allows('kids', '/kids/child/41');
 allows('kids', '/kids/child/41/notes');

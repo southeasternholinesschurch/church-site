@@ -42,13 +42,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
    * mark a child present, so this branch cannot exist there — not hidden, not
    * disabled, absent.
    */
-  let card: { personId: number } | undefined;
+  let card: { kidId: number } | undefined;
 
   if (body?.demo === true && isDemoInstance(env)) {
-    const pool = await db.select({ personId: schema.kidCards.personId })
+    const pool = await db.select({ kidId: schema.kidCards.kidId })
       .from(schema.kidCards)
-      .innerJoin(schema.people, eq(schema.people.id, schema.kidCards.personId))
-      .where(and(eq(schema.kidCards.active, true), eq(schema.people.archived, false)))
+      .innerJoin(schema.kids, eq(schema.kids.id, schema.kidCards.kidId))
+      .where(and(eq(schema.kidCards.active, true), eq(schema.kids.archived, false)))
       .limit(60);
     if (pool.length === 0) return json({ ok: false, reason: 'unknown-card' });
     card = pool[Math.floor(Math.random() * pool.length)];
@@ -63,7 +63,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
      * from here — this endpoint has no other capability to grant, which is why
      * accepting the weaker of the two credentials is safe.
      */
-    [card] = await db.select({ personId: schema.kidCards.personId })
+    [card] = await db.select({ kidId: schema.kidCards.kidId })
       .from(schema.kidCards)
       .where(and(
         scan.kind === 'token'
@@ -76,13 +76,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!card) return json({ ok: false, reason: 'unknown-card' });
 
   const [child] = await db.select({
-    id: schema.people.id,
-    firstName: schema.people.firstName,
+    id: schema.kids.id,
+    firstName: schema.kids.firstName,
     className: schema.kidClasses.name,
-  }).from(schema.people)
-    .leftJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
-    .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kidProfiles.classId))
-    .where(and(eq(schema.people.id, card.personId), eq(schema.people.archived, false)))
+  }).from(schema.kids)
+    .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kids.classId))
+    // An archived child's card no longer checks them in.
+    .where(and(eq(schema.kids.id, card.kidId), eq(schema.kids.archived, false)))
     .limit(1);
 
   if (!child) return json({ ok: false, reason: 'unknown-card' });
@@ -116,18 +116,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Were they already here? Asked BEFORE the write, so the screen can say
   // "you're already checked in" rather than silently doing nothing.
-  const [already] = await db.select({ id: schema.attendance.id })
-    .from(schema.attendance)
-    .where(and(eq(schema.attendance.serviceId, serviceId),
-               eq(schema.attendance.personId, child.id))).limit(1);
+  const [already] = await db.select({ id: schema.kidAttendance.id })
+    .from(schema.kidAttendance)
+    .where(and(eq(schema.kidAttendance.serviceId, serviceId),
+               eq(schema.kidAttendance.kidId, child.id))).limit(1);
 
   /*
    * class_id stays NULL: this records "arrived at church", not "was in Miss
    * Karen's class". The teacher's register claims the same row later and sets
    * it — one row, never two, which is the whole of §5.1.
    */
-  await db.insert(schema.attendance)
-    .values({ serviceId, personId: child.id, classId: null, createdAt: nowIso() })
+  await db.insert(schema.kidAttendance)
+    .values({ serviceId, kidId: child.id, classId: null, createdAt: nowIso() })
     .onConflictDoNothing();
 
   /*
@@ -138,13 +138,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const perVisit = await getPerVisit(db);
   if (perVisit > 0) {
     await db.insert(schema.kidLedger).values({
-      personId: child.id, delta: perVisit, reason: 'attendance', serviceId,
+      kidId: child.id, delta: perVisit, reason: 'attendance', serviceId,
       staffId: null, kioskDeviceId: kiosk.id, createdAt: nowIso(),
     }).onConflictDoNothing();
   }
 
   const ledger = await db.select({ delta: schema.kidLedger.delta })
-    .from(schema.kidLedger).where(eq(schema.kidLedger.personId, child.id));
+    .from(schema.kidLedger).where(eq(schema.kidLedger.kidId, child.id));
 
   await touchKiosk(env, kiosk.id);
 

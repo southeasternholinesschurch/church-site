@@ -30,17 +30,15 @@ if (!canIssueCards(user.role)) return Astro.redirect('/kids', 302);
 
 /* ---- issuing, for the script to call ------------------------------------- */
 if (Astro.request.method === 'POST') {
-  const body = await Astro.request.json().catch(() => null) as { personId?: number } | null;
-  const personId = Number(body?.personId ?? 0);
+  const body = await Astro.request.json().catch(() => null) as { kidId?: number } | null;
+  const kidId = Number(body?.kidId ?? 0);
   const json = (o: unknown, status = 200) =>
     new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 
-  if (!Number.isInteger(personId) || personId <= 0) return json({ error: 'bad child' }, 400);
+  if (!Number.isInteger(kidId) || kidId <= 0) return json({ error: 'bad child' }, 400);
 
-  const [child] = await db.select({ id: schema.people.id })
-    .from(schema.people)
-    .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
-    .where(and(eq(schema.people.id, personId), eq(schema.people.archived, false))).limit(1);
+  const [child] = await db.select({ id: schema.kids.id }).from(schema.kids)
+    .where(and(eq(schema.kids.id, kidId), eq(schema.kids.archived, false))).limit(1);
   if (!child) return json({ error: 'not an Fairhaven Kids child' }, 400);
 
   /*
@@ -51,14 +49,14 @@ if (Astro.request.method === 'POST') {
    */
   const [existing] = await db.select({ token: schema.kidCards.token })
     .from(schema.kidCards)
-    .where(and(eq(schema.kidCards.personId, personId), eq(schema.kidCards.active, true)))
+    .where(and(eq(schema.kidCards.kidId, kidId), eq(schema.kidCards.active, true)))
     .limit(1);
 
   let token = existing?.token;
   if (!token) {
     token = randomToken(32);
     await db.insert(schema.kidCards).values({
-      personId, token, active: true, issuedAt: nowIso(), issuedBy: user.email,
+      kidId, token, active: true, issuedAt: nowIso(), issuedBy: user.email,
     });
   }
   return json({ url: `${Astro.url.origin}/kids/card/${token}` });
@@ -66,19 +64,18 @@ if (Astro.request.method === 'POST') {
 
 /* ---- the queue ------------------------------------------------------------ */
 const rows = await db.select({
-  id: schema.people.id,
-  firstName: schema.people.firstName,
-  lastName: schema.people.lastName,
+  id: schema.kids.id,
+  firstName: schema.kids.firstName,
+  lastName: schema.kids.lastName,
   className: schema.kidClasses.name,
   cardId: schema.kidCards.id,
-}).from(schema.kidProfiles)
-  .innerJoin(schema.people, eq(schema.people.id, schema.kidProfiles.personId))
-  .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kidProfiles.classId))
+}).from(schema.kids)
+  .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kids.classId))
   .leftJoin(schema.kidCards, and(
-    eq(schema.kidCards.personId, schema.kidProfiles.personId),
+    eq(schema.kidCards.kidId, schema.kids.id),
     eq(schema.kidCards.active, true)))
-  .where(eq(schema.people.archived, false))
-  .orderBy(asc(schema.kidClasses.sort), asc(schema.people.firstName), asc(schema.people.lastName));
+  .where(eq(schema.kids.archived, false))
+  .orderBy(asc(schema.kidClasses.sort), asc(schema.kids.firstName), asc(schema.kids.lastName));
 
 const needed = rows.filter((r) => r.cardId === null);
 const done = rows.length - needed.length;
@@ -227,7 +224,7 @@ const done = rows.length - needed.length;
       fetch(location.pathname, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ personId: id }),
+        body: JSON.stringify({ kidId: id }),
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {

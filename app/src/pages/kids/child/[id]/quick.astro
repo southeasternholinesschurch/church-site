@@ -5,7 +5,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { readForm } from '../../../../lib/form';
 import { balanceOf, parseAmount, REASON_LABEL, MAX_AMOUNT } from '../../../../lib/bucks';
 import { churchToday, KIDS_KIND_IDS } from '../../../../lib/services';
-import { ageOn } from '../../../../lib/kids';
+import { ageOn, MAX_NOTE } from '../../../../lib/kids';
 
 /**
  * WHAT A CARD TAP OPENS. One child, in a classroom, on a teacher's phone.
@@ -33,8 +33,8 @@ const wantsJson = Astro.request.headers.get('x-kids-quick') === 'json';
 if (Astro.request.method === 'POST') {
   const form = await readForm(Astro.request);
   const act = String(form.get('action') ?? '');
-  const [enrolled] = await db.select({ personId: schema.kidProfiles.personId })
-    .from(schema.kidProfiles).where(eq(schema.kidProfiles.personId, id)).limit(1);
+  const [enrolled] = await db.select({ id: schema.kids.id })
+    .from(schema.kids).where(eq(schema.kids.id, id)).limit(1);
 
   if (!enrolled) error = 'That child is not in Fairhaven Kids.';
   else if (act === 'award' || act === 'spend') {
@@ -44,7 +44,7 @@ if (Astro.request.method === 'POST') {
       // The sign comes from the BUTTON, never from what was typed — the same
       // rule as the profile page, for the same reason.
       await db.insert(schema.kidLedger).values({
-        personId: id,
+        kidId: id,
         delta: act === 'award' ? amount : -amount,
         reason: act,
         note: String(form.get('note') ?? '').trim() || null,
@@ -62,23 +62,49 @@ if (Astro.request.method === 'POST') {
      */
     const serviceId = Number(form.get('serviceId') ?? 0);
     if (serviceId) {
-      await db.insert(schema.attendance)
-        .values({ serviceId, personId: id, classId: null, createdAt: nowIso() })
+      await db.insert(schema.kidAttendance)
+        .values({ serviceId, kidId: id, classId: null, createdAt: nowIso() })
         .onConflictDoNothing();
       const [{ perVisit } = { perVisit: 0 }] = [{ perVisit: Number(form.get('perVisit') ?? 0) }];
       if (perVisit > 0) {
         await db.insert(schema.kidLedger).values({
-          personId: id, delta: perVisit, reason: 'attendance', serviceId,
+          kidId: id, delta: perVisit, reason: 'attendance', serviceId,
           staffId: user.id > 0 ? user.id : null, createdAt: nowIso(),
         }).onConflictDoNothing();
       }
     }
     if (!wantsJson) return back('present');
+  } else if (act === 'note') {
+    /*
+     * A BEHAVIOUR NOTE, written where the child is standing.
+     *
+     * The case this serves: a child is being sent home, the teacher scans the
+     * card they already have in their hand and types why. A bus worker reads it
+     * off the profile twenty minutes later and can tell the parent at the door
+     * what happened, instead of "something, ask on Sunday".
+     *
+     * Appended, never merged into a single field — two volunteers on one
+     * evening must not overwrite each other.
+     */
+    const body = String(form.get('body') ?? '').trim();
+    if (!body) error = 'Type the note first.';
+    else if (body.length > MAX_NOTE) error = `That note is too long — keep it under ${MAX_NOTE} characters.`;
+    else {
+      await db.insert(schema.kidNotes).values({
+        kidId: id, body,
+        staffId: user.id > 0 ? user.id : null,
+        // The name as well as the id: see the schema. A note about somebody's
+        // child should not go anonymous when a volunteer leaves.
+        authorName: user.name || user.email,
+        createdAt: nowIso(),
+      });
+      if (!wantsJson) return back('note');
+    }
   }
 
   if (wantsJson) {
     const rows = await db.select({ delta: schema.kidLedger.delta })
-      .from(schema.kidLedger).where(eq(schema.kidLedger.personId, id));
+      .from(schema.kidLedger).where(eq(schema.kidLedger.kidId, id));
     return new Response(JSON.stringify({ ok: !error, error, balance: balanceOf(rows) }),
       { status: error ? 400 : 200, headers: { 'content-type': 'application/json' } });
   }
@@ -86,24 +112,23 @@ if (Astro.request.method === 'POST') {
 
 // ---- reads ------------------------------------------------------------------
 const [child] = await db.select({
-  id: schema.people.id,
-  firstName: schema.people.firstName,
-  lastName: schema.people.lastName,
-  birthday: schema.people.birthday,
-  archived: schema.people.archived,
-  allergies: schema.kidProfiles.allergies,
+  id: schema.kids.id,
+  firstName: schema.kids.firstName,
+  lastName: schema.kids.lastName,
+  birthday: schema.kids.birthday,
+  archived: schema.kids.archived,
+  allergies: schema.kids.allergies,
   className: schema.kidClasses.name,
   routeName: schema.kidRoutes.name,
-}).from(schema.people)
-  .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
-  .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kidProfiles.classId))
-  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
-  .where(eq(schema.people.id, id)).limit(1);
+}).from(schema.kids)
+  .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kids.classId))
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kids.routeId))
+  .where(eq(schema.kids.id, id)).limit(1);
 
 if (!child) return Astro.redirect('/kids/children', 302);
 
 const ledger = await db.select().from(schema.kidLedger)
-  .where(eq(schema.kidLedger.personId, id))
+  .where(eq(schema.kidLedger.kidId, id))
   .orderBy(desc(schema.kidLedger.id));
 const balance = balanceOf(ledger);
 const recent = ledger.slice(0, 3);
@@ -116,15 +141,16 @@ const [service] = await db.select({ id: schema.services.id })
   .where(and(eq(schema.services.date, today), inArray(schema.services.kind, KIDS_KIND_IDS)))
   .limit(1);
 const [here] = service
-  ? await db.select({ id: schema.attendance.id }).from(schema.attendance)
-      .where(and(eq(schema.attendance.serviceId, service.id),
-                 eq(schema.attendance.personId, id))).limit(1)
+  ? await db.select({ id: schema.kidAttendance.id }).from(schema.kidAttendance)
+      .where(and(eq(schema.kidAttendance.serviceId, service.id),
+                 eq(schema.kidAttendance.kidId, id))).limit(1)
   : [];
 
 const age = ageOn(child.birthday, today);
 const saved = Astro.url.searchParams.get('saved');
 const SAVED: Record<string, string> = {
   awarded: 'Added.', spent: 'Taken off.', present: 'Marked here.',
+  note: 'Note saved to their profile.',
 };
 const AWARD = [1, 2, 5];
 const SPEND = [1, 2, 5];
@@ -136,7 +162,7 @@ const SPEND = [1, 2, 5];
 
   {child.archived && (
     <div class="k-card" style="border-left:5px solid #a3540a; margin-bottom:14px;">
-      <strong>This child has left Fairhaven Kids.</strong>
+      <strong>This child is archived from Fairhaven Kids.</strong>
     </div>
   )}
 
@@ -159,7 +185,7 @@ const SPEND = [1, 2, 5];
 
   <div class="q-balance">
     <span id="balance">{balance}</span>
-    <small>Fairhaven Bucks</small>
+    <small>SE bucks</small>
   </div>
 
   <div class="q-grid">
@@ -216,6 +242,19 @@ const SPEND = [1, 2, 5];
     </p>
   )}
 
+  {/* WRITE-ONLY, deliberately. This screen is held up in a room full of
+      children and the child whose card it is can see it; a list of what has
+      been written about them over the term does not belong on it. The notes
+      are read on the profile, which is where the bus workers look on the way
+      home — and which is one tap below. */}
+  <form method="POST" class="q-note">
+    <input type="hidden" name="action" value="note" />
+    <label class="k-label" for="note-body">Add a note</label>
+    <textarea id="note-body" name="body" rows="3" maxlength={MAX_NOTE} required
+              placeholder="What happened?"></textarea>
+    <button class="k-btn" type="submit">Save note</button>
+  </form>
+
   <a href={`/kids/child/${child.id}`} class="q-full">Everything about {child.firstName} →</a>
 </KidsLayout>
 
@@ -253,6 +292,13 @@ const SPEND = [1, 2, 5];
            border-radius: 9px; background: var(--k-orange); color: #fff; cursor: pointer; }
   .k-btn--quiet { background: transparent; color: var(--k-ink-soft);
                   border: 1px solid rgba(13,27,69,.22); }
+  .q-note { background: #fff; color: var(--k-ink); border-radius: 14px;
+            padding: 16px 18px; margin: 0 0 6px; }
+  .q-note .k-label { display: block; color: var(--k-ink-soft); margin-bottom: 8px; }
+  .q-note textarea { width: 100%; padding: 12px; font: inherit; font-size: 16px;
+                     color: var(--k-ink); border: 1px solid rgba(13,27,69,.22);
+                     border-radius: 9px; background: #fff; resize: vertical;
+                     margin-bottom: 10px; }
   .q-full { display: block; text-align: center; padding: 14px; font-size: 15px; }
 </style>
 

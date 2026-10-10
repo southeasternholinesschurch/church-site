@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, unique } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
 // scheduled_messages references message_schedules, which is declared after it —
 // the explicit column type is what lets that forward reference typecheck.
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
@@ -541,32 +541,87 @@ export const kidRoutes = sqliteTable('kid_routes', {
   createdAt: text('created_at').notNull(),
 });
 
-/** What is true of a child, beside their `people` row. */
-export const kidProfiles = sqliteTable('kid_profiles', {
-  /** The person IS the key — one profile per child, and it cannot exist
-   *  without the person it describes. */
-  personId: integer('person_id').primaryKey()
-    .references(() => people.id, { onDelete: 'cascade' }),
+/**
+ * Fairhaven Kids' OWN list of children — not `people`.
+ *
+ * SEPARATE ON PURPOSE (the pastor, 2026-10-10). The church's list (`people`) is the
+ * congregation: the People tab, check-in, groups, texts, bulletin birthdays and
+ * the directory all read it. Fairhaven Kids is a different crowd — mostly bus-ministry
+ * children whose families are not members — and kept in one list, every church
+ * page had to remember a rule about which children it may show. Two lists means
+ * a church page CANNOT show an Fairhaven Kids child, because it never reads this table.
+ *
+ * A church family's child who also comes to Fairhaven Kids is entered on both sides.
+ * That duplication is the deliberate price, and nothing links the two records.
+ *
+ * Children moved here from `people` + `kid_profiles` kept their id numbers
+ * (migration 0026), so links and printed cards did not change.
+ */
+export const kids = sqliteTable('kids', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  firstName: text('first_name').notNull(),
+  lastName: text('last_name').notNull(),
+  /** YYYY-MM-DD. Sparse: most bus children have none on file. */
+  birthday: text('birthday'),
+  addressStreet: text('address_street'),
+  addressCity: text('address_city'),
+  addressState: text('address_state'),
+  addressZip: text('address_zip'),
+  /** R2 object key, under kids/ for anything uploaded since the split. */
+  photoKey: text('photo_key'),
+  /** Free text from intake (the van-list import puts judgement calls here). */
+  notes: text('notes'),
   classId: integer('class_id').references(() => kidClasses.id),
-  /** NULL is the NORMAL case: only bus-ministry children have a route. */
+  /** NULL is the NORMAL case for a church family's child: no bus. */
   routeId: integer('route_id').references(() => kidRoutes.id),
+  /** Where on the route: the driving order, typed by whoever does the calling.
+   *  Siblings share a number. NULL = not placed yet, sorted last. Cleared when
+   *  the route changes. See routeOrder in lib/kids. */
+  routeStop: integer('route_stop'),
+  /** On the Kids Club (Wednesday) list — Club is a different crowd from Sunday. */
+  inClub: integer('in_club', { mode: 'boolean' }).notNull().default(false),
   /** Its own column rather than a line in notes. This is what a volunteer has
    *  to find in four seconds; notes is where things go to be scrolled past. */
   allergies: text('allergies'),
   medicalNotes: text('medical_notes'),
+  /** Archived, never deleted: attendance and the Bucks ledger point at a child,
+   *  and a delete would cascade away their history. Reversible from their page. */
+  archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 }, (t) => ({
-  classIdx: index('kid_profiles_class_idx').on(t.classId),
-  routeIdx: index('kid_profiles_route_idx').on(t.routeId),
+  nameIdx: index('kids_name_idx').on(t.lastName, t.firstName),
+  classIdx: index('kids_class_idx').on(t.classId),
+  routeIdx: index('kids_route_idx').on(t.routeId),
+}));
+
+/**
+ * Who was at an Fairhaven Kids meeting. Fairhaven Kids' own register, separate from the
+ * church's `attendance` for the same reason `kids` is separate from `people`.
+ * Meetings themselves are still rows in `services` (kinds kids-*): a meeting
+ * is a date, not a person, and the church pages already leave those kinds out.
+ */
+export const kidAttendance = sqliteTable('kid_attendance', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  serviceId: integer('service_id').notNull().references(() => services.id, { onDelete: 'cascade' }),
+  kidId: integer('kid_id').notNull().references(() => kids.id, { onDelete: 'cascade' }),
+  /** The child's class at the time, so class counts survive a child moving up. */
+  classId: integer('class_id').references(() => kidClasses.id),
+  createdAt: text('created_at').notNull(),
+}, (t) => ({
+  /** Load-bearing: a child ticked by two volunteers, or a card tapped four
+   *  times, is one row — and so one Fairhaven Bucks attendance credit. Do not weaken. */
+  uniq: unique('kid_attendance_service_kid').on(t.serviceId, t.kidId),
+  serviceIdx: index('kid_attendance_service_idx').on(t.serviceId),
+  classIdx: index('kid_attendance_class_idx').on(t.classId),
 }));
 
 /** A child's grown-ups. */
 export const kidGuardians = sqliteTable('kid_guardians', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   /** The CHILD, not the guardian. */
-  personId: integer('person_id').notNull()
-    .references(() => people.id, { onDelete: 'cascade' }),
+  kidId: integer('kid_id').notNull()
+    .references(() => kids.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   /** Free text: family shapes do not fit an enum, and a wrong dropdown is
    *  worse than a blank. */
@@ -581,7 +636,9 @@ export const kidGuardians = sqliteTable('kid_guardians', {
   addressState: text('address_state'),
   addressZip: text('address_zip'),
   /**
-   * Set when this guardian IS a member — and it is the DOUBLE-TEXT GUARD. A
+   * Set when this guardian IS a church member — and it is the DOUBLE-TEXT
+   * GUARD. The one deliberate link between the two sides: an ADULT on the
+   * church list, never a child. A
    * parent who is also a member exists in both tables, and without deciding in
    * one place which record gets texted they receive every bus message twice.
    * See §7.2 of the brief before writing the kids audience builder.
@@ -607,7 +664,7 @@ export const kidGuardians = sqliteTable('kid_guardians', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 }, (t) => ({
-  personIdx: index('kid_guardians_person_idx').on(t.personId),
+  kidIdx: index('kid_guardians_kid_idx').on(t.kidId),
   /** What the STOP handler looks up. Opt-out is matched by NUMBER, never by
    *  person — one handset, one decision. */
   phoneIdx: index('kid_guardians_phone_idx').on(t.phoneE164),
@@ -627,7 +684,7 @@ export const kidClassTeachers = sqliteTable('kid_class_teachers', {
 
 export type KidClass = typeof kidClasses.$inferSelect;
 export type KidRoute = typeof kidRoutes.$inferSelect;
-export type KidProfile = typeof kidProfiles.$inferSelect;
+export type Kid = typeof kids.$inferSelect;
 export type KidGuardian = typeof kidGuardians.$inferSelect;
 
 
@@ -642,8 +699,8 @@ export type KidGuardian = typeof kidGuardians.$inferSelect;
  */
 export const kidLedger = sqliteTable('kid_ledger', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  personId: integer('person_id').notNull()
-    .references(() => people.id, { onDelete: 'cascade' }),
+  kidId: integer('kid_id').notNull()
+    .references(() => kids.id, { onDelete: 'cascade' }),
   /** Signed. Awards and credits positive, spending negative — so a balance is
    *  a sum rather than a subtraction somebody can get backwards. */
   delta: integer('delta').notNull(),
@@ -657,12 +714,12 @@ export const kidLedger = sqliteTable('kid_ledger', {
   kioskDeviceId: integer('kiosk_device_id'),
   createdAt: text('created_at').notNull(),
 }, (t) => ({
-  personIdx: index('kid_ledger_person_idx').on(t.personId),
+  kidIdx: index('kid_ledger_kid_idx').on(t.kidId),
   /*
    * The partial unique index that makes the automatic credit fire exactly once
    * is NOT declared here — drizzle has no partial-index syntax, so it lives in
    * the migration alone. It is real in the database and it is load-bearing:
-   * see kid_ledger_attendance_once in 0015. Do not "add" it here and do not
+   * see kid_ledger_attendance_once in 0015, rebuilt on kid_id in 0026. Do not "add" it here and do not
    * assume its absence from this file means it is not there.
    */
 }));
@@ -671,8 +728,8 @@ export const kidLedger = sqliteTable('kid_ledger', {
  *  overwrites, because two live tokens for one child is two credits. */
 export const kidCards = sqliteTable('kid_cards', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  personId: integer('person_id').notNull()
-    .references(() => people.id, { onDelete: 'cascade' }),
+  kidId: integer('kid_id').notNull()
+    .references(() => kids.id, { onDelete: 'cascade' }),
   /** Long, random, opaque, and unique across every card ever issued —
    *  revoked ones included, so a token can never be handed out twice. */
   token: text('token').notNull().unique(),
@@ -695,11 +752,42 @@ export const kidCards = sqliteTable('kid_cards', {
   revokedAt: text('revoked_at'),
   issuedBy: text('issued_by'),
 }, (t) => ({
-  personIdx: index('kid_cards_person_idx').on(t.personId),
+  kidIdx: index('kid_cards_kid_idx').on(t.kidId),
 }));
 
 export type KidLedgerRow = typeof kidLedger.$inferSelect;
 export type KidCard = typeof kidCards.$inferSelect;
+
+/**
+ * A behaviour note on a child. Written on the classroom screen, read on the
+ * profile — usually by somebody else, usually later the same evening.
+ *
+ * APPEND-ONLY, like the ledger and for the same reason: an evening can produce
+ * two notes from two volunteers, and the second must not erase the first. What
+ * makes it useful on the bus home is the timestamp, so every note is a row that
+ * carries its own.
+ *
+ * Not to be confused with kids.allergies or .medicalNotes, which are
+ * standing facts shown in red above everything. A note about one Wednesday is
+ * not a medical fact and is never displayed as one.
+ */
+export const kidNotes = sqliteTable('kid_notes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  kidId: integer('kid_id').notNull()
+    .references(() => kids.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  /** Who wrote it, for as long as they are on the staff list. */
+  staffId: integer('staff_id').references(() => staff.id, { onDelete: 'set null' }),
+  /** Their name, captured at the time. Outlives the staff row on purpose: a
+   *  note about somebody's child should not become anonymous when a volunteer
+   *  leaves. */
+  authorName: text('author_name'),
+  createdAt: text('created_at').notNull(),
+}, (t) => ({
+  kidIdx: index('kid_notes_kid_idx').on(t.kidId, t.id),
+}));
+
+export type KidNote = typeof kidNotes.$inferSelect;
 
 
 /**
@@ -742,6 +830,9 @@ export const kidRouteCaptains = sqliteTable('kid_route_captains', {
 }, (t) => ({
   uniq: unique('kid_route_captains_pair').on(t.staffId, t.routeId),
 }));
+
+
+/* ======================================================= sign-up sheets == */
 
 /**
  * A sign-up sheet, reached by a LINK rather than through the website's menu.
@@ -882,3 +973,37 @@ export const signups = sqliteTable('signups', {
 export type SignupSheet = typeof signupSheets.$inferSelect;
 export type SignupSlot = typeof signupSlots.$inferSelect;
 export type Signup = typeof signups.$inferSelect;
+
+/**
+ * The group a volunteer takes attendance for — 'all', 'class:<id>' or
+ * 'route:<id>' — remembered so the attendance page opens on it. A preference
+ * rather than a relationship, so it is text and not a foreign key; see
+ * lib/kids.ts parseView.
+ *
+ * Its own table rather than a column on `staff`: sign-in selects the whole
+ * staff row, so a column missing from the database would break every login.
+ * See migrations/0021_kids_view.sql.
+ */
+export const kidStaffView = sqliteTable('kid_staff_view', {
+  staffId: integer('staff_id').primaryKey()
+    .references(() => staff.id, { onDelete: 'cascade' }),
+  view: text('view').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/**
+ * "Calling" — what a family said on the call the day before. One row
+ * per child per week, the week named by its Sunday, so a new week is a new key
+ * and the tally "resets" by there being no rows. No row = not asked, and is
+ * deliberately different from 'no'. See migrations/0022_kids_coming.sql.
+ */
+export const kidComing = sqliteTable('kid_coming', {
+  kidId: integer('kid_id').notNull()
+    .references(() => kids.id, { onDelete: 'cascade' }),
+  week: text('week').notNull(),
+  answer: text('answer', { enum: ['yes', 'maybe', 'no'] }).notNull(),
+  staffId: integer('staff_id').references(() => staff.id, { onDelete: 'set null' }),
+  updatedAt: text('updated_at').notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.kidId, t.week] }),
+}));

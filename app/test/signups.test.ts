@@ -16,7 +16,7 @@
  * by a removal genuinely reopens.
  *
  * THE THIRD IS THE REMINDER WINDOW. A Worker runs in UTC, and after 8pm in
- * Indianapolis it is already tomorrow — so "9am the day before" fires on the
+ * Fairhaven it is already tomorrow — so "9am the day before" fires on the
  * wrong day if the clock is read carelessly, and the grace window is what
  * decides between a late reminder and a silent one.
  *
@@ -154,7 +154,7 @@ eq('an untaken day says Available',
 eq('a full dish says Full and stacks the names',
    slotStatus(2, ['Ada Aldridge', 'Mary Kingsley'], false), { text: 'Full', stacked: true });
 eq('a part-filled dish still counts down',
-   slotStatus(6, ['Luke Kingsley'], false), { text: '5 still open.', stacked: true });
+   slotStatus(6, ['Peter Kingsley'], false), { text: '5 still open.', stacked: true });
 eq('an empty dish says Available without stacking',
    slotStatus(6, [], false), { text: 'Available', stacked: false });
 // THE ONE FROM THE SCREENSHOT: a list of four, capped at four.
@@ -167,9 +167,9 @@ eq('an uncapped list keeps welcoming',
 // A CLOSED SHEET NEVER ADVERTISES PLACES. "5 still open." under a banner saying
 // the sign-up has closed is the software contradicting itself.
 eq('a closed part-filled row reports rather than offers',
-   slotStatus(6, ['Luke Kingsley'], true), { text: '1 signed up', stacked: true });
+   slotStatus(6, ['Peter Kingsley'], true), { text: '1 signed up', stacked: true });
 eq('a closed fuller row counts them',
-   slotStatus(6, ['Luke Kingsley', 'Ruth Camp'], true), { text: '2 signed up', stacked: true });
+   slotStatus(6, ['Peter Kingsley', 'Ruth Camp'], true), { text: '2 signed up', stacked: true });
 eq('a closed day still names who took it',
    slotStatus(1, ['Ada Aldridge'], true), { text: 'Ada Aldridge', stacked: false });
 eq('a closed day nobody took says so',
@@ -179,7 +179,7 @@ eq('a closed empty dish says so too',
 
 /* ==== dates: the trap this project has already fallen into once =========== */
 
-// new Date('2026-10-14') is UTC midnight, which in Indianapolis is the EVENING
+// new Date('2026-10-14') is UTC midnight, which in Fairhaven is the EVENING
 // OF THE 13TH. Every date here goes through noon UTC for that reason.
 eq('a day reads as its own weekday', dayLabel('2026-10-14'), 'Wednesday, 14 October');
 eq('the first of a month is not the last of the one before',
@@ -349,7 +349,7 @@ eq('an undated list stays open',
 
 const at = (iso: string) => localNow(new Date(iso));
 
-// 9am the day before. 2026-10-14T13:00Z is 9am on the 14th in Indianapolis
+// 9am the day before. 2026-10-14T13:00Z is 9am on the 14th in Fairhaven
 // (EDT), so the reminder for the 15th is due.
 eq('due at 9am the day before', reminderDue('2026-10-15', at('2026-10-14T13:00:00Z')), true);
 eq('not due at 8:59 the day before',
@@ -357,7 +357,7 @@ eq('not due at 8:59 the day before',
 eq('still due at 11pm the day before',
    reminderDue('2026-10-15', at('2026-10-15T03:00:00Z')), true);
 
-// THE UTC TRAP. 2026-10-15T02:00Z is 10pm on the 14th in Indianapolis. Reading
+// THE UTC TRAP. 2026-10-15T02:00Z is 10pm on the 14th in Fairhaven. Reading
 // the clock as UTC would call it the 15th and drop the reminder out of its
 // window an evening early.
 eq('10pm the day before is still the day before',

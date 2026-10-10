@@ -1,0 +1,30 @@
+---
+import { getDb, schema, nowIso } from '../../../db';
+import { and, eq } from 'drizzle-orm';
+import { churchToday, likelyKidsKind } from '../../../lib/services';
+
+/**
+ * "Take attendance" — one tap from anywhere, no form.
+ *
+ * Finds tonight's meeting from the day of the week (Sunday → Fairhaven Kids,
+ * Wednesday → Kids Club), creates it if nobody has opened it yet, and goes
+ * straight to the list. Creating it here is the act of opening it; the table
+ * still never fills with empty Sundays nobody met on, because a meeting is only
+ * made when somebody asks for it.
+ *
+ * On a day with no children's meeting there is nothing to guess, so it hands
+ * off to the picker for a past or other date.
+ */
+const db = getDb(Astro.locals.runtime.env);
+const date = churchToday();
+const kind = likelyKidsKind(date);
+if (!kind) return Astro.redirect('/kids/register', 302);
+
+const [existing] = await db.select({ id: schema.services.id }).from(schema.services)
+  .where(and(eq(schema.services.date, date), eq(schema.services.kind, kind))).limit(1);
+const id = existing?.id ?? (await db.insert(schema.services)
+  .values({ date, kind, createdAt: nowIso() })
+  .returning({ id: schema.services.id }))[0]!.id;
+
+return Astro.redirect(`/kids/attendance/${id}`, 302);
+---

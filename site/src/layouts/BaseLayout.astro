@@ -1,9 +1,9 @@
 ---
 import '../styles/global.css';
-import { copyFor } from '../lib/copy';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import { getCollection } from 'astro:content';
+import { copyFor } from '../lib/copy';
 
 interface Props {
   title: string;
@@ -60,7 +60,7 @@ const INSTALL = {
 
 const {
   title,
-  description = 'Fairhaven Community Church — a family in Indianapolis. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
+  description = 'Fairhaven Community Church — a family in Fairhaven. Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM.',
   navTheme = 'dark',
   noindex = false,
   installAs = 'site',
@@ -73,7 +73,7 @@ const app = INSTALL[installAs];
 const [settingsEntry] = await getCollection('settings');
 const settings = settingsEntry.data;
 
-/** Page text, editable at /website/copy. Falls back to the words below. */
+/** Nav and footer text, editable at /website/copy. */
 const t = await copyFor('navigation');
 ---
 <!doctype html>
@@ -119,7 +119,7 @@ const t = await copyFor('navigation');
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     {/* The name printed under the icon. Without it iOS uses <title>, which on
-        the bulletin reads "This Week's Bulletin · Fairhaven Community Church
+        the bulletin reads "This Week's Bulletin · Fairhaven Community
         Church" and truncates to something like "This Week…". */}
     <meta name="apple-mobile-web-app-title" content={app.title} />
 

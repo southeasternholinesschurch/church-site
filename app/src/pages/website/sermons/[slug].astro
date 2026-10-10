@@ -2,7 +2,7 @@
 import AppLayout from '../../../layouts/AppLayout.astro';
 import { readForm } from '../../../lib/form';
 import { siteEditingConfigured, GitConflict } from '../../../lib/site-content';
-import { readSermon, saveSermon, saveDraft, listSeries, publishDraft, deleteSermon, fromSlug } from '../../../lib/site-sermons';
+import { readSermon, saveSermon, saveDraft, listSeries, publishDraft, discardDraft, deleteSermon, fromSlug } from '../../../lib/site-sermons';
 
 /**
  * One sermon: its details, and the review step for a cleaned transcript.
@@ -50,6 +50,17 @@ if (Astro.request.method === 'POST' && configured) {
       await deleteSermon(env, slug, user);
       return Astro.redirect('/website/sermons?removed=1', 303);
     }
+    /*
+     * The leftover draft. A sermon can end up with its text published AND a
+     * draft still on file — publishing writes the sermon and deletes the draft
+     * as two separate calls, and the second can lose a race with a Save. When
+     * the two match, publishing finishes the job by itself; when they do not,
+     * this is the only thing that can clear it.
+     */
+    if (action === 'discard-draft') {
+      await discardDraft(env, slug, user);
+      return Astro.redirect(`/website/sermons/${slug}?saved=discarded`, 303);
+    }
     if (action === 'publish') {
       const { words } = await publishDraft(env, slug, user, {
         edited: String(form.get('draft') ?? '') || undefined,
@@ -95,6 +106,8 @@ const reviewing = Boolean(sermon?.draft && !sermon.body.trim());
 const field = (k: string) => v(k) || (reviewing ? String(suggested[k] ?? '') : '');
 const guessed = (k: string) => reviewing && !v(k) && Boolean(suggested[k]);
 const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean).length : 0;
+/** Published, but its draft was never cleared away. See the discard action. */
+const leftoverDraft = Boolean(sermon?.draft && sermon.body.trim());
 ---
 <AppLayout title={v('title') || slug} user={user}>
   <p style="margin:0 0 6px;"><a href="/website/sermons" class="muted">← Sermons</a></p>
@@ -106,8 +119,26 @@ const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean
 
   {!configured && <p class="notice"><strong>Website editing is not connected yet.</strong></p>}
   {saved && <p class="notice">Saved. Live in a couple of minutes.</p>}
+  {Astro.url.searchParams.get('saved') === 'discarded' && (
+    <p class="notice notice--ok">The leftover draft has been thrown away. This sermon's page is unchanged.</p>
+  )}
   {publishedWords && <p class="notice"><strong>Published — {Number(publishedWords).toLocaleString()} words are now on the sermon's page.</strong></p>}
   {error && <p class="notice">{error}</p>}
+
+  {leftoverDraft && (
+    <div class="card" style="border-color:var(--red); margin-bottom:20px;">
+      <h2 style="margin-top:0; font-size:19px;">A draft is still on file for this sermon</h2>
+      <p class="muted" style="max-width:64ch; margin:-4px 0 14px; font-size:15px;">
+        The page below already has its text, so this sermon is published and
+        live — the draft beside it is left over. Usually that means a publish
+        was interrupted partway. Nothing you do here changes the page.
+      </p>
+      <form method="POST" style="margin:0;">
+        <input type="hidden" name="action" value="discard-draft" />
+        <button class="btn btn--danger" type="submit">Throw the leftover draft away</button>
+      </form>
+    </div>
+  )}
 
   {sermon && (
     <form method="POST">
@@ -154,7 +185,7 @@ const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean
             Ephesians 4:2's "lowliness" came through as "loneliness". Edit anything
             here and it publishes as you leave it.
           </p>
-          <textarea name="draft" rows="22"
+          <textarea name="draft" class="transcript"
                     style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.draft!.text}</textarea>
           <p class="muted" style="font-size:13px; margin:8px 0 0;">
             Anything below an <code>editor's notes</code> line is for you and is
@@ -171,7 +202,7 @@ const draftWords = sermon?.draft ? sermon.draft.text.split(/\s+/).filter(Boolean
                 : 'No transcript yet either; the nightly job fetches those from YouTube.'}
             </p>
           )}
-          <textarea name="body" rows="14" style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.body.trim()}</textarea>
+          <textarea name="body" class="transcript" style="font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.55;">{sermon.body.trim()}</textarea>
         </div>
       )}
 

@@ -32,15 +32,14 @@ export const GET: APIRoute = async ({ params, locals }) => {
   if (!Number.isInteger(id)) return deny;
 
   const [p] = await getDb(env).select({
-    photoKey: schema.people.photoKey,
-  }).from(schema.people)
+    photoKey: schema.kids.photoKey,
+  }).from(schema.kids)
     .where(and(
-      eq(schema.people.id, id),
-      // A child, and not archived. Both checked in the QUERY rather than after
-      // it, so there is one code path and no chance of reading the row and
-      // forgetting to look at the flag.
-      eq(schema.people.adultChild, 'child'),
-      eq(schema.people.archived, false),
+      // An Fairhaven Kids child (their own list, never `people`), and not archived.
+      // Checked in the QUERY rather than after it, so there is one code path
+      // and no chance of reading the row and forgetting to look at the flag.
+      eq(schema.kids.id, id),
+      eq(schema.kids.archived, false),
     )).limit(1);
 
   if (!p) return deny;

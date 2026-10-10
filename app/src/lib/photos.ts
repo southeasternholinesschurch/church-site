@@ -49,9 +49,12 @@ export function sniffImage(bytes: Uint8Array): string | null {
  */
 export async function putPhoto(
   env: PhotoEnv, personId: number, bytes: Uint8Array, mime: string,
+  /** 'kids' for an Fairhaven Kids child — their id is a `kids` id, not a `people` one,
+   *  and the two must never share a folder. */
+  folder: 'people' | 'kids' = 'people',
 ): Promise<string> {
   const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-  const key = `people/${personId}/${crypto.randomUUID()}.${ext}`;
+  const key = `${folder}/${personId}/${crypto.randomUUID()}.${ext}`;
   await env.PHOTOS!.put(key, bytes, { httpMetadata: { contentType: mime } });
   return key;
 }

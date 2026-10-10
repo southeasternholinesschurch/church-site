@@ -11,7 +11,7 @@
  *
  *   npm test
  */
-import { ageOn, suggestClass, classMismatch } from '../src/lib/kids.ts';
+import { ageOn, suggestClass, classMismatch, noteStamp, parseView, formatView, comingSunday, isComingAnswer, parseStop, routeOrder } from '../src/lib/kids.ts';
 import type { AgeClass } from '../src/lib/kids.ts';
 import { likelyKidsKind, kindHasClasses } from '../src/lib/services.ts';
 
@@ -84,6 +84,65 @@ eq('the eve of it is a Wednesday',        likelyKidsKind('2025-12-31'), 'kids-we
 
 eq('the Wednesday club has no classes',   kindHasClasses('kids-wednesday'), false);
 eq('the Sunday classes do',               kindHasClasses('kids-sunday'), true);
+
+/* --- note timestamps ------------------------------------------------------
+ * These are read on a bus, minutes after being written, by somebody who was
+ * not there. The date has to be the evening it actually happened.
+ */
+// 00:42 UTC Thursday is 8.42pm WEDNESDAY in Indiana — the hour Kids Club ends,
+// and the one that rolls the date over if the timezone is ignored.
+eq('an evening note keeps its own evening',
+   noteStamp('2026-09-10T00:42:00.000Z'), 'Wed 9 Sept, 8:42 pm');
+// Just before the rollover, same evening, same date.
+eq('and so does one an hour earlier',
+   noteStamp('2026-09-09T23:42:00.000Z'), 'Wed 9 Sept, 7:42 pm');
+eq('a broken timestamp reads as missing, not as a crash',
+   noteStamp('not a date'), '');
+eq('an empty one too', noteStamp(''), '');
+
+// ---- the remembered attendance view ----
+eq('view: all', parseView('all'), { kind: 'all' });
+eq('view: class', parseView('class:3'), { kind: 'class', id: 3 });
+eq('view: route', parseView('route:12'), { kind: 'route', id: 12 });
+eq('view: null is not chosen', parseView(null), null);
+eq('view: empty is not chosen', parseView(''), null);
+eq('view: junk is not chosen', parseView('class:abc'), null);
+eq('view: zero id refused', parseView('route:0'), null);
+eq('view: trailing junk refused', parseView('class:3;drop'), null);
+eq('view: unknown kind refused', parseView('person:3'), null);
+eq('view: round trip', formatView(parseView('route:7')!), 'route:7');
+
+// ---- Coming Sunday? ----
+eq('Saturday looks to tomorrow', comingSunday('2026-10-10'), '2026-10-11');
+eq('Sunday is its own week', comingSunday('2026-10-11'), '2026-10-11');
+eq('Monday starts the next week - the reset', comingSunday('2026-10-12'), '2026-10-18');
+eq('Wednesday', comingSunday('2026-10-07'), '2026-10-11');
+eq('across a month end', comingSunday('2026-10-29'), '2026-11-01');
+eq('across a year end', comingSunday('2026-12-30'), '2027-01-03');
+eq('junk is passed through, not invented', comingSunday('soon'), 'soon');
+eq('answers: yes', isComingAnswer('yes'), true);
+eq('answers: maybe', isComingAnswer('maybe'), true);
+eq('answers: junk refused', isComingAnswer('YES'), false);
+
+// Stop numbers: a stray keystroke must unplace a child, never move them.
+eq('stop: plain', parseStop('4'), 4);
+eq('stop: spaces trimmed', parseStop(' 20 '), 20);
+eq('stop: max', parseStop('9999'), 9999);
+for (const bad of ['', '0', '-3', '2.5', '1e3', '10000', 'four', '3a']) {
+  eq(`stop: ${JSON.stringify(bad)} is unplaced`, parseStop(bad), null);
+}
+eq('stop: not a string', parseStop(null), null);
+
+// Driving order: by stop, siblings together, the unplaced last.
+const kid = (firstName: string, routeStop: number | null, street: string | null, lastName = 'X') =>
+  ({ firstName, lastName, routeStop, street });
+const route = [
+  kid('Zoe', null, '9 Elm'), kid('Amy', 20, '5 Oak'), kid('Ben', 10, '1 Pine'),
+  kid('Cal', 20, '5 Oak'), kid('Dan', null, null), kid('Eve', 5, null),
+].sort(routeOrder).map((k) => k.firstName);
+eq('route: driving order, siblings by name, blanks last', route, ['Eve', 'Ben', 'Amy', 'Cal', 'Zoe', 'Dan']);
+eq('route: 9 before 10 (numbers, not text)',
+  [kid('A', 10, null), kid('B', 9, null)].sort(routeOrder).map((k) => k.firstName), ['B', 'A']);
 
 console.log(fail ? `\n${fail} FAILED` : '\nall passed');
 if (fail) process.exit(1);

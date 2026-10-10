@@ -1,6 +1,6 @@
 # Staff app — people, attendance, bulletin, directory
 
-Private. Nothing here is reachable from example.org, and no member
+Private. Nothing here is reachable from yourchurch.org, and no member
 data ever reaches the public static build. Phases 3–5 of the build brief.
 
 ## Why this is separate from `site/`
@@ -95,6 +95,17 @@ cascade and silently change historical totals — last year's number would move.
 Archiving takes someone off the roll and out of the directory, and is
 reversible. A tablet in a busy doorway is exactly where a mis-tap happens.
 
+Archiving is also on a person's own page (an "Archive this person" fold) and in
+bulk on the People tab: tick rows, press "Archive selected", and the first press
+writes nothing — it shows a card naming everybody about to go, and the write is
+on the second button. The Archived view runs the same thing backwards to
+restore. Every path goes through `src/lib/archive.ts`, so adults and the
+church's own children are treated alike. Fairhaven Kids is separate: since 2026-10-10
+its children live in their own list (`kids`, not `people`) with their own
+archived flag, so "Archive from Fairhaven Kids" takes a child off the Fairhaven Kids lists and
+nothing else — see `docs/kids-separation-plan.md`. Restoring does **not** put anyone back in the directory: that
+is a consent decision, and the app cannot know what it was before.
+
 Someone added at the door is NOT put in the directory. Consent is gathered in
 person by the pastor and is never implied by a name being typed in.
 
@@ -115,19 +126,28 @@ from April 2025. Trends start from the first real check-in.
 
 ## Status
 
-Built: schema and migrations, Google sign-in, sessions, the auth gate, people
-list and editor, staff management, the Breeze import, attendance check-in, and
-the trends dashboard.
+All of it is built and in real use: schema and migrations, Google sign-in,
+sessions, the auth gate, people and groups, staff management, the Breeze import,
+attendance check-in and trends, the bulletin editor, texting through Twilio
+(broadcast, scheduled, automatic birthdays, replies and the number checker), the
+website editor, Fairhaven Kids check-in, sign-up sheets, and the member directory with
+photo upload and member self-edit.
 
-Not yet: photo uploads, the bulletin editor (Phase 4) and the member directory
-(Phase 5).
+`docs/README.md` in the repo root is the operational document — how it deploys,
+what is set in the Cloudflare dashboard rather than in the repo, and the traps
+each half hit. Read that before changing anything here.
 
 ## Deployed
 
-**https://app.example.org** — Cloudflare Worker `changeme-app`, D1
-database `changeme-app`. Deployed with `npx wrangler deploy` from this directory.
-Not yet connected to Workers Builds, so a `git push` does NOT redeploy it (the
-public site does work that way — do not assume the same here).
+**https://app.yourchurch.org** — Cloudflare Worker `changeme-app`, D1
+database `changeme-app`. Connected to Workers Builds since 2026-09-01, so a push to
+`main` that touches `app/**` builds and deploys it, the same as the public site.
+Nothing here is deployed from a laptop. The build settings — including the root
+directory, which fails silently when it is wrong — are in `docs/README.md`.
+
+**A migration is not part of that deploy.** Apply it to the remote database
+yourself (`npx wrangler d1 migrations apply changeme-app --remote`) BEFORE the code
+that reads the new tables goes live.
 
 ### Two traps this deployment hit
 

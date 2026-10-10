@@ -30,14 +30,14 @@ const token = String(Astro.params.token ?? '');
  * working, and does not helpfully announce that it used to belong to somebody.
  */
 const [card] = token
-  ? await db.select({ personId: schema.kidCards.personId })
+  ? await db.select({ kidId: schema.kidCards.kidId })
       .from(schema.kidCards)
-      .innerJoin(schema.people, eq(schema.people.id, schema.kidCards.personId))
+      .innerJoin(schema.kids, eq(schema.kids.id, schema.kidCards.kidId))
       .where(and(
         eq(schema.kidCards.token, token),
         eq(schema.kidCards.active, true),
         // A card for an archived child leads nowhere either.
-        eq(schema.people.archived, false),
+        eq(schema.kids.archived, false),
       )).limit(1)
   : [];
 
@@ -48,7 +48,7 @@ const [card] = token
  * balance and six big buttons — not the one with the guardian addresses and the
  * photo upload. Everything else is one link away from there.
  */
-if (card) return Astro.redirect(`/kids/child/${card.personId}/quick`, 302);
+if (card) return Astro.redirect(`/kids/child/${card.kidId}/quick`, 302);
 
 const user = Astro.locals.user!;
 ---

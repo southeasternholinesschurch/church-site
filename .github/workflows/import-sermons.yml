@@ -18,27 +18,12 @@ name: Import sermons
 #
 # Quota is not a concern: ~30 units a night against a 10,000/day allowance.
 
-# NO SCHEDULE HERE, AND THAT IS DELIBERATE.
-#
-# A fresh copy of this template has no YouTube channel and no YOUTUBE_API_KEY,
-# so a daily cron does nothing but fail every morning and mail whoever owns the
-# repository. It did exactly that here, every day for weeks, until the only
-# person receiving them had learned to ignore the subject line — at which point
-# a real failure would have arrived looking identical.
-#
-# TO TURN IT ON, once the channel is yours:
-#   1. Set CHANNEL_ID in site/scripts/import-sermons.mjs
-#   2. Add the YOUTUBE_API_KEY secret (Settings -> Secrets and variables ->
-#      Actions). docs/transcripts.md covers the Google side.
-#   3. Run it by hand from the Actions tab and check what it filed.
-#   4. Then add the schedule back:
-#        schedule:
-#          - cron: '0 9 * * *'   # 09:00 UTC daily
-#
-# Step 3 before step 4. The first run against a real channel is the one that
-# tells you whether your service titles parse, and that is worth watching.
 on:
-  workflow_dispatch: # run it by hand from the Actions tab
+  schedule:
+    # 09:00 UTC daily (~4–5am Fairhaven). Uploads lag the service by days,
+    # so a daily check catches everything without hammering the feed.
+    - cron: '0 9 * * *'
+  workflow_dispatch: # so it can also be run by hand from the Actions tab
 
 # The job's whole purpose is to commit; nothing else is needed.
 permissions:
@@ -77,17 +62,15 @@ jobs:
         # shows up as a red X rather than as months of missing services.
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        #
-        # NO --prune. It removes archive entries whose video has gone from the
-        # channel, which sounds tidy and is not: a sermon page can hold hours of
-        # reviewed, hand-edited text, and a video that is briefly unlisted or
-        # re-uploaded reads exactly like a deleted one. Upstream this flag very
-        # nearly took 3,540 reviewed words off a sermon that was simply
-        # retitled. Remove entries by hand, in the dashboard, where you can see
-        # what you are removing.
+        # NO --prune. The six months is how far back to REACH when importing,
+        # not how long to keep what has been imported: once a service is in the
+        # repo it stays, and its cleaned transcript stays with it. Pruning would
+        # have deleted 2026-03-15-sunday-evening.md — 3,540 reviewed words — on
+        # the morning of 15 September.
         run: node scripts/import-sermons.mjs --write --strict
 
       - name: Import transcripts
+        id: transcripts
         working-directory: site
         # Runs AFTER the sermon import, and that order is load-bearing.
         #
@@ -110,6 +93,18 @@ jobs:
         # continue-on-error because a transcript is an enhancement: if YouTube
         # refuses, or the token has been revoked, the sermon archive itself
         # must still update.
+        #
+        # But continuing is NOT the same as saying nothing, and for four days
+        # in September it was. The Google refresh token expired on 19 September
+        # and every run through the 22nd fetched zero transcripts while
+        # reporting a green tick, because this step's failure was swallowed
+        # here and the job went on to succeed. Nobody had any reason to look.
+        #
+        # So the outcome is now carried forward twice: into the commit message,
+        # where it is visible in the history even months later, and into a
+        # final step that fails the run — AFTER the sermons have been committed
+        # and pushed, so the archive still updates. Red means a real break now,
+        # which is the only kind of red worth sending.
         continue-on-error: true
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -124,6 +119,8 @@ jobs:
           node scripts/import-transcripts.mjs --write
 
       - name: Commit any new services and transcripts
+        env:
+          TRANSCRIPTS_OUTCOME: ${{ steps.transcripts.outcome }}
         run: |
           # Both paths, or a transcript would be fetched, spent against quota,
           # and then thrown away when the runner is destroyed.
@@ -138,7 +135,15 @@ jobs:
           added=$(git diff --cached --name-only --diff-filter=A -- site/src/content/sermons | wc -l | tr -d ' ')
           removed=$(git diff --cached --name-only --diff-filter=D -- site/src/content/sermons | wc -l | tr -d ' ')
           texts=$(git diff --cached --name-only -- site/transcripts | wc -l | tr -d ' ')
-          git commit -m "Sermons: +${added} new, -${removed} aged out, ${texts} transcript(s)" \
+          # A count of zero is ambiguous — it means "none were due" and "the
+          # fetch died" equally well. Say which, in the one place somebody
+          # scanning the history will actually read.
+          if [ "$TRANSCRIPTS_OUTCOME" = "success" ]; then
+            note="${texts} transcript(s)"
+          else
+            note="TRANSCRIPTS FAILED"
+          fi
+          git commit -m "Sermons: +${added} new, -${removed} aged out, ${note}" \
                      -m "Automated by .github/workflows/import-sermons.yml from the channel's RSS feed and, for transcripts, the YouTube Data API."
 
           # Absorb anything pushed while this job was running. The commit only
@@ -146,3 +151,23 @@ jobs:
           # rebase here cannot conflict with work happening elsewhere.
           git pull --rebase origin main
           git push
+
+      # LAST, deliberately. Everything above has already run, committed and
+      # pushed, so failing here costs the archive nothing — it only makes the
+      # run red and sends the email that four days of silence did not.
+      #
+      # If there were no new services either, the commit step above exits early
+      # and writes nothing at all, so this is the ONLY thing that speaks up.
+      - name: Say so if the transcripts failed
+        if: steps.transcripts.outcome == 'failure'
+        run: |
+          echo "::error title=Transcript fetch failed::The sermons imported, but captions did not."
+          {
+            echo "## Transcripts failed"
+            echo
+            echo "The sermon archive updated normally. Captions did not."
+            echo
+            echo "Check the **Import transcripts** step above for the reason. The"
+            echo "usual one is the Google OAuth token: see docs/transcripts.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

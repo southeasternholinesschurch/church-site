@@ -157,8 +157,8 @@ export async function saveSermon(
  *
  * Both are guesses made by whatever read the sermon, and they exist to save
  * the pastor typing what the transcript already says. They reach the sermon's
- * frontmatter only when he approves the draft, and only into fields nobody has
- * filled in already.
+ * frontmatter only when he approves the draft, and only into fields he has not
+ * filled in himself.
  *
  * A block is only a block if every line in it parses, so a transcript that
  * opened with a horizontal rule keeps its first paragraphs instead of losing
@@ -285,6 +285,40 @@ export async function saveDraft(
  * the draft were thrown away by the very button that published it, and had to
  * be typed again afterwards. Omit them and the sermon keeps what it had.
  */
+/**
+ * Is this draft's text already on the sermon's page?
+ *
+ * Pure, and separate, because it is the one judgement in the half-done publish
+ * above and it must not be a guess: deleting a draft somebody still wants is
+ * not recoverable from the dashboard. Exact match after the editor's notes are
+ * cut — the same cut publishing performs — so this answers "these are the same
+ * words", never "these are similar enough".
+ *
+ * An empty page is never a match, or the first publish would delete its own
+ * source before writing anything.
+ */
+export function draftAlreadyPublished(body: string, draftText: string): boolean {
+  const onPage = body.trim();
+  if (!onPage) return false;
+  return onPage === stripEditorNotes(draftText).trim();
+}
+
+/**
+ * Throw a draft away without publishing it.
+ *
+ * For the leftover case the dashboard can now see: a sermon that has its text
+ * and a draft still sitting beside it. Publishing finishes that automatically
+ * when the two match; this is for when they do not — a draft superseded by
+ * something typed by hand, which nothing else can clear.
+ */
+export async function discardDraft(env: GitEnv, slug: string, who: { email: string }): Promise<void> {
+  const path = `${DRAFTS_DIR}/${slug}.md`;
+  const existing = await readFile(env, path);
+  if (!existing) return;   // already gone; nothing to do and nothing to report
+  await deleteFile(env, path, existing.sha,
+    commitMessage(`Sermon: discard the unpublished draft for ${slug}`, who));
+}
+
 export async function publishDraft(
   env: GitEnv, slug: string, who: { email: string },
   opts: { edited?: string; values?: Record<string, string> } = {},
@@ -292,7 +326,28 @@ export async function publishDraft(
   const sermon = await readSermon(env, slug);
   if (!sermon) throw new Error('That sermon no longer exists.');
   if (!sermon.draft) throw new Error('There is no draft for that sermon.');
-  if (sermon.body.trim()) throw new Error('That sermon already has text on its page. Clear it first if you mean to replace it.');
+  /*
+   * A publish that half-finished is FINISHED here, not refused.
+   *
+   * publishDraft writes the sermon and then deletes the draft, and those are
+   * two separate calls to GitHub. On 25 September the second one lost a race:
+   * a Save one second earlier had rewritten the draft, so the delete carried a
+   * sha that no longer matched and failed. The sermon was published and live;
+   * the draft stayed; and from then on this line refused every attempt to
+   * finish the job, because the body it was complaining about was the very
+   * text this draft had just put there. There was no way out from the screen.
+   *
+   * So: if the page already holds exactly what this draft says, the publish
+   * happened and only the tidying is outstanding. Do the tidying.
+   */
+  if (sermon.body.trim()) {
+    if (!draftAlreadyPublished(sermon.body, sermon.draft.text)) {
+      throw new Error('That sermon already has text on its page. Clear it first if you mean to replace it.');
+    }
+    await deleteFile(env, `${DRAFTS_DIR}/${slug}.md`, sermon.draft.sha,
+      commitMessage(`Sermon: clear the draft already published for ${slug}`, who));
+    return { words: sermon.body.trim().split(/\s+/).filter(Boolean).length };
+  }
 
   // Editor's notes are addressed to the reviewer, not to the congregation.
   const text = stripEditorNotes(opts.edited ?? sermon.draft.text).trim();
@@ -314,11 +369,12 @@ export async function publishDraft(
  *
  * Needed because the archive can end up with a service on it twice: the slug
  * is date + service type, the service type is read off the YouTube title, and
- * titles get edited after the stream. A stream that goes up as "Evening
- * Worship" and is retitled to "Sunday School and Evening Worship" gets filed a
- * second time by the next night's import. The importer refuses to do that now,
- * but somebody still has to say which of the two entries is the wrong one, and
- * without this that means editing the repository by hand.
+ * titles get edited after the stream. 13 September went up as "Evening
+ * Worship" and was retitled to "Sunday School and Evening Worship", so the
+ * next night's import filed the same video a second time. The importer now
+ * refuses to do that again, but somebody still has to say which of the two
+ * entries is the wrong one — and until now that meant editing the repository
+ * by hand.
  *
  * The draft goes with it, if one is still waiting. Leaving a draft behind
  * would make the sermon reappear in the review queue with no page to publish

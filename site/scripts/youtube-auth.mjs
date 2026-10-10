@@ -4,10 +4,18 @@
  *
  *   GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... node scripts/youtube-auth.mjs
  *
- * Run it once, on a machine with a browser, signed in as the account that OWNS
- * the YouTube channel. It prints a refresh token. Put that in the repo secrets
- * as GOOGLE_REFRESH_TOKEN and never run this again — refresh tokens do not
- * expire unless they are revoked or unused for six months.
+ * Run it on a machine with a browser, signed in as the account that OWNS the
+ * YouTube channel. It prints a refresh token. Put that in the repo secrets as
+ * GOOGLE_REFRESH_TOKEN.
+ *
+ * NOT necessarily once. A refresh token lasts until it is revoked or goes six
+ * months unused — but ONLY if the OAuth app is PUBLISHED. While it is in
+ * "Testing" status Google expires every token after seven days, whoever is
+ * using it. This comment used to promise "never run this again", and the
+ * transcript importer duly died a week after setup.
+ *
+ * Check first: console.cloud.google.com/auth/audience should say "In
+ * production", not "Testing".
  *
  * It listens on localhost only, for one request, and exits. Nothing is stored
  * on disk: the token is printed once so it goes where you choose to put it.

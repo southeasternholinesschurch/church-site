@@ -18,8 +18,8 @@ original plan.
 
 **Current status: everything in the brief is built and live except the PWA offline
 layer, which was dropped — see "What is deliberately NOT built" at the end.** Both
-halves are deployed and in real use: the public site at `example.org`
-and the app at `app.example.org`.
+halves are deployed and in real use: the public site at `yourchurch.org`
+and the app at `app.yourchurch.org`.
 
 ---
 
@@ -39,13 +39,19 @@ broken images, no missing alt text, no text under 11px, no content bleeding out 
 container, every parallax layer composing. All body text meets WCAG AA. With JavaScript
 disabled every page renders complete — the motion system only ever adds motion.
 
-**The app** (`app.example.org`) — Google sign-in for staff, the people
+**The app** (`app.yourchurch.org`) — Google sign-in for staff, the people
 database, attendance and visitor check-in, trends, groups, the bulletin editor with a
-publish button, SMS broadcast and replies through Twilio, the Monday singing reminder
-on a cron, and the member directory with photo upload and member self-edit. Since
-2026-09-04 it also carries **scheduled texts**, **automatic birthday texts** and a
-**number checker** — see "Scheduled and automatic texts" below. Since 2026-09-17 it
+publish button, texting through Twilio (broadcast, scheduled, automatic birthdays and
+replies), the Monday singing reminder on a cron, Fairhaven Kids check-in, the website editor,
+and the member directory with photo upload and member self-edit. Since 2026-09-17 it
 also carries **sign-up sheets** — see that section below.
+
+**Fairhaven Kids keeps its own list of children.** Since 2026-10-10 an Fairhaven Kids child is a row
+in `kids`, not `people`, so no church page can show one by accident. A church child
+who also comes to Fairhaven Kids is entered on both sides (a child's People page has a
+"Copy to Fairhaven Kids" button), and archiving on one side does not touch the other. Why,
+and how the live data was moved (people 242 → 146), is in
+[`docs/kids-separation-plan.md`](kids-separation-plan.md).
 
 **The nav bar is nine tabs and was ten more.** Four screens were folded into the
 page that already asked their question, which is worth knowing before hunting for a
@@ -54,12 +60,12 @@ fold on `/attendance`, and Groups is a fold on `/people` with a picker beside th
 search box. `/messaging/inbox`, `/messaging/numbers` and `/attendance/trends` still
 render — they are off the bar, not deleted, and remain perfectly good bookmarks.
 `/groups` redirects to `/people?groups=open`. The signed-in name and Sign out moved
-off the bar to a tan line at the foot of every page (AppLayout only — the children's
-section and the directory keep theirs, for reasons in that commit).
+off the bar to a tan line at the foot of every page (AppLayout only — Fairhaven Kids and the
+directory keep theirs, for reasons in that commit).
 
 **The directory has real data.** On 2026-09-04 the printed church directory was
 imported from a CSV: birthdays went 16 -> 97, anniversaries 3 -> 43, addresses 17 -> 91.
-Current figures: 128 active people (82 adults, 46 children), 82 listed in the directory,
+Figures at that import: 128 active people (82 adults, 46 children), 82 listed in the directory,
 55 with directory access, 78 textable on 77 handsets.
 
 **Texting is live.** The Twilio 10DLC campaign was approved 2026-09-01 and the first
@@ -84,7 +90,8 @@ procedure, the verification recipe, and a log of every bug this build hit.
            R2 for member photos. Staff auth via Google OAuth; members via SMS magic link.
 /workers   Two small Cloudflare Workers:
              rebuild-cron/  — daily cron that triggers a site rebuild
-             sms-cron/      — hourly cron that POSTs /api/sms/run-due in the app
+             sms-cron/      — POSTs /api/sms/run-due in the app, every 5 minutes,
+                              and again hourly with ?roster=1
 /docs      This file, plus anything else operational
 ```
 
@@ -97,7 +104,7 @@ procedure, the verification recipe, and a log of every bug this build hit.
 | **Astro + TypeScript** | Ships zero JS by default, fast static output, and content collections give every sermon/ministry/settings entry a typed schema (Zod) — a bad date or missing field fails the build loudly instead of quietly breaking the live site. |
 | **npm** (not pnpm/yarn) | Most universal option; least friction for a future volunteer who's never touched this repo before. |
 | **Cloudflare (Workers Builds, static assets)** | Free static hosting, fast global edge, Deploy Hooks give us the rebuild plumbing below for free. Note: this is Cloudflare's newer git-connected "Workers Builds" product, not classic "Pages" — same idea, some different UI/mechanics, see "Deploying" below and `site/wrangler.jsonc`'s comments for what that changes. |
-| **The staff app edits the site** | Site content is markdown in this repository and the dashboard commits to it through the GitHub API, so a save publishes itself. This replaced Decap CMS, which needed its own OAuth proxy Worker, a GitHub OAuth App, two further secrets and an exception in the content-security policy. One fine-grained token replaces all of it. |
+| **The staff app edits the site** | Site content is markdown in this repository, and the dashboard commits to it through the GitHub API. Retired Decap CMS on 2026-09-11 along with its OAuth proxy Worker: it had been used exactly once in the project's history, while everything else was edited through an agent. One fine-grained token replaces a GitHub OAuth App whose own setup notes had to warn that getting it wrong fails silently in the browser console. |
 | **Instrument Serif + Texta** | Headings are Instrument Serif (Google Fonts, OFL, free — regular and italic only, no bold, so hierarchy comes from size). Body and UI are Texta, the pastor's own, self-hosted from `site/public/fonts/` so the PWA works offline. **Licensing note:** Texta came from a desktop licence, which typically does NOT cover public web embedding — that's usually a separate tier. Worth confirming with Yellow Design Studio before launch. BD Script was used in an earlier direction and is no longer on the site. Change `--font-body`/`--font-display` in `src/styles/tokens.css` to re-brand. |
 | **`node-ical`** | Handles RRULE (recurring events) and EXDATE/overrides for the iCloud calendar feed — see "Testing the events feed" below, this is the brief's flagged risk area. |
 | **Web3Forms** for Contact/Prayer forms | A hosted form-relay needs zero DNS changes (no SPF/DKIM records to add) — important since the brief explicitly says don't touch the church's email DNS. Custom mail-sending code would need exactly those DNS changes. |
@@ -110,7 +117,7 @@ procedure, the verification recipe, and a log of every bug this build hit.
 None of these are committed. Set them where noted.
 
 **Cloudflare Worker secrets** (`npx wrangler secret put <NAME>`, run from each worker's folder):
-- the app Worker: `GITHUB_TOKEN` — a fine-grained PAT, Contents: read and write, this repository only. This is what lets the dashboard edit the website.
+- `changeme-app`: `GITHUB_TOKEN` — fine-grained PAT, Contents: read and write, this repository only. This is what lets the dashboard edit the website.
 - `workers/rebuild-cron`: `DEPLOY_HOOK_URL` (from the site's Cloudflare project → Settings → Deploy hooks) — **done 2026-08-29**, deployed and verified firing a real rebuild
 
 - the site itself (`site/`): `YOUTUBE_API_KEY` — feeds `/api/live-status`. **Done 2026-08-31.**
@@ -121,7 +128,7 @@ None of these are committed. Set them where noted.
   Two traps here, both of which cost time the first time round — read this before rotating
   the key:
 
-  1. **The Worker is named `yourchurch-site-1`**, after the repo — NOT
+  1. **The Worker is named `southeaster-holiness-church-site-1`**, after the repo — NOT
      `your-church-site`, which is what `site/wrangler.jsonc` says. Workers Builds
      ignores that field and uses the project name, so deploys are unaffected, but anything
      run from the CLI (`npx wrangler secret put …`) targets the name in the config and will
@@ -174,12 +181,12 @@ portraits must be cropped square before upload, and so on).
 None of these block building/previewing — the site runs fine with placeholders and swaps in
 real values as they arrive.
 
-- [x] Church-owned GitHub repo — done 2026-08-29. Pushed via a dedicated SSH deploy key (`~/.ssh/id_ed25519_seh_site` on the pastor's Mac); repo is [your-github-org/your-repo-name](https://github.com/your-github-org/your-repo-name)
-- [x] Breeze export received and inspected 2026-08-29 (`docs/breeze-export-notes.md`). the pastor dropped the manual adult/child review at import time. It mattered in the end — adult/child now drives directory visibility, the attendance split AND who appears in the bulletin's birthday list — and it was cleaned up as the directory was built. Two junk records still carry `child` (see Still Outstanding).
+- [x] Church-owned GitHub repo — done 2026-08-29. Pushed via a dedicated SSH deploy key (`~/.ssh/id_ed25519_changeme_site` on the pastor's Mac); repo is [your-github-org/your-repo-name](https://github.com/your-github-org/your-repo-name)
+- [x] Breeze export received and inspected 2026-08-29 (`docs/breeze-export-notes.md`). The pastor dropped the manual adult/child review at import time. It mattered in the end — adult/child now drives directory visibility, the attendance split AND who appears in the bulletin's birthday list — and it was cleaned up as the directory was built. Two junk records still carry `child` (see Still Outstanding).
 - [x] SHC logo — done 2026-08-29. Real files live in `site/src/assets/brand/` (icon mark, dark and white horizontal lockups) and are wired into the nav/footer/favicon/PWA icons via Astro's image pipeline (auto-optimized to WebP). Fairhaven Kids/Fairhaven Youth marks are in too; Fairhaven Ladies/Fairhaven Men/Fairhaven Seniors still have no real logo.
 - [x] Fonts — settled. Texta (body/UI, self-hosted from the pastor's own files) + Instrument Serif (display, Google Fonts, OFL). BD Script was used in an earlier direction and has been dropped. Still open: the Texta web-embedding licence — see the note in the stack-choices table above.
 - [x] Calendar feed — done 2026-08-29, live and connected (currently empty, waiting on real events)
-- [x] **`YOUTUBE_API_KEY`** — fully done. Created on a church-owned Google Cloud project, added BOTH as a GitHub Actions secret (the nightly sermon import runs on it) and as a Cloudflare secret on the site Worker. `/api/live-status` returns `configured: true` and the Livestream page detects a live service; verified against a real test stream. Channel ID: `UC…YOUR_CHANNEL_ID`
+- [x] **`YOUTUBE_API_KEY`** — fully done. Created on a church-owned Google Cloud project, added BOTH as a GitHub Actions secret (the nightly sermon import runs on it) and as a Cloudflare secret on the site Worker. `/api/live-status` returns `configured: true` and the Livestream page detects a live service; verified against a real test stream. Channel ID: `UCCjlcMeiioBKihboxwgvnEg`
 - [x] Church inbox email — confirmed 2026-08-30: `hello@example.org`. Shown on the Contact page and the address the forms will deliver to. **Register the Web3Forms key with this address.**
 - [x] Real Facebook page URL — done 2026-08-29
 - [x] Real Zeffy giving URL — done 2026-08-29 (found via the church's Linktree)
@@ -188,17 +195,17 @@ real values as they arrive.
 - [x] Founding year — confirmed 1968, now in the About hero
 
 **Domain cutover: DONE 2026-08-31.** `site` in `site/astro.config.mjs` now names
-`https://example.org`. It remains the only place the origin is
+`https://yourchurch.org`. It remains the only place the origin is
 configured — the canonical tags, the sitemap and the Contact form's redirect are all
 built from it — so if the address ever changes, that is the one line to change.
 
 **Deliberate omission:** the Give page carries no cheque payee and no mailing
-address. the pastor's call — who to make a cheque out to is not something the church
+address. The pastor's call — who to make a cheque out to is not something the church
 publishes. The Linktree (`givingLinksUrl` in site settings) covers the other
 digital options instead. Don't reinstate either without asking.
-- [x] Staff portrait confirmed with the pastor (2026-08-30)
-- [x] Staff portraits — all three in place as of 2026-08-30. Marion's came from a real photo squared up via ChatGPT (confirmed with the pastor; the filename alone doesn't distinguish an AI-generated image from an AI-edited one, and it's worth asking).
-- [x] All four staff portraits done. Notes for future ones: Portraits are circle-cropped, so head-and-shoulders works best. `focus` in the CMS moves the crop vertically, but ONLY on a non-square photo — a square source fills the circle exactly and `focus` does nothing. For a tall portrait, crop it square first and keep the uncropped original alongside (see `pastor-full.jpg`), because re-cropping later otherwise means digging the source out of git history. Note `a-wide-congregation-shot.jpg` in the photo library is a wide congregation shot and is deliberately NOT offered as a portrait
+- [x] Staff portrait confirmed as Pastor Alan (2026-08-30)
+- [x] Staff portraits — all three in place as of 2026-08-30. Felicia's came from a real photo squared up via ChatGPT (confirmed with the pastor; the filename alone doesn't distinguish an AI-generated image from an AI-edited one, and it's worth asking).
+- [x] All four staff portraits done. Notes for future ones: Portraits are circle-cropped, so head-and-shoulders works best. `focus` in the CMS moves the crop vertically, but ONLY on a non-square photo — a square source fills the circle exactly and `focus` does nothing. For a tall portrait, crop it square first and keep the uncropped original alongside (see `kenny-stetler-full.jpg`), because re-cropping later otherwise means digging the source out of git history. Note `luther.jpg` in the photo library is a wide congregation shot and is deliberately NOT offered as a portrait
 - [x] Staff page complete — four entries, real photos, the church's own bios. To add someone: `/admin` → Staff & Leadership (a new photo must be added to `src/lib/staff-assets.ts` first so it appears in the dropdown).
 - [x] Kids Club time — Wednesdays at 7:00 (confirmed 2026-08-30)
 - Ministry **locations** are deliberately not published for Fairhaven Youth / Fairhaven Ladies / Fairhaven Seniors — the pastor's call. The `where` field is simply omitted on those, so no row renders. Don't add placeholders back.
@@ -263,22 +270,25 @@ migrations were written by hand. Match the numbering and keep them additive.
 
 **Signing in locally** is the one awkward part: staff auth is Google OAuth, which does
 not work against localhost. To drive a staff page in dev, insert a session row directly
-and set the `seh_session` cookie to its id. For a member session, mint a row in
+and set the `changeme_session` cookie to its id. For a member session, mint a row in
 `directory_invites` and open `/directory/join/<token>`. Delete both afterwards.
 
 ---
 
 ## Deploying
 
-**The site** deploys itself: pushing to `main` triggers Cloudflare Workers Builds.
-**The app does not** — run `npm run build && npx wrangler deploy` from `/app`.
+**Both halves deploy themselves**: pushing to `main` triggers Cloudflare Workers Builds
+— the site from `site/`, the app from `app/`. Nothing is deployed from a laptop. The app
+was connected on 2026-09-01; see "Deploying the app" under Operational notes for its
+settings. **A database migration is not part of that** — apply it to the remote D1
+yourself before the code that reads the new tables goes live.
 The rest of this section is the record of how each piece was set up, 2026-08-29.
 
 1. ✅ **Repo pushed** to the church-owned GitHub account, via a dedicated SSH deploy key.
-2. ✅ **Cloudflare project created**: `yourchurch-site-1`, connected to the
+2. ✅ **Cloudflare project created**: `southeaster-holiness-church-site-1`, connected to the
    GitHub repo. Root directory `site`, build command `npm run build`, deploy command
    `npx wrangler deploy` (Cloudflare's own default for this project type — see below).
-   **Live at https://example.org since 2026-08-31.**
+   **Live at https://yourchurch.org since 2026-08-31.**
 
    The `*.workers.dev` hostname now returns 404 and is not coming back: adding
    `routes` to wrangler.jsonc replaces the workers.dev subdomain with the
@@ -306,12 +316,15 @@ The rest of this section is the record of how each piece was set up, 2026-08-29.
    to the deploy hook from step 4, cron fires daily at 09:00 UTC. Manually verified working:
    `curl https://rebuild-cron.YOUR-SUBDOMAIN.workers.dev` → `ok: deploy hook
    returned 200`.
-6. ✅ **Website editing**: built into the staff app at `/website`, admin only.
-   Needs one secret on the app Worker — `GITHUB_TOKEN`, a fine-grained PAT with
-   Contents: read and write on this repository and nothing else. A save commits,
-   and the commit triggers the build, so an edit publishes itself.
-   **Check:** `/website` reports a wrong token plainly — length, prefix and
-   repository — rather than failing with a bare 401 further in.
+6. ✅ **decap-oauth Worker**: deployed at
+   https://decap-oauth.YOUR-SUBDOMAIN.workers.dev. GitHub OAuth App created
+   ("Fairhaven Community CMS", org-owned), callback URL
+   `https://decap-oauth.YOUR-SUBDOMAIN.workers.dev/callback`, "Expire user access
+   tokens" left **unchecked** (this Worker doesn't implement token refresh — see its
+   `src/index.ts` comments — so a non-expiring token is what it expects).
+   `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` secrets set, `public/admin/config.yml`'s `repo`
+   and `base_url` point at the real values. **Verified end-to-end 2026-08-29**: the pastor logged
+   into `/admin` successfully via GitHub.
 
 Every subsequent push to `main` auto-deploys via Cloudflare's GitHub integration — no extra
 steps needed after this one-time setup. Auth for local `wrangler` commands is stored in
@@ -322,17 +335,17 @@ Cloudflare account — nothing committed to the repo).
 
 ## The staff/member app — how it fits together
 
-Deployed with `npm run build && npx wrangler deploy` from `/app`. There is no git
-integration on this half: it deploys from the machine you are sitting at, so a change
-is not live until someone runs that.
+Deployed by a push to `main` through Cloudflare Workers Builds, the same as the public
+site — see "Deploying the app" under Operational notes for the settings and the one that
+fails silently. It is not deployed from a laptop.
 
 **Two separate kinds of user, deliberately never mixed.**
 
-*Staff* sign in with Google and get the dashboard: people, attendance, trends,
-messaging, groups, the bulletin editor. `src/middleware.ts` is deny-by-default — every
-route requires a staff session unless its prefix is listed in `PUBLIC_PREFIXES`,
-which lives in `src/lib/public-paths.ts` so that the list can be tested without
-standing up a request.
+*Staff* sign in with Google and get the dashboard: people, attendance, messaging, the
+bulletin editor, sign-up sheets, the website editor and Fairhaven Kids. `src/middleware.ts` is
+deny-by-default — every route requires a staff session unless its prefix is listed in
+`PUBLIC_PREFIXES`, which lives in `src/lib/public-paths.ts` so that the list can be
+tested without standing up a request.
 
 *Members* never sign in at all. They receive a personal link by text, tap it once, and
 that device is remembered for 90 days. Their sessions live in `member_sessions`, a
@@ -388,7 +401,7 @@ passes `cache: 'no-store'` so it does not depend on that setting. **A correct
 `Cache-Control` in source proves nothing — read the header off production:**
 
 ```
-curl -sID - https://example.org/api/live-status | grep -i cache-control
+curl -sID - https://yourchurch.org/api/live-status | grep -i cache-control
 ```
 
 **`wrangler deploy` REPLACES a Worker's plain vars with whatever the config declares.**
@@ -440,7 +453,7 @@ real fault is that it is in the wrong folder and nothing was ever built. Cost on
 build on 2026-09-01.
 
 **Connect git to the EXISTING `changeme-app` Worker.** Do not use "Create application" and
-point it at the repo — that makes a *second* Worker, and `app.example.org`
+point it at the repo — that makes a *second* Worker, and `app.yourchurch.org`
 stays attached to the first one, so the site would look unchanged no matter how many
 times it deployed. The site has already been bitten by a version of this: its Worker is
 named after the Cloudflare project and ignores the `name` in its own wrangler config.
@@ -457,13 +470,13 @@ money. The secret comparison is constant-time in code; a rate limit is the other
 and Cloudflare rate-limiting rules are zone configuration that cannot live in
 `wrangler.jsonc`. Create it once:
 
-**Cloudflare dashboard → example.org → Security → WAF → Rate limiting rules
+**Cloudflare dashboard → yourchurch.org → Security → WAF → Rate limiting rules
 → Create rule**
 
 | Field | Value |
 |---|---|
 | Rule name | `sms-run-due` |
-| If incoming requests match | `Hostname` equals `app.example.org` **and** `URI Path` equals `/api/sms/run-due` |
+| If incoming requests match | `Hostname` equals `app.yourchurch.org` **and** `URI Path` equals `/api/sms/run-due` |
 | Characteristics | `IP` |
 | Requests | `3` |
 | Period | `10 seconds` |
@@ -511,7 +524,7 @@ To re-test (harmless — a wrong secret is rejected without sending anything):
 
 ```bash
 for i in $(seq 1 8); do curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  -H "x-cron-secret: wrong" https://app.example.org/api/sms/run-due; sleep 1; done
+  -H "x-cron-secret: wrong" https://app.yourchurch.org/api/sms/run-due; sleep 1; done
 ```
 
 ### Security response headers
@@ -535,7 +548,7 @@ HTML page and a font file, and `/_headers` itself correctly 404s rather than bei
 served. Confirm once after the first deploy:
 
 ```bash
-curl -sI https://example.org/ | grep -i content-security-policy
+curl -sI https://yourchurch.org/ | grep -i content-security-policy
 ```
 
 If that comes back empty, `_headers` is not being honoured in production and the
@@ -543,7 +556,7 @@ fallback is a **Response Header Transform Rule** (dashboard → Rules → Transf
 Modify Response Header), which runs at the edge ahead of asset matching.
 
 **`/admin` gets its own policy, and the `!` line in `_headers` is load-bearing.** The
-CMS loads Decap from unpkg and talks to GitHub, which the site-wide policy forbids.
+the CMS loaded Decap from unpkg and talked to GitHub, which the site-wide policy forbids. That exception is gone with the CMS.
 Rules in `_headers` *accumulate*, and a browser given two CSP headers enforces the
 intersection — so without `! Content-Security-Policy-Report-Only` on the `/admin/*`
 block, the tight policy goes on blocking unpkg and the CMS breaks with no clue why.
@@ -610,7 +623,9 @@ change. Birthdays are matched by parsing month and day out of the string, never
 
 ## Checking numbers without texting anyone
 
-`/messaging/numbers` runs **Twilio Lookup** over every distinct `phone_e164` and stores
+`/messaging/numbers` — off the nav bar since the import it was built for is finished,
+but still there and still a good bookmark for the next batch — runs **Twilio Lookup**
+over every distinct `phone_e164` and stores
 the line type on the person. A **landline cannot receive SMS at all**, which is the
 usual meaning of error 30005 — and a number copied off a printed directory is exactly
 where a household landline hides.
@@ -619,8 +634,8 @@ About half a cent a number; the page states the total before you press anything.
 Batched 40 at a time for the subrequest reason above, and one lookup per DISTINCT
 number rather than per person, since couples share handsets.
 
-**First full run, 2026-09-04: all 77 numbers came back `mobile`.** So Della
-Rowntree's old 30005 was a disconnected or reassigned mobile, not a landline.
+**First full run, 2026-09-04: all 77 numbers came back `mobile`.** So Shirley
+Parmalee's old 30005 was a disconnected or reassigned mobile, not a landline.
 
 **Lookup proves the line TYPE, never that anyone is answering.** A dead mobile still
 reports `mobile`. It rules out the landline category; only a delivery report proves
@@ -730,13 +745,70 @@ Four rules, each learned the hard way:
 3. **Check every flag against existing rows.** The first draft would have created new
    people with `include_in_directory=1`, putting six CHILDREN in the member directory.
    Every existing child is 0. Only comparing caught it.
-4. **The two sources spell people differently** — Rowntry/Rowntree, Marisa/Marissa,
-   Kaylee/Kayleigh, Margery/Marguerite. Fuzzy-match and confirm each, or the import silently
+4. **The two sources spell people differently** — Parmelee/Parmalee, Briana/Brianna,
+   Mackayla/Michaela, Julia/Marguerite. Fuzzy-match and confirm each, or the import silently
    creates duplicate people.
+
+## Keeping the app and the demo out of search results
+
+`X-Robots-Tag: noindex, nofollow, noarchive` is set in `app/src/middleware.ts`
+on **every** response from the app and the demo. The public site is untouched
+and indexes normally.
+
+As a HEADER rather than only the meta tags already on the pages, because a meta
+tag only covers HTML a crawler renders. The generated demo portraits are SVG
+and `/api/bulletin/current` is JSON; neither can carry one, and both are
+directly linkable.
+
+**`robots.txt` deliberately ALLOWS crawling. Do not add `Disallow: /`.**
+
+That reads backwards and is the point. `noindex` only works if the crawler is
+permitted to fetch the page and see it. `Disallow` blocks that fetch — and
+Google will still index a disallowed URL it finds linked elsewhere, showing a
+bare result, having never read the noindex it was refused permission to look at.
+Let them in; tell them not to index.
+
+(A first attempt did add `Disallow: /`. It was inert regardless: Cloudflare
+injects its own managed `User-agent: * / Allow: /` block, and where two groups
+match the same agent the least restrictive rule wins. Right outcome, wrong
+reasoning — hence this note.)
+
+Verified on both subdomains: the header is present on HTML and on a generated
+portrait, no `Disallow: /` applies, and the public site carries no such header.
+
+## Demo mode — screenshots without your congregation in them
+
+Add `?demo=1` to a staff page and every name, phone number, street address and
+email is replaced with an invented one. The layout, the counts, the dates and
+the design are untouched, so a screenshot tells the truth about the product
+without telling anyone about the church.
+
+Works on People, the person page, the directory, an attendance sheet, Replies
+and Numbers. A yellow banner marks every page while it is on, because a
+screenshot of invented data mistaken for real data is the one way this could do
+harm.
+
+Three properties that matter, all covered by `app/test/demo.test.ts`:
+
+- **Staff only, and read from the URL.** A member following a directory link
+  cannot reach it by adding the flag, and it cannot be left switched on.
+- **Households hold together.** The surname and the address key off the REAL
+  address rather than the person id, so a couple share both. Keying the surname
+  off the id gave two people at one address two different surnames, which reads
+  as a bug in a screenshot.
+- **An empty field stays empty.** The People list exists partly to show which
+  records are incomplete; filling those gaps in would misrepresent the data.
+
+Numbers are generated in the 555-01xx range, which is reserved for fiction and
+can never be a real handset. Inbound texts are replaced outright rather than
+paraphrased — a reply can say anything at all.
+
+Birthdays, anniversaries and photographs are NOT faked: a month and a day beside
+an invented name identifies nobody, and the photographs are the church's own.
 
 ### The public demo site
 
-Separate from the flag above. **demo.fairhavenchurch.org** is its own
+Separate from the flag above. **demo.yourchurch.org** is its own
 Worker (`changeme-demo`) with its own database of invented people, so a pastor
 considering this can click through the whole app without an account and without
 seeing anybody real. `DEMO_INSTANCE=1` removes sign-in and refuses every Twilio
@@ -764,44 +836,33 @@ having pressed Close — because what is worth showing about that feature is the
 states a sheet can be in. Their dates are computed at reseed rather than written
 down, so re-running the command above makes them current again.
 
-## Editing content (Decap CMS)
+## Editing content
 
-Visit `/admin` on the deployed site (not meaningful on localhost until the OAuth Worker is
-deployed and `config.yml` points at it). Log in with a GitHub account that has write access to
-the repo.
+Everything about the public site is edited in the **staff app**, under
+`/website` — admin only:
 
-**Approval workflow (brief §6):** the CMS is configured with `publish_mode: editorial_workflow`
-— every edit goes through Draft → In Review → Ready before it's live. This is Decap's built-in
-mechanism, not custom code, and satisfies the brief's approval-workflow requirement for
-public-facing content edits.
+| Screen | What it edits |
+|---|---|
+| Right now | The livestream override and the homepage banner |
+| Service times & contact | `settings/site.yaml` — name, address, times, links |
+| Staff & leadership | `content/staff/*.md` |
+| Ministries | `content/ministries/*.md`, including the focal-point picker |
+| What we believe | `content/beliefs/*.md` |
+| Sermons | Titles, speakers, series — and approving a cleaned transcript |
+| Photos | Every image, uploaded and resized in the browser |
 
-**Adding a sermon** (brief §4 — should be fast): Sermons collection → New Sermon → paste the
-YouTube video ID (not the full URL — just the 11 characters after `v=`), fill in title/series/
-speaker/date/scripture, publish through the workflow. That's the whole weekly task.
+A save is a **commit**, and the push triggers the site build — so an edit
+publishes itself in about two minutes with nothing else to press. Every change
+keeps a diff and names the person who made it.
 
-**Ministries**: 4 fixed entries (Fairhaven Kids/Fairhaven Youth/Fairhaven Ladies/Fairhaven Seniors) — edit existing ones rather
-than creating new ones. Uncheck "Placeholder content" once real copy/branding lands for
-Fairhaven Ladies/Fairhaven Seniors. A 5th (men's ministry) was pulled entirely 2026-08-29 — "Fairhaven Men" reads as an
-unintended word — add it back via a new content file once the pastor has a real name for it.
+It needs one secret, `GITHUB_TOKEN`, on the `changeme-app` Worker: a fine-grained
+personal access token with **Contents: read and write on this repository only**.
 
-**Livestream override**: Site Settings → Livestream Override. Turn "active" on and paste the
-week's URL to force that stream regardless of auto-detection; turn it back off afterward (or
-leave off and let auto-detect handle it week to week).
-
-**Homepage banner / media uploads** (brief §1 — "banners and seasonal graphics"): Site Settings
-→ Homepage Banner. Upload an image (uses Decap's media library — this commits the file straight
-into `site/public/uploads/` via the GitHub API, no server involved), add a headline and optional
-link, turn "active" on. Turn it back off when the season/event is over; the image stays in the
-repo for reuse next time. **Do not use this uploader for member/people photos** — that is now built and separate: member portraits go to R2 through the person's profile in the app, never into this repo
-— anything here is public and served to everyone; private member data needs the actual server
-app instead.
-
-Uploads are auto-compressed on every build (`scripts/optimize-uploads.mjs`, wired up as npm's
-`prebuild` hook — runs automatically, no manual step) since phone photos land here at 10+ MB and
-public/ bypasses Astro's normal image optimization. Resizes to max 2000px wide, re-compresses,
-in place — safe to re-run repeatedly, no cumulative quality loss.
-
----
+Decap CMS was retired on 2026-09-11. It had been used exactly once in the
+project's history — one commit, toggling the livestream override — while every
+other content change went through an agent editing files. It also required its
+own OAuth proxy Worker and a GitHub OAuth App whose setup notes had to warn
+that a mistake fails silently in the browser console.
 
 ## Testing the events feed (recurring events + DST)
 
@@ -853,7 +914,7 @@ own accent names, so it can't drift out of step with the content collection:
 
 Details worth knowing:
 
-- **Case doesn't matter.** `#Fairhaven Kids`, `#kids` and `#KIDS` all work — phone
+- **Case doesn't matter.** `#Kids`, `#kids` and `#KIDS` all work — phone
   keyboards autocapitalise.
 - **Several tags are fine.** `#kids #youth` puts a joint event under both.
   Under Fairhaven Kids it shows a "Fairhaven Youth" chip and vice versa, so a shared event
@@ -957,7 +1018,7 @@ the fetch), but it has not been exercised on a live broadcast.
 ## Sermons: a rolling window, not the whole catalogue
 
 The site carries the **last 6 months** of services. Everything older stays on
-YouTube, and the Sermons page links out to it. the pastor's call, and the right one:
+YouTube, and the Sermons page links out to it. The pastor's call, and the right one:
 four years is ~600 pages nobody browses, when people looking for an old service
 go to YouTube anyway.
 
@@ -973,7 +1034,7 @@ Everything the site knows about a service comes from its YouTube title, so the
 titling convention IS the data entry. Use pipes:
 
 ```
-August 23, 2026 | Sunday Morning Worship | Pastor [Pastor Name] | The Narrow Gate
+August 23, 2026 | Sunday Morning Worship | Pastor Alan Reeve | The Narrow Gate
      date       |        service         |       speaker        |  sermon title
 ```
 
@@ -1015,6 +1076,15 @@ The job runs the importer with `--strict`, which is the safety net that matters
 unattended: if the channel's titling changes and nothing parses, the run FAILS
 rather than silently committing nothing while the archive quietly goes stale.
 A red X in the Actions tab is the intended signal.
+
+**The same job also fetches transcripts, and that half DOES need secrets** —
+Google OAuth, set up per [`docs/transcripts.md`](transcripts.md). It runs after
+the sermon import and is allowed to fail without stopping it, so the archive
+always updates. But a failure is not swallowed: the commit reads
+`TRANSCRIPTS FAILED` instead of a transcript count, and a last step turns the
+run red after everything has been pushed. So a red run with new sermons in it
+means captions broke, not the archive — almost always the Google refresh token,
+which expires every seven days if the OAuth app was left in Testing status.
 
 ### Importing by hand
 
@@ -1076,7 +1146,7 @@ filtering is by service type and year, both derived.
 ### Known limitation
 
 Every video uses the same branded stream thumbnail, so the grid shows the same
-image on every card. the pastor chose to keep them rather than substitute rotating
+image on every card. The pastor chose to keep them rather than substitute rotating
 church photos (which would look varied but wouldn't depict the actual service).
 Revisit if it grates.
 
@@ -1132,7 +1202,7 @@ system before believing it.
   the 2026-09-04 import.
 - [ ] **Some singers on the rota are still not in the people database.** The Monday
   reminder can only text people it can find and skips the rest with a note rather than
-  guessing, so a gap is silent unless you read the dashboard. Della Rowntree is now
+  guessing, so a gap is silent unless you read the dashboard. Shirley Parmalee is now
   present, with her number corrected.
 - [x] ~~Two junk records (#23 "Sim Not sure", #26 "Sm Sure not")~~ — archived 2026-09-04.
 - [ ] **The birthday texts are built but switched OFF.** Put the wording in and turn

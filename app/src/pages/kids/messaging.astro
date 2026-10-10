@@ -1,5 +1,6 @@
 ---
 import KidsLayout from '../../layouts/KidsLayout.astro';
+import KidsMessageTabs from '../../components/KidsMessageTabs.astro';
 import { getDb, schema } from '../../db';
 import { asc, eq } from 'drizzle-orm';
 import { kidsSendScope } from '../../lib/permissions';
@@ -68,7 +69,8 @@ const TEMPLATES = [
   'No Fairhaven Kids this week. See you next Sunday!',
 ];
 ---
-<KidsLayout title="Messaging" user={user}>
+<KidsLayout title="Messages" user={user}>
+  <KidsMessageTabs active="send" />
   <h1>Text a bus route</h1>
 
   {scope === null ? (

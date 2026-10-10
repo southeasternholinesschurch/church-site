@@ -6,10 +6,16 @@ import { sql, eq, desc } from 'drizzle-orm';
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
 
+/*
+ * Two numbers, and neither of them is displayed as a number.
+ *
+ * `total` only decides whether this is a fresh install with an empty database.
+ * `unknown` only decides whether the notice below appears. The adult and child
+ * counts went with the tiles that used to print them — see the note further
+ * down — so they are no longer selected either.
+ */
 const [counts] = await db.select({
   total: sql<number>`count(*)`,
-  adults: sql<number>`sum(case when adult_child = 'adult' then 1 else 0 end)`,
-  children: sql<number>`sum(case when adult_child = 'child' then 1 else 0 end)`,
   unknown: sql<number>`sum(case when adult_child = 'unknown' then 1 else 0 end)`,
 }).from(schema.people).where(eq(schema.people.archived, false));
 
@@ -25,6 +31,17 @@ const [counts] = await db.select({
  * chase the last few people.
  *
  * What replaces it is the four screens the pastor opens most.
+ *
+ * The four counting tiles above it — People, Adults, Children, Unconfirmed —
+ * are gone for the same reason, one round of edits later. A headcount that
+ * moves by one or two a month is not something you check on a Sunday morning;
+ * it is something you look up when you happen to want it, and /people prints
+ * it at the top of the list next to the filters that break it down.
+ *
+ * What survives is the one of the four that was never really a count: the
+ * unconfirmed notice. It stays because it is not reporting a number, it is
+ * asking for something to be done, and the thing it asks for changes how those
+ * people are treated everywhere else in the app.
  */
 
 const recent = await db.select().from(schema.services)
@@ -36,7 +53,7 @@ const unknown = counts?.unknown ?? 0;
 <AppLayout title="Dashboard" user={user} backdrop>
   <h1>Dashboard</h1>
 
-  {total === 0 ? (
+  {total === 0 && (
     <div class="card" style="margin-bottom:26px;">
       <h2>No people yet</h2>
       <p class="muted">
@@ -46,29 +63,15 @@ const unknown = counts?.unknown ?? 0;
         the database.
       </p>
     </div>
-  ) : (
-    <>
-      {/* 140px rather than 160px, which is the difference between two of these
-          per row on a 375px phone and four stacked full-width cards pushing the
-          quick links below the fold — the whole point of the quick links being
-          that they are reached without scrolling. Four items and auto-fit still
-          means four across on a desktop. */}
-      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin-bottom:26px;">
-        <div class="card"><p class="label muted">People</p><p style="font-size:32px;margin:4px 0 0;">{total}</p></div>
-        <div class="card"><p class="label muted">Adults</p><p style="font-size:32px;margin:4px 0 0;">{counts?.adults ?? 0}</p></div>
-        <div class="card"><p class="label muted">Children</p><p style="font-size:32px;margin:4px 0 0;">{counts?.children ?? 0}</p></div>
-        <div class="card"><p class="label muted">Unconfirmed</p><p style="font-size:32px;margin:4px 0 0;">{unknown}</p></div>
-      </div>
+  )}
 
-      {unknown > 0 && (
-        <p class="notice">
-          <strong>{unknown} {unknown === 1 ? 'person is' : 'people are'} not marked as adult or child.</strong>
-          The Breeze export had no age, birthday or family role for them. Until that is
-          set they are treated as children — kept out of the directory and counted as
-          children in attendance. <a href="/people?filter=unknown">Review them</a>.
-        </p>
-      )}
-    </>
+  {total > 0 && unknown > 0 && (
+    <p class="notice">
+      <strong>{unknown} {unknown === 1 ? 'person is' : 'people are'} not marked as adult or child.</strong>
+      The Breeze export had no age, birthday or family role for them. Until that is
+      set they are treated as children — kept out of the directory and counted as
+      children in attendance. <a href="/people?filter=unknown">Review them</a>.
+    </p>
   )}
 
   {/* The four most-used screens, as targets big enough to hit on a phone
@@ -137,13 +140,35 @@ const unknown = counts?.unknown ?? 0;
 <style>
   /* Four squares. Two-up on a phone, which keeps them square there as well —
      a 4-wide row on a 375px screen gives tiles too small to label. */
+  /* minmax(0, …) and not a plain 1fr.
+   *
+   * A 1fr track has an AUTO minimum, which is min-content — and on a tile with
+   * `aspect-ratio`, min-content width is derived from the height the text
+   * needs. So the two-up phone layout was sizing its columns from how tall
+   * "Take attendance / Start or reopen a service" wraps, producing 159.6px
+   * tracks inside a 331px grid and pushing the last tile 2px past the right
+   * edge of every card on the page. Flooring the track at 0 makes the columns
+   * a pure division of the row, which is the only way these line up at every
+   * width rather than at the one that was checked. */
   .quick {
-    display: grid; grid-template-columns: repeat(4, 1fr);
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 14px; margin-bottom: 26px;
   }
   .quick a {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 9px; text-align: center; aspect-ratio: 1; max-height: 200px;
+    gap: 9px; text-align: center;
+    /* `width: 100%` is load-bearing, not tidiness.
+     *
+     * Without it the tile has no definite width, so `aspect-ratio` drives BOTH
+     * dimensions off `max-height` — every tile came out 200px wide inside a
+     * 247px grid track, and the row finished 48px short of the right edge of
+     * every card above and below it. Stating the width makes it definite, and
+     * aspect-ratio then only fills in the height, which max-height is free to
+     * cap without pulling the width in after it.
+     *
+     * So: as wide as its track at every size, and square until a square would
+     * be taller than 200px. */
+    width: 100%; aspect-ratio: 1; max-height: 200px;
     padding: 16px 12px; border-radius: var(--radius-lg);
     border: 1px solid var(--hair); background: rgba(255, 255, 255, .94);
     color: var(--ink); text-decoration: none;
@@ -157,7 +182,7 @@ const unknown = counts?.unknown ?? 0;
   .quick a:hover .quick__n { color: rgba(244, 239, 231, .8); }
 
   @media (max-width: 720px) {
-    .quick { grid-template-columns: repeat(2, 1fr); }
+    .quick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (prefers-reduced-motion: reduce) {
     .quick a { transition: none; }

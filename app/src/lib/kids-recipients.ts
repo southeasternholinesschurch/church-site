@@ -17,7 +17,7 @@ import type { SendScope } from './permissions.ts';
  * SMS webhook — and this builder treats an opt-out recorded in EITHER table as
  * final. If you are about to merge these two builders "to remove the
  * duplication", what you would actually remove is the reason the congregation's
- * counts are honest. Read §7.2 of handoff/SETUP.md step 16 first.
+ * counts are honest. Read §7.2 of handoff/BRIEF-kids.md first.
  */
 
 export interface KidsRecipient {
@@ -59,7 +59,6 @@ export async function buildKidsAudience(db: Db, scope: SendScope | null): Promis
   // everybody — see kidsSendScope.
   if (scope !== 'all' && scope.length === 0) return { ...EMPTY };
 
-  const child = alias(schema.people, 'child');
   const member = alias(schema.people, 'member');
 
   const rows = await db.select({
@@ -69,12 +68,11 @@ export async function buildKidsAudience(db: Db, scope: SendScope | null): Promis
     memberId: schema.kidGuardians.memberPersonId,
     memberPhone: member.phoneE164,
     memberConsent: member.smsConsent,
-    childFirstName: child.firstName,
+    childFirstName: schema.kids.firstName,
   }).from(schema.kidGuardians)
-    // The child, for their name and to skip archived ones.
-    .innerJoin(child, eq(child.id, schema.kidGuardians.personId))
-    // Their Fairhaven Kids profile, which carries the route the scope filters on.
-    .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.kidGuardians.personId))
+    // The child — Fairhaven Kids' own list — for their name, their route (what the
+    // scope filters on) and to skip archived ones.
+    .innerJoin(schema.kids, eq(schema.kids.id, schema.kidGuardians.kidId))
     /*
      * LEFT join, and this is the line the first attempt got wrong. An inner
      * join here would silently drop every guardian who is NOT a member — which
@@ -83,8 +81,8 @@ export async function buildKidsAudience(db: Db, scope: SendScope | null): Promis
      */
     .leftJoin(member, eq(member.id, schema.kidGuardians.memberPersonId))
     .where(and(
-      eq(child.archived, false),
-      scope === 'all' ? undefined : inArray(schema.kidProfiles.routeId, scope),
+      eq(schema.kids.archived, false),
+      scope === 'all' ? undefined : inArray(schema.kids.routeId, scope),
     ));
 
   /*

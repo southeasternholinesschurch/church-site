@@ -63,7 +63,7 @@ export const isIsoDate = (v: string | null | undefined): boolean => ISO.test((v 
  * `days` after an ISO date, as an ISO date.
  *
  * Noon UTC, never `new Date(iso)` — that is UTC midnight, which in
- * Indianapolis is the evening BEFORE, and is how this project once shipped an
+ * Fairhaven is the evening BEFORE, and is how this project once shipped an
  * off-by-one day on the public site. addDays in lib/roster.ts carries the same
  * note for the same reason.
  */
@@ -296,7 +296,7 @@ export interface SheetTiming {
  * press Close, so the dates do it.
  *
  * `today` is the church's date, passed in — a Worker's own date is UTC, and
- * after 8pm in Indianapolis that is already tomorrow.
+ * after 8pm in Fairhaven that is already tomorrow.
  */
 export function closedReason(
   sheet: SheetTiming, slotDates: (string | null)[], today: string,

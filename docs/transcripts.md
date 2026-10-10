@@ -26,9 +26,19 @@ Google Cloud Console → APIs & Services → Credentials → *Create credentials
 client secret.
 
 If it asks you to configure a consent screen first: user type **External**,
-fill in the name and your email, and add yourself as a **test user**. It never
-needs verifying or publishing, because you are the only person who will ever
-use it.
+fill in the name and your email, and add yourself as a **test user**.
+
+**Then publish it, and do not skip this.** Google Cloud Console →
+console.cloud.google.com/auth/audience → **Publish app**, so the status reads
+*In production* rather than *Testing*. It still does not need Google's
+verification — you are the only user, and the "unverified app" warning at
+consent time is expected; click **Advanced → Go to (app name)**.
+
+This page used to say publishing was unnecessary. It is the single most
+important step here. **A Testing-status app expires every refresh token it
+issues after seven days**, so the importer works for a week and then fails
+every night until somebody notices. It did exactly that from 19 to 22
+September 2026.
 
 **2. Grant consent once**, signed in as the account that owns the channel:
 
@@ -49,8 +59,13 @@ GOOGLE_REFRESH_TOKEN
 ```
 
 The refresh token is a password. It grants access to the channel until it is
-revoked at https://myaccount.google.com/permissions. It does not expire on its
-own, but Google does drop one that has gone unused for six months.
+revoked at https://myaccount.google.com/permissions, and Google drops one that
+has gone unused for six months.
+
+It does not otherwise expire **provided step 1's publishing was done**. If the
+app is still in Testing, it dies after seven days no matter what. The symptom
+is `token refresh failed 400: Token has been expired or revoked.` in the
+Actions log, and a commit reading `TRANSCRIPTS FAILED`.
 
 **4. Try it on a single sermon before trusting it with sixty:**
 

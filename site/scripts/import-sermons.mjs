@@ -61,7 +61,7 @@ const PRUNE = args.has('--prune');
 const STRICT = args.has('--strict');
 /**
  * The site carries a rolling window, not the whole catalogue — see
- * SERMON_WINDOW_MONTHS in src/lib/content.ts. Importing four years of services
+ * SERMON_IMPORT_MONTHS in src/lib/content.ts. Importing four years of services
  * would create hundreds of pages that age out of the site immediately, so the
  * import is bounded the same way. `--limit` caps it further for a first run.
  */
@@ -119,7 +119,7 @@ function optional(part) {
 
 /**
  * Both title formats:
- *   "August 23, 2026 | Sunday Morning Worship | Pastor Reeve | The Narrow Gate"
+ *   "August 23, 2026 | Sunday Morning Worship | Pastor Alan Reeve | The Narrow Gate"
  *   "August 23, 2026 Sunday Morning Worship"   (legacy — existing uploads)
  */
 function parseServiceTitle(title) {
@@ -180,18 +180,65 @@ async function fetchViaRss() {
  */
 class QuotaExceeded extends Error {}
 
+/**
+ * A failure worth trying again, as opposed to one worth reporting.
+ *
+ * 5xx and 429 are YouTube having a moment; everything else is us. The
+ * distinction matters because retrying a 403 would spend quota on a request
+ * that is going to be refused again, and quota is the binding constraint here.
+ */
+const TRANSIENT = new Set([429, 500, 502, 503, 504]);
+const RETRIES = 3;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function api(endpoint, params) {
   const url = new URL(`https://www.googleapis.com/youtube/v3/${endpoint}`);
   for (const [k, v] of Object.entries({ ...params, key: KEY })) url.searchParams.set(k, v);
-  const res = await fetch(url);
-  if (!res.ok) {
+
+  /*
+   * RETRIED, because one bad second should not cost the whole night.
+   *
+   * A full catalogue is a dozen-odd paginated calls, and on 2026-10-03 the
+   * tenth of them came back
+   *
+   *     "The service is currently unavailable." reason: backendError
+   *
+   * — Google's own backend, for one request, in the middle of a run that was
+   * otherwise fine. Without a retry that ends the job, skips the transcripts,
+   * commits nothing, and mails a failure that says nothing is wrong. The real
+   * damage is not the missed night; it is one more red email that turns out to
+   * mean nothing, in an inbox where that lesson has already been learned twice.
+   *
+   * Three attempts, backing off, and a network throw counts the same as a 503:
+   * `fetch` rejects rather than returning a status when the connection itself
+   * fails, and that is the same kind of bad luck.
+   */
+  let lastErr;
+  for (let attempt = 1; attempt <= RETRIES; attempt++) {
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      lastErr = new Error(`YouTube API ${endpoint} -> ${err.message}`);
+      if (attempt === RETRIES) break;
+      console.error(`  ${endpoint}: ${err.message} — retrying (${attempt}/${RETRIES - 1})`);
+      await sleep(attempt * 2000);
+      continue;
+    }
+
+    if (res.ok) return res.json();
+
     const body = await res.text().catch(() => '');
+    // Quota is final for the day. Saying so plainly beats three more refusals.
     if (res.status === 403 && /quotaExceeded/i.test(body)) {
       throw new QuotaExceeded(`YouTube API quota is spent for today (${endpoint}).`);
     }
-    throw new Error(`YouTube API ${endpoint} -> ${res.status}. ${body.slice(0, 300)}`);
+    lastErr = new Error(`YouTube API ${endpoint} -> ${res.status}. ${body.slice(0, 300)}`);
+    if (!TRANSIENT.has(res.status) || attempt === RETRIES) throw lastErr;
+    console.error(`  ${endpoint}: ${res.status} from YouTube — retrying (${attempt}/${RETRIES - 1})`);
+    await sleep(attempt * 2000);
   }
-  return res.json();
+  throw lastErr;
 }
 
 /** Full catalogue. Paginates the uploads playlist, then batches for durations. */
@@ -392,10 +439,11 @@ function isPristine(raw) {
  * twice under two names.
  *
  * The slug is date + service type, but the SERVICE TYPE comes from the YouTube
- * title, and titles get edited after the fact. A stream that goes up as
- * "Evening Worship" is imported as <date>-other; retitled to "Sunday School
- * and Evening Worship", the next night's run files it again as
- * <date>-sunday-evening. Two pages, one service, the same transcript on both.
+ * title, and titles get edited after the fact. On 13 September the stream went
+ * up as "Evening Worship", imported as 2026-09-13-other, was retitled to
+ * "Sunday School and Evening Worship", and the next night's run filed it again
+ * as 2026-09-13-sunday-evening. Two pages, one service, the same transcript on
+ * both.
  *
  * The video id is the identity; the slug is only a filename.
  */
@@ -495,15 +543,34 @@ console.log(DRY
   ? `DRY RUN — would add ${written}, update ${updated}, leave ${kept} unchanged.`
   : `Added ${written}, updated ${updated}, left ${kept} unchanged.`);
 
-// Ageing out of the window already hides a service from the site, so pruning
-// is housekeeping, not correctness. Opt-in for that reason.
+/*
+ * Pruning is housekeeping for services that are nothing but a video embed.
+ *
+ * It is NEVER housekeeping for a service somebody has cleaned and published:
+ * that markdown body is hours of review, and this deletes the file. The
+ * nightly job ran with --prune until it was two days from removing
+ * 2026-03-15-sunday-evening.md with 3,540 reviewed words inside it.
+ *
+ * The six months is how far back to REACH when importing. It is not how long
+ * to keep what has been imported.
+ */
+function hasTranscript(file) {
+  const m = /^---\n[\s\S]*?\n---\n([\s\S]*)$/.exec(fs.readFileSync(path.join(OUT_DIR, file), 'utf8'));
+  return (m ? m[1] : '').trim().length > 0;
+}
+
 if (PRUNE) {
-  const stale = fs.existsSync(OUT_DIR)
+  const aged = fs.existsSync(OUT_DIR)
     ? fs.readdirSync(OUT_DIR).filter((f) => /^\d{4}-\d{2}-\d{2}-/.test(f) && f.slice(0, 10) < cutoffStr)
     : [];
+  const written = aged.filter(hasTranscript);
+  const stale = aged.filter((f) => !hasTranscript(f));
   for (const f of stale) if (!DRY) fs.unlinkSync(path.join(OUT_DIR, f));
-  console.log(`${DRY ? 'Would prune' : 'Pruned'} ${stale.length} file(s) older than ${cutoffStr}.`);
+  console.log(`${DRY ? 'Would prune' : 'Pruned'} ${stale.length} empty file(s) older than ${cutoffStr}.`);
+  if (written.length) {
+    console.log(`Kept ${written.length} older service(s) that carry a transcript — those are not housekeeping.`);
+  }
 } else {
-  console.log(`(Files older than ${cutoffStr} are hidden by the site's rolling window but kept on disk. --prune removes them.)`);
+  console.log(`(Files older than ${cutoffStr} are kept. --prune removes the ones with no transcript.)`);
 }
 if (DRY) console.log('Re-run with --write to actually create them.');

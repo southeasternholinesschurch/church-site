@@ -20,7 +20,7 @@
  *
  *   npm test
  */
-import { stripEditorNotes, hasEditorNotes } from '../src/lib/site-sermons.ts';
+import { stripEditorNotes, hasEditorNotes, draftAlreadyPublished } from '../src/lib/site-sermons.ts';
 import { stripEditorNotes as stripMjs, hasEditorNotes as hasMjs }
   from '../../site/scripts/lib/editor-notes.mjs';
 
@@ -71,6 +71,47 @@ eq('hasEditorNotes agrees (app)', hasEditorNotes(`${SERMON}\n\n<!-- editor's not
 eq('hasEditorNotes agrees (script)', hasMjs(`${SERMON}\n\n<!-- editor's notes -->\n- x`), true);
 eq('hasEditorNotes on a clean sermon (app)', hasEditorNotes(SERMON), false);
 eq('hasEditorNotes on a clean sermon (script)', hasMjs(SERMON), false);
+
+/* ==== has this draft already been published? ============================= */
+
+/**
+ * The judgement behind finishing a half-completed publish.
+ *
+ * Publishing writes the sermon and then deletes the draft — two calls, and the
+ * second can fail on its own. When it does, the sermon is live and the draft
+ * survives, and the screen used to refuse every attempt to tidy up: the text it
+ * objected to was the text this very draft had put there.
+ *
+ * So publishing now finishes the job when the page already says exactly what
+ * the draft says. The danger is the other direction — deleting a draft
+ * somebody still wants, which cannot be undone from the dashboard — so this is
+ * an exact match after the same cut publishing makes, never a resemblance.
+ */
+const PREACHED = '## The choice of a donkey\n\nThroughout his earthly ministry, Jesus had been careful.';
+const MARGINALIA = "<!-- editor's notes -->\n- Ephesians 4:2's \"lowliness\" came through as \"loneliness\".";
+
+eq('the page holds exactly what the draft says',
+   draftAlreadyPublished(PREACHED, PREACHED), true);
+
+// Publishing cuts the notes, so the page will never carry them. Comparing
+// without cutting would call every real half-done publish a mismatch.
+eq('and still does when the draft carries editor notes',
+   draftAlreadyPublished(PREACHED, `${PREACHED}\n\n${MARGINALIA}\n`), true);
+
+eq('surrounding whitespace is not a difference',
+   draftAlreadyPublished(`\n${PREACHED}\n\n`, `${PREACHED}\n`), true);
+
+// THE ONE THAT PROTECTS SOMEBODY'S WORK. A draft that says something the page
+// does not is unpublished work, whatever else is true, and must survive.
+eq('a draft saying something different is NOT published',
+   draftAlreadyPublished(PREACHED, `${PREACHED}\n\nAnd one more thing he said.`), false);
+eq('nor is one the page merely starts with',
+   draftAlreadyPublished(PREACHED, PREACHED.slice(0, 40)), false);
+
+// An empty page is never a match, or the first publish would delete its own
+// source before it had written anything.
+eq('an empty page is never a match', draftAlreadyPublished('', PREACHED), false);
+eq('nor is a page of whitespace', draftAlreadyPublished('   \n\n ', PREACHED), false);
 
 console.log(fail === 0 ? '\nall passed' : `\n${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;

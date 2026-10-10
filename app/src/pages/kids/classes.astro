@@ -100,8 +100,8 @@ if (Astro.request.method === 'POST') {
            * teacher looks, and quietly moving six children is not a thing a
            * toggle should do. The director moves them first, deliberately.
            */
-          const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kidProfiles)
-            .where(eq(schema.kidProfiles.classId, id));
+          const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kids)
+            .where(eq(schema.kids.classId, id));
           if ((n?.c ?? 0) > 0) {
             error = `${n!.c} ${n!.c === 1 ? 'child is' : 'children are'} still in ${c.name}. `
                   + 'Move them to another class first.';
@@ -231,8 +231,8 @@ if (Astro.request.method === 'POST') {
           // Same rule as a class: a route with children riding it is not
           // something to switch off by accident. Their pickup is somebody's
           // Sunday morning.
-          const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kidProfiles)
-            .where(eq(schema.kidProfiles.routeId, id));
+          const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kids)
+            .where(eq(schema.kids.routeId, id));
           if ((n?.c ?? 0) > 0) {
             error = `${n!.c} ${n!.c === 1 ? 'child rides' : 'children ride'} ${r.name}. `
                   + 'Move them off it first.';
@@ -255,13 +255,13 @@ const classes = await db.select({
   description: schema.kidClasses.description,
   minAge: schema.kidClasses.minAge, maxAge: schema.kidClasses.maxAge,
   active: schema.kidClasses.active,
-  children: sql<number>`(select count(*) from kid_profiles kp where kp.class_id = kid_classes.id)`,
+  children: sql<number>`(select count(*) from kids k where k.class_id = kid_classes.id)`,
 }).from(schema.kidClasses).orderBy(asc(schema.kidClasses.sort), asc(schema.kidClasses.id));
 
 const routes = await db.select({
   id: schema.kidRoutes.id, name: schema.kidRoutes.name, notes: schema.kidRoutes.notes,
   active: schema.kidRoutes.active,
-  children: sql<number>`(select count(*) from kid_profiles kp where kp.route_id = kid_routes.id)`,
+  children: sql<number>`(select count(*) from kids k where k.route_id = kid_routes.id)`,
 }).from(schema.kidRoutes).orderBy(asc(schema.kidRoutes.name));
 
 const teachers = await db.select({

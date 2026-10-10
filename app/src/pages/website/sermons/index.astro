@@ -57,10 +57,20 @@ const waiting = data?.rows.filter((r) => r.hasDraft).length ?? 0;
                   {r.speaker && <><br /><span class="muted" style="font-size:13px;">{r.speaker}</span></>}
                 </td>
                 <td data-label="Page text">
-                  {r.hasDraft
-                    ? <span style="color:var(--red); font-weight:700;">draft waiting</span>
-                    : r.hasBody
-                      ? <span class="muted">published</span>
+                  {/*
+                    PAGE TEXT DECIDES FIRST. This used to ask about the draft
+                    file before asking whether the sermon had any text, so a
+                    published sermon whose draft was left behind read red as
+                    "draft waiting" forever. The pastor saved one four times over a
+                    week, each save worked, and each time the same red word came
+                    back — the sermon had been live the whole time.
+                  */}
+                  {r.hasBody
+                    ? r.hasDraft
+                      ? <><span class="muted">published</span>{' '}<span class="chip chip--warn">draft left over</span></>
+                      : <span class="muted">published</span>
+                    : r.hasDraft
+                      ? <span style="color:var(--red); font-weight:700;">draft waiting</span>
                       : r.hasTranscript
                         ? <span class="muted">transcript only</span>
                         : <span class="muted" style="opacity:.6;">—</span>}

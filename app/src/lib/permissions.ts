@@ -53,6 +53,9 @@ export const KIDS_ROOT = '/kids';
 const KIDS_DIRECTOR_ONLY = [
   '/kids/classes',
   '/kids/settings',
+  // The hub that links to the structural screens below. Director-only for the
+  // same reason they are, so a teacher is not offered a door they cannot open.
+  '/kids/setup',
   // Registering a check-in tablet, and pairing one. §4 lists it with the other
   // structural acts a teacher may not do.
   '/kids/kiosk',
@@ -65,7 +68,7 @@ const KIDS_DIRECTOR_ONLY = [
  * Granting access is the one thing an editor has never been able to do — and
  * now, publishing to the public website.
  *
- * the pastor's call. Worth stating what it costs: the /website screens are the only
+ * The pastor's call. Worth stating what it costs: the /website screens are the only
  * way to change service times, and only an admin can reach them. If a
  * secretary ever needs to do that, this is the line to revisit rather than
  * handing out an admin role.

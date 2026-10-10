@@ -52,51 +52,35 @@ if (Astro.request.method === 'POST') {
     error = 'That date of birth does not look right.';
   } else {
     const at = nowIso();
-    const [created] = await db.insert(schema.people).values({
+    /*
+     * Into Fairhaven Kids' own list, never the church's. A child added here does not
+     * appear on the People tab, at church check-in or in any church text — see
+     * the note on `kids` in the schema.
+     */
+    const [created] = await db.insert(schema.kids).values({
       firstName, lastName,
-      adultChild: 'child',
       birthday: birthday || null,
       addressStreet: orNull('addressStreet'), addressCity: orNull('addressCity'),
       addressState: orNull('addressState'), addressZip: orNull('addressZip'),
-      /*
-       * NEVER in the directory. This is a standing rule of the whole app, not a
-       * default somebody may flip: the member directory is adults who have
-       * consented, and a child appearing in it is the exact failure the design
-       * guards against. Set explicitly here rather than left to the column
-       * default, so that reading this code answers the question.
-       */
-      includeInDirectory: false,
-      directoryStatus: 'none',
-      // A CHILD's own consent is meaningless — they have no phone here, and
-      // anything sent about them goes to a guardian.
-      smsConsent: 'unknown',
-      archived: false,
-      createdAt: at, updatedAt: at,
-    }).returning({ id: schema.people.id });
-
-    const personId = created!.id;
-
-    /*
-     * The profile, then the guardian. Not one transaction: D1 has no
-     * transaction here, and the failure modes are both recoverable and visible
-     * — a person with no profile shows up under "Not in Fairhaven Kids" on the children
-     * list, and a child with no grown-up is obvious on their own page. Neither
-     * is silent, which is what would make a transaction worth reaching for.
-     */
-    await db.insert(schema.kidProfiles).values({
-      personId,
       classId: Number(get('classId')) || null,
       routeId: Number(get('routeId')) || null,
       allergies: orNull('allergies'),
       medicalNotes: orNull('medicalNotes'),
+      inClub: get('inClub') === '1',
       createdAt: at, updatedAt: at,
-    });
+    }).returning({ id: schema.kids.id });
 
+    const kidId = created!.id;
+
+    /*
+     * The child, then the guardian. Not one transaction: D1 has no transaction
+     * here, and a child with no grown-up is obvious on their own page.
+     */
     const gName = get('guardianName');
     if (gName) {
       const gPhone = orNull('guardianPhone');
       await db.insert(schema.kidGuardians).values({
-        personId, name: gName,
+        kidId, name: gName,
         relationship: orNull('guardianRelationship'),
         phone: gPhone, phoneE164: toE164(gPhone),
         email: orNull('guardianEmail'),
@@ -114,7 +98,7 @@ if (Astro.request.method === 'POST') {
       });
     }
 
-    return Astro.redirect(`/kids/child/${personId}?saved=created`, 303);
+    return Astro.redirect(`/kids/child/${kidId}?saved=created`, 303);
   }
 }
 
@@ -129,11 +113,11 @@ if (Astro.request.method === 'POST') {
 const typedFirst = (v.firstName ?? '').trim();
 const typedLast = (v.lastName ?? '').trim();
 const possibleDuplicates = typedFirst && typedLast
-  ? await db.select({ id: schema.people.id, firstName: schema.people.firstName,
-                      lastName: schema.people.lastName, birthday: schema.people.birthday })
-      .from(schema.people)
+  ? await db.select({ id: schema.kids.id, firstName: schema.kids.firstName,
+                      lastName: schema.kids.lastName, birthday: schema.kids.birthday })
+      .from(schema.kids)
       .where(and(
-        eq(schema.people.archived, false),
+        eq(schema.kids.archived, false),
         sql`lower(first_name) = ${typedFirst.toLowerCase()}`,
         sql`lower(last_name) = ${typedLast.toLowerCase()}`,
       )).limit(4)
@@ -143,7 +127,8 @@ const possibleDuplicates = typedFirst && typedLast
   <p style="margin:0 0 6px;"><a href="/kids/children" style="font-size:15px;">← All children</a></p>
   <h1>Add a child</h1>
   <p class="k-muted" style="margin:-4px 0 22px;">
-    For a child who is not in the church’s records — a bus-ministry child, or a visitor who keeps coming.
+    Every child in Fairhaven Kids is added here — bus-ministry children, visitors, and church families’ children
+    alike. Fairhaven Kids keeps its own list, so nobody added here appears in the church’s People list.
   </p>
 
   {error && (
@@ -178,10 +163,6 @@ const possibleDuplicates = typedFirst && typedLast
         <label class="k-field"><span>Date of birth</span>
           <input type="date" name="birthday" value={v.birthday ?? ''} /></label>
       </div>
-      <p class="k-muted" style="margin:-4px 0 0; font-size:14px;">
-        A date of birth is optional — most bus-ministry children arrive without one.
-        It only decides which class we suggest.
-      </p>
     </div>
 
     <div class="k-card" style="margin-bottom:16px;">
@@ -209,13 +190,14 @@ const possibleDuplicates = typedFirst && typedLast
                placeholder="Peanuts — EpiPen in the office" autocomplete="off" /></label>
       <label class="k-field" style="margin-bottom:0;"><span>Medical notes</span>
         <textarea name="medicalNotes" rows="2">{v.medicalNotes ?? ''}</textarea></label>
+      <label style="display:flex; gap:10px; align-items:center; font-size:15px; margin-top:14px;">
+        <input type="checkbox" name="inClub" value="1" checked={v.inClub === '1'} />
+        <span>Comes to Kids Club (Wednesday)</span>
+      </label>
     </div>
 
     <div class="k-card" style="margin-bottom:16px;">
       <h2 style="margin-top:0;">Where they live</h2>
-      <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
-        Only needed for a child on a bus route — it is how the driver finds them.
-      </p>
       <label class="k-field"><span>Street</span>
         <input name="addressStreet" value={v.addressStreet ?? ''} autocomplete="off" /></label>
       <div class="k-grid">
@@ -230,9 +212,6 @@ const possibleDuplicates = typedFirst && typedLast
 
     <div class="k-card" style="margin-bottom:18px;">
       <h2 style="margin-top:0;">A grown-up</h2>
-      <p class="k-muted" style="margin:-6px 0 14px; font-size:14px;">
-        Whoever we ring about this child. You can add more later.
-      </p>
       <div class="k-grid">
         <label class="k-field"><span>Name</span>
           <input name="guardianName" value={v.guardianName ?? ''} autocomplete="off" /></label>

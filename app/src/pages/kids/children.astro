@@ -1,7 +1,7 @@
 ---
 import KidsLayout from '../../layouts/KidsLayout.astro';
 import { getDb, schema } from '../../db';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { churchToday } from '../../lib/services';
 import { ageOn, classMismatch, type AgeClass } from '../../lib/kids';
 
@@ -12,10 +12,8 @@ import { ageOn, classMismatch, type AgeClass } from '../../lib/kids';
  * seventy children and ten volunteers. There is no per-class or per-route
  * filtering of what anyone may look at.
  *
- * Children who are in `people` but have NO kid_profile are listed too, in their
- * own group at the bottom. They are the church's children who have not been
- * enrolled, and leaving them off the page would make them invisible to the one
- * person who could enrol them.
+ * Fairhaven Kids' own list (`kids`) only — never the church's `people`. A church
+ * family's child who comes to Fairhaven Kids is added here with "Add a child".
  */
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
@@ -26,26 +24,24 @@ const classRows = await db.select().from(schema.kidClasses)
   .orderBy(asc(schema.kidClasses.sort));
 
 const children = await db.select({
-  id: schema.people.id,
-  firstName: schema.people.firstName,
-  lastName: schema.people.lastName,
-  birthday: schema.people.birthday,
-  photoKey: schema.people.photoKey,
-  classId: schema.kidProfiles.classId,
-  allergies: schema.kidProfiles.allergies,
-  routeId: schema.kidProfiles.routeId,
+  id: schema.kids.id,
+  firstName: schema.kids.firstName,
+  lastName: schema.kids.lastName,
+  birthday: schema.kids.birthday,
+  photoKey: schema.kids.photoKey,
+  classId: schema.kids.classId,
+  allergies: schema.kids.allergies,
+  routeId: schema.kids.routeId,
   routeName: schema.kidRoutes.name,
-  enrolled: schema.kidProfiles.personId,
   /* Summed per child in the one query rather than a stored column. At seventy
    * children this costs nothing, and it is the same number the profile shows
    * because it is computed the same way — a cached balance is how a list and a
    * page start disagreeing. */
-  bucks: sql<number>`(select coalesce(sum(delta), 0) from kid_ledger l where l.person_id = people.id)`,
-}).from(schema.people)
-  .leftJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
-  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
-  .where(and(eq(schema.people.adultChild, 'child'), eq(schema.people.archived, false)))
-  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+  bucks: sql<number>`(select coalesce(sum(delta), 0) from kid_ledger l where l.kid_id = kids.id)`,
+}).from(schema.kids)
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kids.routeId))
+  .where(eq(schema.kids.archived, false))
+  .orderBy(asc(schema.kids.lastName), asc(schema.kids.firstName));
 
 const ageClasses: AgeClass[] = classRows.map((c) => ({
   id: c.id, name: c.name, minAge: c.minAge, maxAge: c.maxAge,
@@ -81,32 +77,29 @@ const groups = [
   ...classGroups,
   { key: 'unplaced', name: 'Not yet in a class',
     note: 'Enrolled in Fairhaven Kids, but not in a class that is running.',
-    kids: rows.filter((r) => r.enrolled !== null && !shown.has(r.id)) },
-  { key: 'unenrolled', name: 'Not in Fairhaven Kids', note: 'Children in the church records who have not been added.',
-    kids: rows.filter((r) => r.enrolled === null) },
+    kids: rows.filter((r) => !shown.has(r.id)) },
 ].filter((g) => g.kids.length > 0);
 
 /* Children who have left. Kept findable — archiving is reversible and the only
  * page that can undo it is the child's own, so there has to be a way back to
  * them. Deliberately a short list at the bottom rather than mixed in. */
 const gone = await db.select({
-  id: schema.people.id,
-  firstName: schema.people.firstName,
-  lastName: schema.people.lastName,
-}).from(schema.people)
-  .innerJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.people.id))
-  .where(and(eq(schema.people.adultChild, 'child'), eq(schema.people.archived, true)))
-  .orderBy(asc(schema.people.lastName), asc(schema.people.firstName));
+  id: schema.kids.id,
+  firstName: schema.kids.firstName,
+  lastName: schema.kids.lastName,
+}).from(schema.kids)
+  .where(eq(schema.kids.archived, true))
+  .orderBy(asc(schema.kids.lastName), asc(schema.kids.firstName));
 
-const enrolled = rows.filter((r) => r.enrolled !== null).length;
+const enrolled = rows.length;
 const onRoute = rows.filter((r) => r.routeId !== null).length;
 const withAllergies = rows.filter((r) => r.allergies).length;
 ---
 <KidsLayout title="Children" user={user}>
   {Astro.url.searchParams.get('saved') === 'archived' && (
     <div class="k-card" style="border-left:5px solid #1f6b3a; margin-bottom:18px;">
-      That child has left Fairhaven Kids. Nothing was deleted — you can find them at the
-      bottom of this page and bring them back.
+      That child is archived from Fairhaven Kids. Nothing was deleted — you can find
+      them at the bottom of this page and bring them back.
     </div>
   )}
 
@@ -166,7 +159,7 @@ const withAllergies = rows.filter((r) => r.allergies).length;
         {gone.map((g) => (
           <a class="k-row" href={`/kids/child/${g.id}`}>
             <span class="k-row__name" style="opacity:.7;">{g.firstName} {g.lastName}</span>
-            <span class="k-row__tags"><span class="k-tag">left</span></span>
+            <span class="k-row__tags"><span class="k-tag">left Fairhaven Kids</span></span>
           </a>
         ))}
       </div>

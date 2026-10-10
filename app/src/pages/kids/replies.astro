@@ -1,5 +1,6 @@
 ---
 import KidsLayout from '../../layouts/KidsLayout.astro';
+import KidsMessageTabs from '../../components/KidsMessageTabs.astro';
 import { getDb, schema, nowIso } from '../../db';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
@@ -44,13 +45,12 @@ const scope = kidsSendScope(user.role, user.kidsCanText, assigned.map((a) => a.r
  * serve. A one-to-one answer to a parent who has just texted the church is a
  * different act: they started it, they are already opted in, and the
  * alternative is their message going unanswered because the only person
- * reading it happens to hold a different route. the pastor should narrow this if he
+ * reading it happens to hold a different route. The pastor should narrow this if he
  * disagrees; it is one condition.
  */
 const canReply = scope !== null;
 
 const member = alias(schema.people, 'member');
-const child = alias(schema.people, 'child');
 
 /** Every number that belongs to an Fairhaven Kids guardian, and who it is. */
 const guardianRows = await db.select({
@@ -58,14 +58,13 @@ const guardianRows = await db.select({
   guardianPhone: schema.kidGuardians.phoneE164,
   memberPhone: member.phoneE164,
   memberId: schema.kidGuardians.memberPersonId,
-  childFirstName: child.firstName,
+  childFirstName: schema.kids.firstName,
   routeName: schema.kidRoutes.name,
 }).from(schema.kidGuardians)
-  .innerJoin(child, eq(child.id, schema.kidGuardians.personId))
-  .leftJoin(schema.kidProfiles, eq(schema.kidProfiles.personId, schema.kidGuardians.personId))
-  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kidProfiles.routeId))
+  .innerJoin(schema.kids, eq(schema.kids.id, schema.kidGuardians.kidId))
+  .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kids.routeId))
   .leftJoin(member, eq(member.id, schema.kidGuardians.memberPersonId))
-  .where(eq(child.archived, false));
+  .where(eq(schema.kids.archived, false));
 
 /** number → who to show for it. Same resolution as the audience builder: a
  *  linked guardian's number comes from their member record. */
@@ -184,12 +183,13 @@ const threads = [...byNumber.entries()]
   })
   .sort((a, b) => b.last.id - a.last.id);
 
-const sentTo = Astro.url.searchParams.get('men');
+const sentTo = Astro.url.searchParams.get('sent');
 const when = (iso: string) => new Date(iso).toLocaleString('en-US', {
   dateStyle: 'medium', timeStyle: 'short', timeZone: CHURCH_TZ,
 });
 ---
 <KidsLayout title="Replies" user={user}>
+  <KidsMessageTabs active="replies" />
   <h1>Replies</h1>
   <p class="k-muted" style="margin:-4px 0 22px; max-width:640px;">
     What Fairhaven Kids families have texted back. These also appear in the church's main

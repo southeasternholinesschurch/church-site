@@ -2,11 +2,12 @@
 import AppLayout from '../../layouts/AppLayout.astro';
 import { readForm } from '../../lib/form';
 import { getDb, schema, nowIso } from '../../db';
-import { and, eq, gt, inArray } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import { photosEnabled, putPhoto, deletePhoto, sniffImage, MAX_UPLOAD_BYTES } from '../../lib/photos';
 import { createInvite, revokeAccess, getInviteTemplate, renderInvite } from '../../lib/directory';
 import { sendOne, smsConfigured, countSegments, toE164 } from '../../lib/sms';
 import { CHURCH_TZ } from '../../lib/services';
+import { archivePeople, restorePeople } from '../../lib/archive';
 
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
@@ -101,10 +102,62 @@ if (Astro.request.method === 'POST') {
   }
 
   if (act === 'restore' && person) {
-    await db.update(schema.people)
-      .set({ archived: false, updatedAt: nowIso() })
-      .where(eq(schema.people.id, person.id));
+    await restorePeople(db, [person.id]);
     return Astro.redirect(`/people/${person.id}?saved=restored`, 303);
+  }
+
+  /*
+   * Archiving, from the one page that is actually ABOUT this person.
+   *
+   * It has been possible all along — but only from the check-in screen, behind
+   * a "Manage list" toggle built for the volunteer holding the register. This
+   * page offered the undo and not the do, so somebody looking for it here, or
+   * on /people, found nothing and reasonably concluded it did not exist.
+   *
+   * Its own action, like restore, so it can never happen as a side effect of an
+   * ordinary save. The confirmation is the <details> fold below: two deliberate
+   * taps, with their name on the second one.
+   */
+  if (act === 'archive' && person) {
+    await archivePeople(db, [person.id]);
+    return Astro.redirect(`/people/${person.id}?saved=archived`, 303);
+  }
+
+  /*
+   * Copy a church child into Fairhaven Kids.
+   *
+   * Fairhaven Kids keeps its OWN list (`kids`) — see the note on it in the schema — so a
+   * church family's child who comes to Fairhaven Kids is two records. This makes the
+   * second from the first instead of typing it again: name, birthday, address.
+   * NOT notes (they may be pastoral and are not Fairhaven Kids' business) and NOT the
+   * photo (it is the directory's, and deleting one side would break the other).
+   * Nothing links the two afterwards, by design.
+   *
+   * A second press, or a child Fairhaven Kids already has, would make a double. So an
+   * exact match on name and birthday goes to the existing Fairhaven Kids child instead,
+   * unless the "add anyway" button below said otherwise.
+   */
+  if (act === 'copy-to-kids' && person) {
+    if (person.adultChild !== 'child' || person.archived) {
+      return Astro.redirect(`/people/${person.id}`, 303);
+    }
+    if (form.get('anyway') !== '1') {
+      const [same] = await db.select({ id: schema.kids.id }).from(schema.kids)
+        .where(and(
+          sql`lower(${schema.kids.firstName}) = lower(${person.firstName})`,
+          sql`lower(${schema.kids.lastName}) = lower(${person.lastName})`,
+          sql`${schema.kids.birthday} is ${person.birthday}`,
+        )).limit(1);
+      if (same) return Astro.redirect(`/kids/child/${same.id}`, 303);
+    }
+    const at = nowIso();
+    const [created] = await db.insert(schema.kids).values({
+      firstName: person.firstName, lastName: person.lastName, birthday: person.birthday,
+      addressStreet: person.addressStreet, addressCity: person.addressCity,
+      addressState: person.addressState, addressZip: person.addressZip,
+      createdAt: at, updatedAt: at,
+    }).returning({ id: schema.kids.id });
+    return Astro.redirect(`/kids/child/${created!.id}?saved=copied`, 303);
   }
   const str = (k: string) => { const val = form.get(k); return typeof val === 'string' && val.trim() ? val.trim() : null; };
   const firstName = str('firstName');
@@ -221,6 +274,19 @@ const memberOf = person
       .map((r) => r.groupId))
   : new Set<number>();
 
+/* Fairhaven Kids children with this child's name — likely the same child already
+ * copied over. Shown beside the Copy button so a double is a choice, not an
+ * accident. Children only: an adult has no business in Fairhaven Kids. */
+const kidsMatches = person && person.adultChild === 'child' && !person.archived
+  ? await db.select({ id: schema.kids.id, firstName: schema.kids.firstName,
+                      lastName: schema.kids.lastName, archived: schema.kids.archived })
+      .from(schema.kids)
+      .where(and(
+        sql`lower(${schema.kids.firstName}) = lower(${person.firstName})`,
+        sql`lower(${schema.kids.lastName}) = lower(${person.lastName})`,
+      )).limit(4)
+  : [];
+
 const v = person;
 const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
 ---
@@ -230,6 +296,7 @@ const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
 
   {saved === '1' && <p class="notice notice--ok">Saved.</p>}
   {saved === 'restored' && <p class="notice notice--ok">Restored — they are back on the check-in list.</p>}
+  {saved === 'archived' && <p class="notice notice--ok">Archived. They are off the check-in list and out of the directory — their attendance history is unchanged, and the banner above brings them back.</p>}
   {saved === 'invited' && <p class="notice notice--ok">Invite texted. The link keeps working for 30 days, however many times they open it.</p>}
   {saved === 'photo-saved' && <p class="notice notice--ok">Photo saved.</p>}
   {saved === 'photo-removed' && <p class="notice notice--ok">Photo removed.</p>}
@@ -470,6 +537,75 @@ const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
 
     <button class="btn" type="submit">{isNew ? 'Add person' : 'Save changes'}</button>
   </form>
+
+  {!isNew && v && v.adultChild === 'child' && !v.archived && (
+    <div class="card" style="max-width:640px; margin-top:28px;">
+      <p class="photo-h">Fairhaven Kids</p>
+      {kidsMatches.length > 0 ? (
+        <>
+          <p class="photo-note" style="margin-bottom:10px;">
+            Fairhaven Kids already has a child with this name:
+          </p>
+          <ul style="margin:0 0 14px; padding-left:20px;">
+            {kidsMatches.map((k) => (
+              <li><a href={`/kids/child/${k.id}`}>{k.firstName} {k.lastName}</a>{k.archived && ' (archived in Fairhaven Kids)'}</li>
+            ))}
+          </ul>
+          <details>
+            <summary class="fold" style="font-size:14px;">A different child with the same name?</summary>
+            <form method="POST" style="margin:12px 0 0;">
+              <input type="hidden" name="action" value="copy-to-kids" />
+              <input type="hidden" name="anyway" value="1" />
+              <button class="btn" type="submit">Copy {v.firstName} to Fairhaven Kids anyway</button>
+            </form>
+          </details>
+        </>
+      ) : (
+        <>
+          <p class="photo-note">
+            Fairhaven Kids keeps its own list of children. If {v.firstName} comes to Fairhaven Kids,
+            this copies their name, birthday and address over and opens their Fairhaven Kids
+            page, where you choose a class and route and add a guardian. Their church
+            record here is not changed.
+          </p>
+          <form method="POST" style="margin:0;">
+            <input type="hidden" name="action" value="copy-to-kids" />
+            <button class="btn" type="submit">Copy {v.firstName} to Fairhaven Kids</button>
+          </form>
+        </>
+      )}
+    </div>
+  )}
+
+  {/*
+    Archiving, folded shut.
+
+    A <details> rather than a confirm() dialog: everything on this page works
+    without JavaScript and this is not the control to make the exception for.
+    It also gives the second step somewhere to explain itself, which a browser
+    dialog does not — and the button carries their NAME, so the last thing
+    tapped says who it is about.
+  */}
+  {!isNew && v && !v.archived && (
+    <details class="card danger" style="margin-top:28px;">
+      <summary class="fold">Archive this person</summary>
+      <p class="muted" style="max-width:62ch; margin:14px 0 16px; font-size:15px;">
+        Archiving takes {v.firstName} off the check-in list, out of the member
+        directory and out of every texting audience. <strong>Nothing is
+        deleted</strong> — their attendance history, groups and message log stay
+        exactly as they are, and you can bring them back from this same page or
+        from the Archived list on the People tab.
+      </p>
+      <p class="muted" style="max-width:62ch; margin:0 0 16px; font-size:15px;">
+        This is what to use for somebody who has left the church, or for the
+        second of two records for the same person.
+      </p>
+      <form method="POST" style="margin:0;">
+        <input type="hidden" name="action" value="archive" />
+        <button class="btn btn--danger" type="submit">Archive {v.firstName} {v.lastName}</button>
+      </form>
+    </details>
+  )}
 </AppLayout>
 
 <style>
@@ -496,6 +632,8 @@ const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
   .photo-acts input[type=file] { font: inherit; font-size: 14px; min-width: 0; max-width: 100%; }
   .linkbtn { font: inherit; font-size: 14px; background: none; border: 0; padding: 0;
              color: var(--red); text-decoration: underline; cursor: pointer; }
+
+  .danger { border-color: var(--red); }
 
   .sms__warn { margin: 8px 0 0; font-size: 14px; color: var(--red-deep);
                background: #f7e9e9; border-left: 3px solid var(--red);

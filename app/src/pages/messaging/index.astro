@@ -9,6 +9,8 @@ import { smsConfigured, COST_PER_SEGMENT_USD } from '../../lib/sms';
 import { getBirthdaySettings, setBirthdaySettings } from '../../lib/birthday-settings';
 import { invalidScheduleReason, WEEKDAYS, localNow, CHURCH_TZ } from '../../lib/schedules';
 import Replies from '../../components/Replies.astro';
+import { parsePersonIds } from '../../lib/archive';
+import { parseGroupTarget, resolveGroup, activePeople, memberCount, addToGroup } from '../../lib/groups';
 
 const user = Astro.locals.user!;
 const env = Astro.locals.runtime.env;
@@ -26,6 +28,45 @@ let scheduleError: string | null = null;
 if (Astro.request.method === 'POST') {
   const form = await readForm(Astro.request);
   const action = String(form.get('action') ?? '');
+
+  /*
+   * "Save ticked as a group", from the Specific-people picker — so a set of
+   * people hand-picked once can be picked again next week in one go.
+   *
+   * Called by the script, NOT by a submit button inside the compose form: that
+   * form's submit becomes a real SEND when "When" is Now, and a second submit
+   * button would also become the one Enter presses. So this answers JSON and
+   * the page, and the message being written, stay exactly as they were.
+   *
+   * A name that matches an existing group adds to that group rather than
+   * failing, and says so. See lib/groups.ts.
+   */
+  if (action === 'save-group') {
+    const json = (o: unknown, status = 200) =>
+      new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+    const ids = parsePersonIds(form.getAll('person'));
+    const parsed = parseGroupTarget('', form.get('groupName'));
+    if (!ids.length) return json({ error: 'Tick some people first.' }, 400);
+    if ('error' in parsed) return json({ error: 'Give the group a name.' }, 400);
+    const existed = (await db.select({ id: schema.groups.id }).from(schema.groups)
+      .where(sql`lower(${schema.groups.name}) = lower(${parsed.target.kind === 'new' ? parsed.target.name : ''})`)
+      .limit(1)).length > 0;
+    const gid = await resolveGroup(db, parsed.target);
+    if (!gid) return json({ error: 'The group could not be saved.' }, 500);
+    const before = await memberCount(db, gid);
+    await addToGroup(db, gid, await activePeople(db, ids));
+    const total = await memberCount(db, gid);
+    const [g] = await db.select({ name: schema.groups.name }).from(schema.groups)
+      .where(eq(schema.groups.id, gid)).limit(1);
+    // The new group's audience, so the script can add it to "Send to" with the
+    // same counts every other option carries.
+    const a = await buildAudience(env, gid);
+    return json({
+      id: gid, name: g?.name ?? '', existed, added: total - before, total,
+      handsets: a.handsets.length, people: a.recipients.length,
+      noNumber: a.excluded.noNumber, optedOut: a.excluded.optedOut, noConsent: a.excluded.noConsent,
+    });
+  }
 
   if (action === 'birthdays') {
     birthdayError = await setBirthdaySettings(env, {
@@ -320,6 +361,13 @@ const sends = [...recent.reduce((m, r) => {
           {textable.length} people can be texted. Anyone without a number, or who
           has not opted in, is not on this list.
         </p>
+        {/* type="button", never submit — see the save-group handler above. */}
+        <div class="savegroup">
+          <input id="sg-name" type="text" maxlength="80" autocomplete="off"
+                 placeholder="Name for a group, e.g. Choir" aria-label="Group name" />
+          <button type="button" id="sg-btn" class="btn btn--ghost">Save ticked as a group</button>
+        </div>
+        <p id="sg-status" class="muted" style="margin:6px 0 0; font-size:14px;" aria-live="polite"></p>
       </div>
 
       <p class="muted" id="audience" style="margin:-8px 0 16px; font-size:15px;"
@@ -335,7 +383,7 @@ const sends = [...recent.reduce((m, r) => {
       <label class="field">
         <span>Message</span>
         <textarea name="body" id="body" rows="5"
-                  placeholder="This is the pastor with Fairhaven Community…"></textarea>
+                  placeholder="This is Pastor Alan with Fairhaven Community…"></textarea>
       </label>
 
       {/* Guidance, not a hardcoded prefix. A2P rules want the sender
@@ -571,6 +619,10 @@ const sends = [...recent.reduce((m, r) => {
 
   .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
   .pfilter { width:100%; max-width:340px; margin-bottom:8px; }
+  .savegroup { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;
+               padding-top:14px; border-top:1px solid var(--hair); }
+  .savegroup input { flex:1 1 220px; min-width:0; max-width:340px; min-height:44px; font:inherit;
+                     padding:8px 10px; border:1px solid var(--hair); border-radius:6px; }
   /* Scrolls rather than running to 75 rows — the picker has to stay a control
      on the page, not become the page. */
   .picker { max-height:230px; overflow-y:auto; border:1px solid var(--hair);
@@ -697,6 +749,61 @@ const sends = [...recent.reduce((m, r) => {
   groupSel.addEventListener('change', syncAudienceControl);
   whenSel.addEventListener('change', syncWhen);
   for (const p of picks) p.querySelector('input')?.addEventListener('change', renderAudience);
+
+  /*
+   * Save the ticked people as a group, without leaving the page or losing the
+   * message. On success the group joins the "Send to" list with its counts, so
+   * next week it is one choice instead of thirty ticks.
+   */
+  const sgName = document.getElementById('sg-name') as HTMLInputElement;
+  const sgBtn = document.getElementById('sg-btn') as HTMLButtonElement;
+  const sgStatus = document.getElementById('sg-status')!;
+  async function saveGroup() {
+    const ids = pickedBoxes().map((b) => b.value);
+    const name = sgName.value.trim();
+    if (!ids.length) { sgStatus.textContent = 'Tick some people first.'; return; }
+    if (!name) { sgStatus.textContent = 'Give the group a name first.'; sgName.focus(); return; }
+    const body = new URLSearchParams({ action: 'save-group', groupName: name });
+    for (const id of ids) body.append('person', id);
+    sgBtn.disabled = true;
+    sgStatus.textContent = 'Saving…';
+    try {
+      const r = await fetch(location.pathname, { method: 'POST', body,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      const d = await r.json() as {
+        error?: string; id: number; name: string; existed: boolean; added: number; total: number;
+        handsets: number; people: number; noNumber: number; optedOut: number; noConsent: number;
+      };
+      if (!r.ok || d.error) { sgStatus.textContent = d.error ?? 'That did not save.'; return; }
+      sgStatus.textContent = d.existed
+        ? `Added ${d.added} to the existing group “${d.name}” — it now has ${d.total}.`
+        : `Saved as “${d.name}” — ${d.total} ${d.total === 1 ? 'person' : 'people'}. It is in the Send to list now.`;
+      sgName.value = '';
+      // Into the dropdown (or its counts refreshed), just above "Specific people…".
+      let opt = [...groupSel.options].find((o) => o.value === String(d.id));
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = String(d.id);
+        opt.textContent = d.name;
+        groupSel.insertBefore(opt, [...groupSel.options].find((o) => o.value === 'people') ?? null);
+      }
+      opt.dataset.handsets = String(d.handsets);
+      opt.dataset.people = String(d.people);
+      opt.dataset.noNumber = String(d.noNumber);
+      opt.dataset.optedOut = String(d.optedOut);
+      opt.dataset.noConsent = String(d.noConsent);
+    } catch {
+      sgStatus.textContent = 'That did not save — check the connection and try again.';
+    } finally {
+      sgBtn.disabled = false;
+    }
+  }
+  sgBtn.addEventListener('click', saveGroup);
+  // Enter in the name box saves the group. Left alone it would submit the
+  // compose form — which, with "Send it now" chosen, is the send.
+  sgName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveGroup(); }
+  });
 
   // Narrow a 75-name list to the one you want without scrolling it.
   const pfilter = document.getElementById('pfilter') as HTMLInputElement | null;

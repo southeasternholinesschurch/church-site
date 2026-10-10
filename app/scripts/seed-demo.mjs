@@ -50,11 +50,12 @@ const out = [];
  * DELETE fails on a foreign key and the whole reseed stops.
  */
 out.push('DELETE FROM kiosk_devices;');
-out.push('DELETE FROM kid_cards; DELETE FROM kid_ledger;');
+out.push('DELETE FROM kid_cards; DELETE FROM kid_ledger; DELETE FROM kid_attendance; DELETE FROM kid_coming;');
 out.push('DELETE FROM attendance; DELETE FROM visitors; DELETE FROM services;');
 out.push('DELETE FROM message_log; DELETE FROM scheduled_messages; DELETE FROM message_schedules;');
 out.push('DELETE FROM people_groups; DELETE FROM groups; DELETE FROM directory_invites;');
-out.push('DELETE FROM kid_class_teachers; DELETE FROM kid_guardians; DELETE FROM kid_profiles;');
+out.push('DELETE FROM kid_notes; DELETE FROM kid_route_captains;');
+out.push('DELETE FROM kid_class_teachers; DELETE FROM kid_guardians; DELETE FROM kids;');
 out.push('DELETE FROM kid_classes; DELETE FROM kid_routes;');
 out.push('DELETE FROM signups; DELETE FROM signup_slots; DELETE FROM signup_sheets;');
 out.push('DELETE FROM people; DELETE FROM bulletins; DELETE FROM app_settings;');
@@ -168,7 +169,7 @@ for (const [cid, name, desc, lo, hi] of KID_CLASSES) {
  * /kids/classes is a feature you can see rather than an empty dropdown.
  */
 const KID_STAFF = [
-  ['marion', 'Marion S.', 'kids-director'],
+  ['felicia', 'Felicia S.', 'kids-director'],
   ['karen',   'Karen H.',   'kids'],
   ['bethany', 'Bethany R.', 'kids'],
   ['darrell', 'Darrell M.', 'kids'],
@@ -193,63 +194,86 @@ for (const [rid, name, notes] of KID_ROUTES) {
     VALUES (${rid}, ${q(name)}, ${q(notes)}, 1, datetime('now'));`);
 }
 
+// Who may text which route. Three states, one per route: Route 1 has two
+// captains, Route 2 has one, Route 3 has nobody — so the "add a captain" form
+// on /kids/classes is visible as well as the list. The kids_can_text flag goes
+// with the rows, the same as the set-captain action keeps them together.
+const CAPTAINS = [[2, 1], [4, 1], [4, 2]];
+for (const [staffId, routeId] of CAPTAINS) {
+  out.push(`INSERT INTO kid_route_captains (staff_id, route_id, created_at)
+    VALUES (${staffId}, ${routeId}, datetime('now'));`);
+}
+out.push(`UPDATE staff SET kids_can_text = 1 WHERE id IN (${[...new Set(CAPTAINS.map(([s]) => s))].join(', ')});`);
+
 const ALLERGIES = ['Peanuts — EpiPen in the office', 'Dairy', 'Bee stings',
                    'Penicillin', 'Eggs and tree nuts'];
 const RELATIONSHIPS = ['mother', 'father', 'grandmother', 'grandfather', 'aunt'];
 const classForAge = (age) => (KID_CLASSES.find(([, , , lo, hi]) => age >= lo && age <= hi) ?? [null])[0];
 
-// The church's own children. Most join Fairhaven Kids; a few deliberately do not, so
-// the "not in Fairhaven Kids yet" case has something in it.
+/*
+ * Fairhaven Kids keeps its OWN list (`kids`), separate from the church's `people` — see
+ * the note on `kids` in the schema. A church family's child who comes to Fairhaven Kids
+ * is therefore two rows, one on each side, with nothing linking them; that
+ * duplication is deliberate, and the demo shows it the way the real app has it.
+ */
+let kidSeq = 0;
+
+// The church's own children. Most come to Fairhaven Kids too; a few deliberately do
+// not, so the People tab has children who are on no Fairhaven Kids list.
 const churchKids = people.filter((p) => p.kind === 'child');
 const kidRows = [];
 for (const k of churchKids) {
-  if (!chance(0.82)) continue;                 // some children are simply not enrolled
+  if (!chance(0.82)) continue;                 // some children are simply not in Fairhaven Kids
   const age = 1 + Math.floor(rnd() * 20);
   // A realistic birth year, so the "suggested class" hint has something true to
   // work from. The generic people birthdays are all year 1900 — fine where only
   // the month and day are ever shown, useless for an age.
   const by = 2026 - age;
-  out.push(`UPDATE people SET birthday = '${by}-${pad(1 + Math.floor(rnd() * 12))}-${pad(1 + Math.floor(rnd() * 28))}' WHERE id = ${k.id};`);
-  // A tenth are enrolled but not yet placed in a class — the director's to-do.
+  const birthday = `${by}-${pad(1 + Math.floor(rnd() * 12))}-${pad(1 + Math.floor(rnd() * 28))}`;
+  out.push(`UPDATE people SET birthday = '${birthday}' WHERE id = ${k.id};`);
+  // A tenth are in Fairhaven Kids but not yet placed in a class — the director's to-do.
   const cid = chance(0.9) ? classForAge(age) : null;
-  kidRows.push({ id: k.id, cid, age });
-  out.push(`INSERT INTO kid_profiles (person_id, class_id, route_id, allergies, medical_notes, created_at, updated_at)
-    VALUES (${k.id}, ${cid ?? 'NULL'}, NULL, ${chance(0.18) ? q(pick(ALLERGIES)) : 'NULL'}, NULL,
-    datetime('now'), datetime('now'));`);
-  // Their guardian IS a member, so the row links through rather than copying
-  // contact details that would then go stale.
+  const kidId = ++kidSeq;
+  kidRows.push({ id: kidId, cid, age });
+  out.push(`INSERT INTO kids (id, first_name, last_name, birthday, class_id, route_id, allergies,
+    medical_notes, created_at, updated_at)
+    VALUES (${kidId}, ${q(k.first)}, ${q(k.last)}, '${birthday}', ${cid ?? 'NULL'}, NULL,
+    ${chance(0.18) ? q(pick(ALLERGIES)) : 'NULL'}, NULL, datetime('now'), datetime('now'));`);
+  // This child's grown-up happens to also be a member, so their name and number
+  // match the adult record — but the guardian row OWNS them, the same as every
+  // other guardian. member_person_id stays null: directory linking was removed
+  // from the profile page on 2026-09-11, and a demo that seeds a state the app
+  // can no longer create is a demo of the wrong app.
   const parent = people.find((a) => a.kind === 'adult' && a.last === k.last);
   if (parent) {
-    out.push(`INSERT INTO kid_guardians (person_id, name, relationship, phone, phone_e164,
+    out.push(`INSERT INTO kid_guardians (kid_id, name, relationship, phone, phone_e164,
       member_person_id, is_primary, sms_consent, sms_consent_source, sms_consent_at, created_at, updated_at)
-      VALUES (${k.id}, ${q(parent.first + ' ' + parent.last)}, ${q(pick(RELATIONSHIPS))},
+      VALUES (${kidId}, ${q(parent.first + ' ' + parent.last)}, ${q(pick(RELATIONSHIPS))},
       ${q(parent.phone)}, ${q(parent.phone ? '+1' + parent.phone.replace(/\D/g, '') : null)},
-      ${parent.id}, 1, 'opted_in', 'verbal-at-intake', datetime('now'), datetime('now'), datetime('now'));`);
+      NULL, 1, 'opted_in', 'verbal-at-intake', datetime('now'), datetime('now'), datetime('now'));`);
   }
 }
 
-// Bus-ministry children. ENTIRELY NEW RECORDS whose families are not members —
-// which is the whole reason kid_guardians exists rather than more people rows.
+// Bus-ministry children. Fairhaven Kids-only records whose families are not members —
+// never in `people` at all, which is the point of Fairhaven Kids having its own list.
 const BUS_KIDS = ['Amari','Destiny','Jayden','Aaliyah','Marcus','Zoe','Elijah','Nevaeh',
                   'Xavier','Trinity','Isaiah','Serenity'];
 const BUS_LAST = ['Colvin','Ramsey','Okafor','Delgado','Boone','Nakamura'];
 for (let b = 0; b < 12; b++) {
   const age = 4 + Math.floor(rnd() * 14);
   const first = BUS_KIDS[b], last = pick(BUS_LAST);
-  const kidId = ++id;
+  const kidId = ++kidSeq;
   const by = 2026 - age;
-  out.push(`INSERT INTO people (id, first_name, last_name, adult_child, include_in_directory,
-    directory_status, sms_consent, archived, needs_profile, birthday, created_at, updated_at)
-    VALUES (${kidId}, ${q(first)}, ${q(last)}, 'child', 0, 'none', 'unknown', 0, 0,
+  out.push(`INSERT INTO kids (id, first_name, last_name, birthday, class_id, route_id, allergies,
+    medical_notes, created_at, updated_at)
+    VALUES (${kidId}, ${q(first)}, ${q(last)},
     '${by}-${pad(1 + Math.floor(rnd() * 12))}-${pad(1 + Math.floor(rnd() * 28))}',
-    datetime('now'), datetime('now'));`);
-  out.push(`INSERT INTO kid_profiles (person_id, class_id, route_id, allergies, medical_notes, created_at, updated_at)
-    VALUES (${kidId}, ${classForAge(age) ?? 'NULL'}, ${1 + Math.floor(rnd() * 3)},
+    ${classForAge(age) ?? 'NULL'}, ${1 + Math.floor(rnd() * 3)},
     ${chance(0.22) ? q(pick(ALLERGIES)) : 'NULL'}, NULL, datetime('now'), datetime('now'));`);
   // The guardian's number exists ONLY here. This is the shape that made the
   // STOP handler span two tables — see lib/consent.ts.
   const gphone = chance(0.85) ? `(317) 555-0${line++}` : null;
-  out.push(`INSERT INTO kid_guardians (person_id, name, relationship, phone, phone_e164,
+  out.push(`INSERT INTO kid_guardians (kid_id, name, relationship, phone, phone_e164,
     member_person_id, is_primary, sms_consent, sms_consent_source, sms_consent_at, created_at, updated_at)
     VALUES (${kidId}, ${q(pick(WOMEN) + ' ' + last)}, ${q(pick(RELATIONSHIPS))},
     ${q(gphone)}, ${q(gphone ? '+1' + gphone.replace(/\D/g, '') : null)}, NULL, 1,
@@ -257,6 +281,23 @@ for (let b = 0; b < 12; b++) {
     'verbal-at-intake', datetime('now'), datetime('now'), datetime('now'));`);
   kidRows.push({ id: kidId, cid: classForAge(age), age });
 }
+
+/*
+ * Behaviour notes. Most children have none, which is the truthful default.
+ * The ones that do cover the shapes a note takes in the real app: the evening
+ * it was written for (a teacher's note and the bus worker's follow-up twenty
+ * minutes later, newest first), one from last week, and one whose author has
+ * since left — staff_id gone, author_name kept, which is why both columns exist.
+ */
+const ago = (mins) => `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${mins} minutes')`;
+const note = (kidId, body, staffId, author, mins) =>
+  out.push(`INSERT INTO kid_notes (kid_id, body, staff_id, author_name, created_at)
+    VALUES (${kidId}, ${q(body)}, ${staffId ?? 'NULL'}, ${q(author)}, ${ago(mins)});`);
+const noted = kidRows.slice(-12);   // bus children, in BUS_KIDS order: [2] Jayden, [3] Aaliyah, [6] Elijah
+note(noted[2].id, 'Kept pushing in line and would not stop when asked. Sent to sit with Felicia for the last half hour.', 2, 'Karen H.', 95);
+note(noted[2].id, 'Told his family at the door. They said they would talk to him tonight.', 4, 'Darrell M.', 70);
+note(noted[3].id, 'Upset when she arrived — said she had not had dinner. Gave her crackers from the cupboard.', 3, 'Bethany R.', 7 * 24 * 60 + 40);
+note(noted[6].id, 'Brought a friend from his street, first time here. Friend\'s mum is happy for him to ride the bus next week.', null, 'Tamsin W.', 14 * 24 * 60);
 
 const creditable = [];
 // Two Fairhaven Kids services, with a register partly taken — some children arrived and
@@ -269,7 +310,7 @@ for (const [kind, offset] of [['kids-sunday', 0], ['kids-wednesday', 3]]) {
     // A third are present but not yet assigned to a class on the row: they
     // scanned in at the door and no teacher has taken the register yet.
     const inClass = k.cid && chance(0.7);
-    out.push(`INSERT INTO attendance (service_id, person_id, class_id, created_at)
+    out.push(`INSERT INTO kid_attendance (service_id, kid_id, class_id, created_at)
       VALUES (${sid}, ${k.id}, ${inClass ? k.cid : 'NULL'}, datetime('now'));`);
     creditable.push([k.id, sid]);
   }
@@ -288,14 +329,14 @@ const PER_VISIT = 5;
 const AWARD_FOR = ['Said the memory verse', 'Helped tidy up', 'Brought a friend',
                    'Kind to a new child', 'Answered every question'];
 const SPENT_ON = ['Bouncy ball', 'Sticker sheet', 'Pencil case', 'Sweets', 'Toy car'];
-for (const [personId, serviceId] of creditable) {
-  out.push(`INSERT INTO kid_ledger (person_id, delta, reason, service_id, created_at)
-    VALUES (${personId}, ${PER_VISIT}, 'attendance', ${serviceId}, datetime('now'));`);
+for (const [kidId, serviceId] of creditable) {
+  out.push(`INSERT INTO kid_ledger (kid_id, delta, reason, service_id, created_at)
+    VALUES (${kidId}, ${PER_VISIT}, 'attendance', ${serviceId}, datetime('now'));`);
 }
 for (const k of kidRows) {
-  if (chance(0.45)) out.push(`INSERT INTO kid_ledger (person_id, delta, reason, note, staff_id, created_at)
+  if (chance(0.45)) out.push(`INSERT INTO kid_ledger (kid_id, delta, reason, note, staff_id, created_at)
     VALUES (${k.id}, ${1 + Math.floor(rnd() * 5)}, 'award', ${q(pick(AWARD_FOR))}, 2, datetime('now'));`);
-  if (chance(0.3)) out.push(`INSERT INTO kid_ledger (person_id, delta, reason, note, staff_id, created_at)
+  if (chance(0.3)) out.push(`INSERT INTO kid_ledger (kid_id, delta, reason, note, staff_id, created_at)
     VALUES (${k.id}, -${1 + Math.floor(rnd() * 8)}, 'spend', ${q(pick(SPENT_ON))}, 2, datetime('now'));`);
 }
 /*
@@ -313,15 +354,15 @@ const fakeToken = () => Array.from({ length: 64 },
 for (const k of kidRows) {
   if (!chance(0.8)) continue;
   if (chance(0.15)) {
-    out.push(`INSERT INTO kid_cards (person_id, token, active, issued_at, revoked_at, issued_by)
-      VALUES (${k.id}, '${fakeToken()}', 0, datetime('now','-60 days'), datetime('now','-20 days'), 'marion@example.org');`);
+    out.push(`INSERT INTO kid_cards (kid_id, token, active, issued_at, revoked_at, issued_by)
+      VALUES (${k.id}, '${fakeToken()}', 0, datetime('now','-60 days'), datetime('now','-20 days'), 'felicia@example.org');`);
   }
-  out.push(`INSERT INTO kid_cards (person_id, token, active, issued_at, issued_by)
-    VALUES (${k.id}, '${fakeToken()}', 1, datetime('now','-20 days'), 'marion@example.org');`);
+  out.push(`INSERT INTO kid_cards (kid_id, token, active, issued_at, issued_by)
+    VALUES (${k.id}, '${fakeToken()}', 1, datetime('now','-20 days'), 'felicia@example.org');`);
 }
 
 out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by)
-  VALUES ('kid_bucks_per_visit', '${PER_VISIT}', datetime('now'), 'marion@example.org');`);
+  VALUES ('kid_bucks_per_visit', '${PER_VISIT}', datetime('now'), 'felicia@example.org');`);
 
 /*
  * A kiosk the demo visitor can pair in one click.
@@ -368,7 +409,7 @@ out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES
 const DEMO_WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const DEMO_MONTHS = ['January','February','March','April','May','June','July',
   'August','September','October','November','December'];
-/* Noon UTC, never new Date(iso) — that is UTC midnight, which in Indianapolis is
+/* Noon UTC, never new Date(iso) — that is UTC midnight, which in Fairhaven is
  * the evening BEFORE. Same note as addDaysIso in lib/signups.ts. */
 const inDays = (n) => {
   const d = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00Z`);

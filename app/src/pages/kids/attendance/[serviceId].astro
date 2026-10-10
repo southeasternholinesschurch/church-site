@@ -1,0 +1,578 @@
+---
+import KidsLayout from '../../../layouts/KidsLayout.astro';
+import { getDb, schema, nowIso } from '../../../db';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { readForm } from '../../../lib/form';
+import { formatDate, kindLabel, isKidsKind, churchToday } from '../../../lib/services';
+import { ageOn, parseView, formatView, routeOrder, type AttendanceView, type ComingAnswer } from '../../../lib/kids';
+import { getPerVisit } from '../../../lib/bucks';
+
+/**
+ * Attendance for one Fairhaven Kids meeting.
+ *
+ * ONE TALLY. Everybody — teachers, bus captains, the coordinator — ticks the
+ * same attendance rows, so a child ticked on the bus is ticked on the teacher's
+ * list a moment later. A tick means "checked in", full stop: there is no
+ * "on the way" state. A teacher with a small class who sees a child ticked but
+ * not in the room knows what that means.
+ *
+ * WHAT YOU SEE IS A REMEMBERED CHOICE. The first visit asks which class or route
+ * you are taking attendance for; that is saved on the account, and every later
+ * visit opens straight on it. The dropdown at the top changes it, and the
+ * change sticks too. It is a convenience filter, not a permission: any enrolled
+ * child may still be marked by any volunteer, as before.
+ *
+ * KIDS CLUB IS ITS OWN LIST. The Wednesday meeting is a different crowd —
+ * almost no bus children, mostly church children — so it ignores the saved
+ * class/route choice and shows the children on the Club list (kids.in_club),
+ * plus anyone already ticked tonight. Underneath, every other Fairhaven Kids child can
+ * be ticked from a "not on the list" fold, which also puts them on the list for
+ * next week. Coming off it is the checkbox on the child's profile.
+ *
+ * Marking is an upsert on unique(service_id, kid_id) in kid_attendance — Fairhaven Kids'
+ * own register, not the church's attendance — so a child ticked by
+ * two people is one row — and, because the Fairhaven Bucks credit hangs off the
+ * same constraint, one credit.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const serviceId = Number(Astro.params.serviceId);
+if (!Number.isInteger(serviceId)) return Astro.redirect('/kids/attendance', 302);
+
+const [service] = await db.select().from(schema.services)
+  .where(eq(schema.services.id, serviceId)).limit(1);
+// Only Fairhaven Kids meetings: the id in the URL is a number somebody can
+// change, and this page must not become a way to edit the sanctuary register.
+if (!service || !isKidsKind(service.kind)) return Astro.redirect('/kids/register', 302);
+const club = service.kind === 'kids-wednesday';
+
+const classes = await db.select({ id: schema.kidClasses.id, name: schema.kidClasses.name })
+  .from(schema.kidClasses).where(eq(schema.kidClasses.active, true))
+  .orderBy(asc(schema.kidClasses.sort));
+const routes = await db.select({ id: schema.kidRoutes.id, name: schema.kidRoutes.name })
+  .from(schema.kidRoutes).where(eq(schema.kidRoutes.active, true))
+  .orderBy(asc(schema.kidRoutes.name));
+
+/** Only a view that still points at something real. A class or route that was
+ *  removed after somebody chose it falls back to the picker, not an empty page. */
+const valid = (v: AttendanceView | null): AttendanceView | null => {
+  if (!v) return null;
+  if (v.kind === 'class') return classes.some((c) => c.id === v.id) ? v : null;
+  if (v.kind === 'route') return routes.some((r) => r.id === v.id) ? v : null;
+  return v;
+};
+
+// ---- writes ------------------------------------------------------------------
+const wantsJson = Astro.request.headers.get('x-kids-register') === 'json';
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const act = String(form.get('action') ?? 'mark');
+
+  if (act === 'view') {
+    // Validated against the live lists: a form value must not store anything
+    // that is not a real class, a real route, or 'all'.
+    const chosen = valid(parseView(String(form.get('view') ?? '')));
+    // The demo instance's synthetic user has id 0 and no staff row to update.
+    if (chosen && user.id > 0) {
+      // Swallowed on purpose: if the table is not there yet (migration not
+      // applied) the choice just is not remembered, and the page still works.
+      try {
+        await db.insert(schema.kidStaffView)
+          .values({ staffId: user.id, view: formatView(chosen), updatedAt: nowIso() })
+          .onConflictDoUpdate({
+            target: schema.kidStaffView.staffId,
+            set: { view: formatView(chosen), updatedAt: nowIso() },
+          });
+      } catch { /* no table yet */ }
+    }
+    return Astro.redirect(Astro.url.pathname, 303);
+  }
+
+  const kidId = Number(form.get('kidId') ?? 0);
+  const present = String(form.get('present') ?? '') === '1';
+
+  // "Here — and on the Club list from now on", from the fold under the Club
+  // list. Only at a Club meeting, and only for a current Fairhaven Kids child.
+  if (club && present && form.get('join') === '1' && Number.isInteger(kidId) && kidId > 0) {
+    await db.update(schema.kids).set({ inClub: true, updatedAt: nowIso() })
+      .where(and(eq(schema.kids.id, kidId), eq(schema.kids.archived, false)));
+  }
+
+  let ok = false;
+  if (Number.isInteger(kidId) && kidId > 0) {
+    // A real, current Fairhaven Kids child — an id typed into a form must not become
+    // an attendance row. Not an archived one, either: they are on no list here.
+    const [enrolled] = await db.select({ classId: schema.kids.classId })
+      .from(schema.kids).where(and(eq(schema.kids.id, kidId), eq(schema.kids.archived, false))).limit(1);
+
+    if (enrolled) {
+      ok = true;
+      if (present) {
+        // Upsert: a child already ticked by somebody else is left as one row.
+        // The row records the child's own class whichever list it was ticked
+        // from, so class counts stay right when a bus captain does the tick.
+        await db.insert(schema.kidAttendance)
+          .values({ serviceId, kidId, classId: enrolled.classId, createdAt: nowIso() })
+          .onConflictDoUpdate({
+            target: [schema.kidAttendance.serviceId, schema.kidAttendance.kidId],
+            set: { classId: enrolled.classId },
+          });
+
+        // The Fairhaven Bucks credit for being here. Guarded by the partial
+        // unique index on (kid_id, service_id) where reason = 'attendance',
+        // so a child ticked twice, by two people, is credited once.
+        const perVisit = await getPerVisit(db);
+        if (perVisit > 0) {
+          await db.insert(schema.kidLedger).values({
+            kidId, delta: perVisit, reason: 'attendance', serviceId,
+            // NULL, not 0, for the demo's synthetic user: staff_id is a foreign key.
+            staffId: user.id > 0 ? user.id : null,
+            createdAt: nowIso(),
+          }).onConflictDoNothing();
+        }
+      } else {
+        // Unticking removes the row — it can only mean a wrong tap.
+        await db.delete(schema.kidAttendance)
+          .where(and(eq(schema.kidAttendance.serviceId, serviceId),
+                     eq(schema.kidAttendance.kidId, kidId)));
+        // And the credit it earned: a mis-tap to undo, not history to keep.
+        // Scoped to reason='attendance' so a teacher's award is untouched.
+        await db.delete(schema.kidLedger)
+          .where(and(eq(schema.kidLedger.serviceId, serviceId),
+                     eq(schema.kidLedger.kidId, kidId),
+                     eq(schema.kidLedger.reason, 'attendance')));
+      }
+    }
+  }
+
+  if (wantsJson) {
+    const [n] = await db.select({ c: sql<number>`count(*)` }).from(schema.kidAttendance)
+      .where(eq(schema.kidAttendance.serviceId, serviceId));
+    return new Response(JSON.stringify({ ok, present, total: n?.c ?? 0 }),
+      { status: ok ? 200 : 400, headers: { 'content-type': 'application/json' } });
+  }
+  // No JavaScript: reload the page it came from.
+  return Astro.redirect(Astro.url.pathname, 303);
+}
+
+// ---- which group am I taking? ---------------------------------------------------
+let saved: string | null = null;
+if (user.id > 0) {
+  try {
+    const [me] = await db.select({ view: schema.kidStaffView.view }).from(schema.kidStaffView)
+      .where(eq(schema.kidStaffView.staffId, user.id)).limit(1);
+    saved = me?.view ?? null;
+  } catch { /* no table yet: treated as "has not chosen", so the picker shows */ }
+}
+// At Club the list is the Club list, whatever was chosen for Sunday.
+const view = club ? null : valid(parseView(saved));
+
+// Their own class or route, offered first on the picker.
+const myClassIds = new Set(user.id > 0
+  ? (await db.select({ id: schema.kidClassTeachers.classId }).from(schema.kidClassTeachers)
+      .where(eq(schema.kidClassTeachers.staffId, user.id))).map((r) => r.id)
+  : []);
+const myRouteIds = new Set(user.id > 0
+  ? (await db.select({ id: schema.kidRouteCaptains.routeId }).from(schema.kidRouteCaptains)
+      .where(eq(schema.kidRouteCaptains.staffId, user.id))).map((r) => r.id)
+  : []);
+
+const [totalRow] = await db.select({ c: sql<number>`count(*)` }).from(schema.kidAttendance)
+  .where(eq(schema.kidAttendance.serviceId, serviceId));
+const total = totalRow?.c ?? 0;
+
+const today = churchToday();
+const title = kindLabel(service.kind);
+
+const mine = <T extends { id: number }>(a: T[], ids: Set<number>): T[] =>
+  [...a.filter((x) => ids.has(x.id)), ...a.filter((x) => !ids.has(x.id))];
+const classOpts = mine(classes, myClassIds);
+const routeOpts = mine(routes, myRouteIds);
+
+let rows: {
+  id: number; firstName: string; lastName: string; age: number | null;
+  allergies: string | null; className: string | null; routeName: string | null; here: boolean;
+}[] = [];
+let heading = '';
+/** Club only: every other current child, to tick in and add to the list. */
+let others: { id: number; firstName: string; lastName: string; age: number | null }[] = [];
+
+if (view) {
+  const list = await db.select({
+    id: schema.kids.id,
+    firstName: schema.kids.firstName,
+    lastName: schema.kids.lastName,
+    birthday: schema.kids.birthday,
+    allergies: schema.kids.allergies,
+    className: schema.kidClasses.name,
+    routeName: schema.kidRoutes.name,
+    routeStop: schema.kids.routeStop,
+    street: schema.kids.addressStreet,
+    attendanceId: schema.kidAttendance.id,
+  }).from(schema.kids)
+    .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kids.classId))
+    .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kids.routeId))
+    .leftJoin(schema.kidAttendance, and(
+      eq(schema.kidAttendance.kidId, schema.kids.id),
+      eq(schema.kidAttendance.serviceId, serviceId)))
+    .where(and(
+      eq(schema.kids.archived, false),
+      view.kind === 'class' ? eq(schema.kids.classId, view.id)
+        : view.kind === 'route' ? eq(schema.kids.routeId, view.id)
+        : sql`1 = 1`,
+    ))
+    .orderBy(asc(schema.kids.firstName), asc(schema.kids.lastName));
+  // A bus route reads in driving order, as set on the Calling page. Classes
+  // and "everyone" stay alphabetical: a class is mostly church children with
+  // no stop at all.
+  if (view.kind === 'route') list.sort(routeOrder);
+
+  rows = list.map((c) => ({
+    id: c.id, firstName: c.firstName, lastName: c.lastName,
+    age: ageOn(c.birthday, today), allergies: c.allergies,
+    className: c.className, routeName: c.routeName, here: c.attendanceId !== null,
+  }));
+  heading = view.kind === 'class' ? classes.find((c) => c.id === view.id)!.name
+    : view.kind === 'route' ? routes.find((r) => r.id === view.id)!.name
+    : 'Everyone';
+}
+
+if (club) {
+  // Every current Fairhaven Kids child, with what we know. Archived ones (aged out,
+  // mostly) are neither on the Club list nor in the fold.
+  const everyone = await db.select({
+    id: schema.kids.id,
+    firstName: schema.kids.firstName,
+    lastName: schema.kids.lastName,
+    birthday: schema.kids.birthday,
+    allergies: schema.kids.allergies,
+    className: schema.kidClasses.name,
+    routeName: schema.kidRoutes.name,
+    inClub: schema.kids.inClub,
+    attendanceId: schema.kidAttendance.id,
+  }).from(schema.kids)
+    .leftJoin(schema.kidClasses, eq(schema.kidClasses.id, schema.kids.classId))
+    .leftJoin(schema.kidRoutes, eq(schema.kidRoutes.id, schema.kids.routeId))
+    .leftJoin(schema.kidAttendance, and(
+      eq(schema.kidAttendance.kidId, schema.kids.id),
+      eq(schema.kidAttendance.serviceId, serviceId)))
+    .where(eq(schema.kids.archived, false))
+    .orderBy(asc(schema.kids.firstName), asc(schema.kids.lastName));
+
+  // On the list, or already ticked tonight (so the count always adds up).
+  const listed = everyone.filter((c) => c.inClub || c.attendanceId !== null);
+  rows = listed.map((c) => ({
+    id: c.id, firstName: c.firstName, lastName: c.lastName,
+    age: ageOn(c.birthday, today), allergies: c.allergies,
+    className: c.className, routeName: c.routeName, here: c.attendanceId !== null,
+  }));
+  others = everyone.filter((c) => !listed.includes(c)).map((c) => ({
+    id: c.id, firstName: c.firstName, lastName: c.lastName, age: ageOn(c.birthday, today),
+  }));
+  heading = 'Kids Club';
+}
+
+/*
+ * What each family said on the Saturday call, shown as a quiet tint on the row.
+ * Only the Sunday meeting: the calls are for Sunday, so Wednesday has none. The
+ * answers are keyed by the Sunday they were for, so this meeting's date IS the
+ * key — and on Monday the next Sunday's key has no answers, which is the reset.
+ *
+ * Read on its own and swallowed if it fails: the migration for kid_coming is
+ * applied by hand, and a missing table must cost the colours, never the
+ * attendance page.
+ */
+const said = new Map<number, ComingAnswer>();
+if (service.kind === 'kids-sunday') {
+  try {
+    const answers = await db.select({ kidId: schema.kidComing.kidId, answer: schema.kidComing.answer })
+      .from(schema.kidComing).where(eq(schema.kidComing.week, service.date));
+    for (const a of answers) said.set(a.kidId, a.answer);
+  } catch { /* no table yet: no colours */ }
+}
+const showCalls = said.size > 0;
+const here = rows.filter((r) => r.here).length;
+const current = view ? formatView(view) : '';
+---
+<KidsLayout title="Attendance" user={user}>
+  <h1 style="margin-bottom:4px;">{title}</h1>
+  <p class="k-muted" style="margin:0 0 18px;">
+    {formatDate(service.date)} ·
+    <strong id="total" style="color:var(--k-text);">{total}</strong> checked in tonight
+    · <a href="/kids/register" style="font-size:14px;">other date</a>
+  </p>
+
+  {!view && !club && (
+    <div class="k-card" style="max-width:640px;">
+      <h2 style="margin-top:0;">Who are you taking attendance for?</h2>
+      <p class="k-muted" style="margin:-4px 0 18px;">
+        Pick once and this page will open on it every time. You can change it from the top of the page.
+      </p>
+
+      {[
+        { label: 'Classes', kind: 'class', list: classOpts, mine: myClassIds },
+        { label: 'Bus routes', kind: 'route', list: routeOpts, mine: myRouteIds },
+      ].filter((g) => g.list.length > 0).map((g) => (
+        <>
+          <div class="k-label k-muted" style="margin:14px 0 8px;">{g.label}</div>
+          <div class="k-pick">
+            {g.list.map((o) => (
+              <form method="POST">
+                <input type="hidden" name="action" value="view" />
+                <input type="hidden" name="view" value={`${g.kind}:${o.id}`} />
+                <button class="k-pick__btn" type="submit">
+                  {o.name}{g.mine.has(o.id) && <span class="k-chip k-chip--quiet" style="margin-left:8px;">yours</span>}
+                </button>
+              </form>
+            ))}
+          </div>
+        </>
+      ))}
+
+      <form method="POST" style="margin-top:18px;">
+        <input type="hidden" name="action" value="view" />
+        <input type="hidden" name="view" value="all" />
+        <button class="k-pick__btn k-pick__btn--plain" type="submit">Everyone — see every child</button>
+      </form>
+    </div>
+  )}
+
+  {(view || club) && (
+    <>
+      {!club && (
+      <form method="POST" id="viewform" class="k-viewbar">
+        <input type="hidden" name="action" value="view" />
+        <label for="view" class="k-label k-muted">Taking attendance for</label>
+        <select name="view" id="view">
+          <option value="all" selected={current === 'all'}>Everyone</option>
+          {classOpts.length > 0 && (
+            <optgroup label="Classes">
+              {classOpts.map((c) => (
+                <option value={`class:${c.id}`} selected={current === `class:${c.id}`}>{c.name}</option>
+              ))}
+            </optgroup>
+          )}
+          {routeOpts.length > 0 && (
+            <optgroup label="Bus routes">
+              {routeOpts.map((r) => (
+                <option value={`route:${r.id}`} selected={current === `route:${r.id}`}>{r.name}</option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        <noscript><button class="k-btn" type="submit">Show</button></noscript>
+      </form>
+      )}
+
+      <p style="margin:0 0 16px; font-size:19px;">
+        <strong id="count">{here}</strong> of {rows.length} here
+        <span class="k-muted" style="font-size:14px;"> · {heading}</span>
+      </p>
+
+      {showCalls && (
+        <p class="k-muted" style="margin:-6px 0 12px; font-size:13px;">
+          From the Saturday calls:
+          <span class="k-key k-key--yes">coming</span>
+          <span class="k-key k-key--maybe">maybe</span>
+          <span class="k-key k-key--no">no</span>
+          · no colour = not reached
+        </p>
+      )}
+
+      {club && rows.length === 0 && (
+        <div class="k-card"><p class="k-muted" style="margin:0;">
+          Nobody is on the Kids Club list yet. Tick children in from the list below
+          as they arrive, and they will be on it from next week.
+        </p></div>
+      )}
+
+      {!club && rows.length === 0 && (
+        <div class="k-card"><p class="k-muted" style="margin:0;">
+          No children here yet. Put them in a class or on a route from <a href="/kids/children">the children list</a>.
+        </p></div>
+      )}
+
+      <div class="k-card" style="padding:8px;">
+        {rows.map((r) => (
+          <form method="POST" class:list={['k-mark', said.has(r.id) && `said-${said.get(r.id)}`]}
+                data-person={r.id}
+                title={said.has(r.id) ? ({ yes: 'Said they are coming', maybe: 'Said maybe', no: 'Said no' } as const)[said.get(r.id)!] : undefined}>
+            <input type="hidden" name="kidId" value={r.id} />
+            <input type="hidden" name="present" value={r.here ? '0' : '1'} />
+            <button type="submit" class:list={['k-mark__btn', r.here && 'is-here']} aria-pressed={r.here ? 'true' : 'false'}>
+              <span class="k-mark__tick" aria-hidden="true">{r.here ? '✓' : ''}</span>
+              <span class="k-mark__name">
+                {r.firstName} {r.lastName}
+                {r.age !== null && <span class="k-mark__age">{r.age}</span>}
+              </span>
+              <span class="k-mark__tags">
+                {r.allergies && <span class="k-tag k-tag--allergy">allergy</span>}
+                {/* The OTHER dimension: a route list shows the class, a class list shows the route. */}
+                {view?.kind !== 'class' && r.className && <span class="k-tag">{r.className}</span>}
+                {view?.kind !== 'route' && r.routeName && <span class="k-tag">{r.routeName.split('—')[0].trim()}</span>}
+              </span>
+            </button>
+          </form>
+        ))}
+      </div>
+
+      {club && (
+        <details class="k-card k-others">
+          <summary>Somebody who isn't on the Kids Club list? ({others.length} other Fairhaven Kids children)</summary>
+          <p class="k-muted" style="margin:8px 0 10px; font-size:14px;">
+            Tap a name to mark them here. They join the Club list for next week too.
+            Not in Fairhaven Kids yet? <a href="/kids/child/new">Add a new child</a> first.
+          </p>
+          {others.map((o) => (
+            <form method="POST" class="k-join">
+              <input type="hidden" name="kidId" value={o.id} />
+              <input type="hidden" name="present" value="1" />
+              <input type="hidden" name="join" value="1" />
+              <button type="submit" class="k-join__btn">
+                <span>{o.firstName} {o.lastName}{o.age !== null && <span class="k-mark__age">{o.age}</span>}</span>
+                <span class="k-join__add">+ Here</span>
+              </button>
+            </form>
+          ))}
+        </details>
+      )}
+    </>
+  )}
+</KidsLayout>
+
+<style>
+  .k-viewbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .k-viewbar select { flex:1; min-width:180px; max-width:360px; padding:10px 12px; font:inherit; font-size:17px;
+    font-weight:600; color:var(--k-ink); border:1px solid rgba(13,27,69,.22); border-radius:9px; background:#fff; }
+  .k-btn { font:inherit; font-size:15px; font-weight:700; padding:10px 18px; border:0;
+           border-radius:9px; background:var(--k-orange); color:#fff; cursor:pointer; }
+  .k-pick { display:grid; gap:8px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .k-pick form { margin:0; }
+  .k-pick__btn { width:100%; text-align:left; font:inherit; font-size:17px; font-weight:700; padding:14px 16px;
+    border:1px solid rgba(13,27,69,.18); border-radius:10px; background:#fff; color:var(--k-ink); cursor:pointer; }
+  .k-pick__btn:hover { background:rgba(13,27,69,.05); }
+  .k-pick__btn--plain { font-weight:600; max-width:360px; }
+  .k-mark { margin:0; }
+  .k-mark + .k-mark .k-mark__btn { border-top:1px solid rgba(13,27,69,.08); }
+  /* The Saturday call, kept quiet: a faint tint and a thin edge, enough to read
+     down the list at a glance without competing with the tick. */
+  .k-mark { border-left:4px solid transparent; border-radius:10px; }
+  .said-yes   { background:rgba(31,157,85,.10);  border-left-color:#1f9d55; }
+  .said-maybe { background:rgba(242,183,5,.16);  border-left-color:#f2b705; }
+  .said-no    { background:rgba(192,57,43,.09);  border-left-color:#c0392b; }
+  .k-key { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px;
+           font-size:12px; font-weight:700; border-left:4px solid; color:var(--k-text); }
+  .k-key--yes { border-color:#1f9d55; background:rgba(31,157,85,.25); }
+  .k-key--maybe { border-color:#f2b705; background:rgba(242,183,5,.25); }
+  .k-key--no { border-color:#c0392b; background:rgba(192,57,43,.25); }
+  /* A whole row is the target, not a small checkbox: tapped one-handed, standing
+     up, or on a moving van. */
+  .k-mark__btn { display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+                 padding:14px 12px; background:none; border:0; border-radius:10px;
+                 font:inherit; font-size:17px; color:var(--k-ink); cursor:pointer; }
+  .k-mark__btn:hover { background:rgba(13,27,69,.05); }
+  .k-mark__tick { flex:0 0 30px; height:30px; border-radius:50%; display:grid; place-items:center;
+                  border:2px solid rgba(13,27,69,.25); color:#fff; font-size:16px; font-weight:800; }
+  .is-here .k-mark__tick { background:var(--k-orange); border-color:var(--k-orange); }
+  .k-mark__name { font-weight:600; flex:1; }
+  .k-mark__age { font-weight:400; color:var(--k-ink-soft); margin-left:8px; font-size:14px; }
+  .k-mark__tags { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .k-tag { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+           padding:3px 8px; border-radius:999px; background:rgba(13,27,69,.08); color:var(--k-ink-soft); }
+  .k-tag--allergy { background:#b01818; color:#fff; }
+  .k-others { margin-top:18px; }
+  .k-others summary { cursor:pointer; font-weight:700; color:var(--k-ink); padding:4px 2px; }
+  .k-join { margin:0; }
+  .k-join + .k-join { border-top:1px solid rgba(13,27,69,.08); }
+  .k-join__btn { display:flex; justify-content:space-between; align-items:center; gap:12px; width:100%;
+                 text-align:left; padding:12px 10px; background:none; border:0; font:inherit; font-size:16px;
+                 color:var(--k-ink); cursor:pointer; }
+  .k-join__btn:hover { background:rgba(13,27,69,.05); }
+  .k-join__add { flex:none; font-size:14px; font-weight:700; color:var(--k-orange); }
+</style>
+
+<script is:inline>
+  /*
+   * Progressive enhancement. Every row is a real form that works with no
+   * JavaScript — it just costs a page load per child. With script, the same POST
+   * goes by fetch, and the button is updated from the SERVER's answer, never
+   * optimistically: a tick that appears and is then silently not recorded is
+   * worse than a slow one.
+   *
+   * The dropdown submits itself on change, so choosing a group is one action.
+   */
+  (function () {
+    var sel = document.getElementById('view');
+    if (sel) sel.addEventListener('change', function () { document.getElementById('viewform').submit(); });
+
+    var count = document.getElementById('count');
+    var total = document.getElementById('total');
+    document.querySelectorAll('.k-mark').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = form.querySelector('.k-mark__btn');
+        var flag = form.querySelector('input[name="present"]');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        fetch(location.pathname, {
+          method: 'POST',
+          headers: { 'x-kids-register': 'json',
+                     'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(form)).toString(),
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.ok) { form.submit(); return; }   // fall back to the real post
+            btn.classList.toggle('is-here', d.present);
+            btn.setAttribute('aria-pressed', String(d.present));
+            btn.querySelector('.k-mark__tick').textContent = d.present ? '✓' : '';
+            flag.value = d.present ? '0' : '1';
+            if (total) total.textContent = d.total;
+            if (count) count.textContent = document.querySelectorAll('.k-mark__btn.is-here').length;
+          })
+          .catch(function () { form.submit(); })
+          .then(function () { btn.disabled = false; });
+      });
+    });
+  })();
+
+  /*
+   * One tally means somebody else's tick should appear on this screen without a
+   * reload — a bus captain ticks a child on the van and the teacher sees it a
+   * moment later. Every 15 seconds, and when the tab comes back to the front,
+   * the page re-reads itself and copies across the tick states and counts.
+   * Skipped while a tap is in flight so it can never fight with one.
+   */
+  (function () {
+    var busy = false;
+    function refresh() {
+      if (busy || document.hidden || document.querySelector('.k-mark__btn:disabled')) return;
+      busy = true;
+      fetch(location.pathname, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (html) {
+          if (!html || document.querySelector('.k-mark__btn:disabled')) return;
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+          doc.querySelectorAll('.k-mark').forEach(function (fresh) {
+            var cur = document.querySelector('.k-mark[data-person="' + fresh.getAttribute('data-person') + '"]');
+            if (!cur) return;
+            var here = fresh.querySelector('.k-mark__btn').classList.contains('is-here');
+            var btn = cur.querySelector('.k-mark__btn');
+            btn.classList.toggle('is-here', here);
+            btn.setAttribute('aria-pressed', String(here));
+            btn.querySelector('.k-mark__tick').textContent = here ? '✓' : '';
+            cur.querySelector('input[name="present"]').value = here ? '0' : '1';
+          });
+          ['count', 'total'].forEach(function (id) {
+            var a = document.getElementById(id), b = doc.getElementById(id);
+            if (a && b) a.textContent = b.textContent;
+          });
+        })
+        .catch(function () {})
+        .then(function () { busy = false; });
+    }
+    setInterval(refresh, 15000);
+    document.addEventListener('visibilitychange', refresh);
+  })();
+</script>
