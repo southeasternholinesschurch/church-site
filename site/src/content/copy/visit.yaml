@@ -25,7 +25,7 @@ when:
 
 where:
   eyebrow: "Where"
-  directions: "On the southeast side of Fairhaven, five minutes off I-465 at the Southeastern Avenue exit."
+  directions: "On the southeast side of Fairhaven, five minutes off I-465 at the Meadowbrook Road exit."
   # Where to park and which door to use. Shown under the directions once filled in.
   parking: ""
   mapButton: "Open in Maps ↗"

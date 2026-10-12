@@ -75,7 +75,7 @@ const buildingJpg = await getImage({ src: buildingImg, width: 1200, format: 'jpg
 ---
 <BaseLayout
   title="Plan Your Visit"
-  description={`Planning your first visit to ${settings.churchName}? Service times, directions, what to expect, and what we have for kids and youth — Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM on Southeastern Avenue in Fairhaven.`}
+  description={`Planning your first visit to ${settings.churchName}? Service times, directions, what to expect, and what we have for kids and youth — Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM on Meadowbrook Road in Fairhaven.`}
   jsonLd={churchJsonLd(settings, Astro.site, buildingJpg.src)}
 >
   <!-- ============ HERO ============ -->
@@ -133,7 +133,7 @@ const buildingJpg = await getImage({ src: buildingImg, width: 1200, format: 'jpg
       <div class="where__body">
         <h2 class="label sect__h">{t('where.eyebrow', 'Where')}</h2>
         <p class="serif sect__lead">{settings.address}</p>
-        <p class="sect__p">{t('where.directions', 'On the southeast side of Fairhaven, five minutes off I-465 at the Southeastern Avenue exit.')}</p>
+        <p class="sect__p">{t('where.directions', 'On the southeast side of Fairhaven, five minutes off I-465 at the Meadowbrook Road exit.')}</p>
         {t('where.parking', '') && <p class="sect__p">{t('where.parking', '')}</p>}
         <div class="where__acts">
           <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--ink">{t('where.mapButton', 'Open in Maps ↗')}</a>

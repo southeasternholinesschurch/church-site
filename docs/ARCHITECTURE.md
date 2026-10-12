@@ -1352,13 +1352,14 @@ the building, Facebook, Instagram and YouTube), a home page title that says "chu
 and "Fairhaven", and the sitemap. That is the part a website can do. **Most of local
 search is a Google Business Profile**, and only someone at the church can claim one:
 
-1. **Claim or create the profile** at business.google.com for "Fairhaven Community
-   Church", 3957 Southeastern Ave. Google verifies by postcard, phone or video.
+1. **Claim or create the profile** at business.google.com for
+   "Fairhaven Community Church", 412 Meadowbrook Road. Google verifies by postcard,
+   phone or video.
 2. **Category:** "Holiness church" is a Google category — use it as the primary, with
    "Church" as a secondary.
-3. **Name, address and phone exactly as the website has them** — "Southeastern
-   Holiness Church", "3957 Southeastern Ave, Fairhaven, IN 46203", (317) 353-8702.
-   Matching details everywhere is most of what local ranking rewards.
+3. **Name, address and phone exactly as the website has them** —
+   "Fairhaven Community Church", "412 Meadowbrook Road, Fairhaven, IN 46140",
+   (317) 555-0142. Matching details everywhere is most of what local ranking rewards.
 4. **Website:** `https://yourchurch.org/visit`, so a searcher lands on the
    page written for them.
 5. **Hours:** Google lists opening hours, not services, so enter the service blocks

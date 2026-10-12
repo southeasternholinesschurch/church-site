@@ -25,7 +25,7 @@ interface Settings {
   socials: { facebook?: string; instagram?: string; youtubeUrl: string };
 }
 
-/** "3957 Southeastern Ave, Fairhaven, IN 46203" -> its parts, or null. */
+/** "412 Meadowbrook Road, Fairhaven, IN 46140" -> its parts, or null. */
 export function postalAddress(address: string) {
   const m = /^(.+?),\s*([^,]+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/.exec(address.trim());
   if (!m) return null;
@@ -39,7 +39,7 @@ export function postalAddress(address: string) {
   };
 }
 
-/** "(317) 353-8702" -> "+1-317-353-8702". */
+/** "(317) 555-0142" -> "+1-317-555-0142". */
 function e164ish(phone: string | undefined): string | undefined {
   const d = (phone ?? '').replace(/\D/g, '');
   if (d.length === 10) return `+1-${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
