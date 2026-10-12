@@ -22,6 +22,7 @@ import { getBirthdaySettings } from './birthday-settings';
 import { consentByNumbers } from './consent';
 import { firstNameOf, reminderBodyFor, reminderDue, reminderKey, reminderMissed,
          renderReminder, shortWhen } from './signups';
+import { expandDigest } from './digest-db';
 
 /**
  * Twilio sends per cron run.
@@ -40,8 +41,13 @@ type Env = SmsEnv & { DB: D1Database };
 
 export interface ExpandResult { queued: number; schedules: number; detail: string[] }
 
-/** Rules that are due right now become queue rows, one per recipient. */
-export async function expandDue(env: Env, now = new Date()): Promise<ExpandResult> {
+/**
+ * Rules that are due right now become queue rows, one per recipient.
+ *
+ * `origin` is the app's own address, for the link in the Monday digest — taken
+ * from the request the cron made, so it is always the address that answered.
+ */
+export async function expandDue(env: Env, now = new Date(), origin = 'https://app.yourchurch.org'): Promise<ExpandResult> {
   const db = getDb(env);
   const local = localNow(now);
   const rows = await db.select().from(schema.messageSchedules)
@@ -105,6 +111,17 @@ export async function expandDue(env: Env, now = new Date()): Promise<ExpandResul
   // Same shape again: a standing arrangement, not a rule anybody creates.
   const sq = await expandSignupReminders(env, local);
   if (sq) { queued += sq.queued; schedules++; detail.push(sq.detail); }
+
+  // --- the pastors' Monday digest -----------------------------------------
+  // And again: switched on in Care, sent on Mondays, nothing to create.
+  // Caught, because a digest that cannot be put together this morning must not
+  // stop the texts above it from going out.
+  try {
+    const dq = await expandDigest(env, local, origin);
+    if (dq) { queued += dq.queued; schedules++; detail.push(dq.detail); }
+  } catch (err) {
+    detail.push(`Monday digest: could not be built (${err instanceof Error ? err.message : String(err)})`);
+  }
 
   return { queued, schedules, detail };
 }

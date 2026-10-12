@@ -22,6 +22,8 @@ export const PAGE_LABELS: Record<string, string> = {
   home: 'Home',
   about: 'About',
   'im-new': "I'm New",
+  visit: 'Plan Your Visit',
+  welcome: 'Guest card (pew tags)',
   contact: 'Contact',
   give: 'Give',
   events: 'Events',
@@ -81,7 +83,7 @@ export async function listCopyPages(env: GitEnv): Promise<{ page: string; label:
 /**
  * A copy file's text -> the fields the dashboard draws, in file order.
  *
- * Separate from readCopyPage so the part the editor actually sees — what the
+ * Separate from readCopyPage so the part the pastor actually sees — what the
  * groups are called, what each field is called, which fields appear at all —
  * can be checked against the real files without reaching GitHub for them.
  */

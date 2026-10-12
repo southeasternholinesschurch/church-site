@@ -119,6 +119,12 @@ plus the brief's "regulars who have gone missing": present at 3+ of the
 previous 8 services and absent from the last 4. Loose on purpose — a fortnight's
 holiday does not appear, someone who quietly stopped in March does.
 
+The follow-up itself lives in **Care** (`/care`, admin only), which uses the
+same loose rule counted in WEEKS rather than services of one kind — a week
+counts if the person came to any service in it, and only weeks in which the
+register was taken count at all. Why, in full: the comment on `findMissing()`
+in `src/lib/care.ts`.
+
 There is no imported history. The old attendance spreadsheets in Downloads turn
 out to be eight variants of an empty template: six contain no marks at all, and
 the other two share the same 219 marks across 19,750 cells — an abandoned trial
@@ -132,6 +138,15 @@ attendance check-in and trends, the bulletin editor, texting through Twilio
 (broadcast, scheduled, automatic birthdays, replies and the number checker), the
 website editor, Fairhaven Kids check-in, sign-up sheets, and the member directory with
 photo upload and member self-edit.
+
+Added 2026-10: **Care** (the follow-up list, the care log,
+and the guest cards visitors fill in from the pew tags and Plan Your Visit,
+with a text to the pastors when one arrives), the **singing schedule** (kept
+here instead of in a Google Sheet, with a printout), the **Monday digest** (one
+text to the pastors and the page it links to), and passage feedback in the
+sermon editor for the website's Sermons by Scripture. Migrations `0028` and
+`0029` are applied to the production database (checked 2026-10-12), and the
+singing schedule has been copied in from the sheet.
 
 `docs/README.md` in the repo root is the operational document — how it deploys,
 what is set in the Cloudflare dashboard rather than in the repo, and the traps

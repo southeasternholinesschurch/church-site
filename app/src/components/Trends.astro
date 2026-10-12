@@ -2,6 +2,7 @@
 import { getDb, schema } from '../db';
 import { sql } from 'drizzle-orm';
 import { kindLabel, formatDate, KIDS_KIND_IDS } from '../lib/services';
+import { canAccess } from '../lib/permissions';
 
 /**
  * Attendance over time: the chart, the regulars who have stopped coming, and
@@ -25,6 +26,7 @@ interface Props {
   linkTo: (kind: string) => string;
 }
 const { kind: kindFilter, open = false, linkTo } = Astro.props;
+const user = Astro.locals.user;
 
 const db = getDb(Astro.locals.runtime.env);
 
@@ -156,6 +158,13 @@ const thisKind = KINDS.find(([k]) => k === kindFilter)?.[1] ?? kindLabel(kindFil
             Came to at least 3 of the previous 8 services, then missed the last 4.
             Long enough to mean something; short enough that a holiday doesn't land here.
           </p>
+          {user && canAccess(user.role, '/care') && (
+            <p class="muted" style="margin:-6px 0 12px; font-size:15px;">
+              The <a href="/care">Care</a> list follows these up, counting any service
+              in a week rather than one kind — so someone who moved to the evening
+              service is not on it.
+            </p>
+          )}
           <table>
             <thead><tr><th>Name</th><th>Last seen</th></tr></thead>
             <tbody>

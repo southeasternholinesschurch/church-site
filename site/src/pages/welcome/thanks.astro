@@ -1,0 +1,37 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { copyFor } from '../../lib/copy';
+
+/** Where the guest card lands after it has been kept. Words at /website/copy. */
+const t = await copyFor('welcome');
+---
+<BaseLayout title="Thank You" description="Your card has reached the pastor." noindex>
+  <section class="ty">
+    <div class="ty__body">
+      <p class="label load d1 ty__eyebrow">{t('thanks.eyebrow', 'Received')}</p>
+      <h1 class="serif load d2">{t('thanks.headline', "Thank you — we're so glad you came.")}</h1>
+      <p class="ty__p load d3">
+        {t('thanks.body', 'Your card has gone straight to the pastor. If you asked for a visit or a call, we will be in touch soon.')}
+      </p>
+      <div class="ty__acts load d4">
+        <a href="/bulletin" class="btn btn--solid">{t('thanks.bulletinButton', "This week's bulletin")}</a>
+        <a href="/" class="btn btn--ghost">{t('thanks.homeButton', 'Back to home')}</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<script is:inline>
+  /* The card arrived, so what was typed no longer needs keeping. */
+  try { sessionStorage.removeItem('guest-card:here'); } catch (e) {}
+</script>
+
+<style>
+  .ty { background: var(--ink); color: var(--cream); min-height: 78vh; display: flex; align-items: center; }
+  .ty__body { padding: 130px var(--pad) clamp(70px,8vw,110px); max-width: 760px; }
+  .ty__eyebrow { color: var(--red-tint); margin: 0 0 20px; }
+  .ty h1 { margin: 0; font-size: clamp(40px,5.8vw,84px); line-height: 1.02; letter-spacing: -.02em; }
+  .ty__p { margin: 24px 0 0; font-size: 18px; line-height: 1.72; color: rgba(244,239,231,.78); max-width: 46ch; }
+  .ty__acts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+  @media (max-width: 860px) { .ty__body { padding: 110px var(--pad) 60px; } }
+</style>

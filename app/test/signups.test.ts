@@ -25,8 +25,9 @@
  *
  *   npm test
  */
+import { headerFor, linesFor, packPrint, PAGE_HEIGHT, RUNNING_HEAD, type PrintItem, type PrintPage } from '../src/lib/signup-print.ts';
 import {
-  addDaysIso, availability, closedReason, dayLabel, daysInRange, daysToAdd,
+  addDaysIso, availability, bulletinSignups, clipIntro, closedReason, printParts, PRINT_OPEN_LINES, PRINT_MAX_BLANKS, dayLabel, daysInRange, daysToAdd,
   DEFAULT_REMINDER_BODY, firstNameOf, invalidRangeReason, invalidReminderReason,
   isIsoDate, isSignupKind, MAX_GENERATED_DAYS, nextSeat, planDays, reminderBodyFor,
   reminderDue, reminderKey, reminderMissed, renderReminder, sheetSummary,
@@ -471,6 +472,116 @@ for (const k of ['meal-train', 'list', 'dish']) eq(`${k} is a kind`, isSignupKin
 for (const k of ['', 'mealtrain', 'MEAL-TRAIN', 'drop table']) {
   eq(`${JSON.stringify(k)} is not a kind`, isSignupKind(k), false);
 }
+
+/* ==== the bulletin lists every open sheet ================================ */
+
+{
+  const O = 'https://app.example';
+  const base = { status: 'open', closesOn: null as string | null, eventDate: null as string | null, intro: null as string | null };
+  const sheets = [
+    { ...base, id: 1, token: 'aaa', title: 'Draft dinner', status: 'draft' },
+    { ...base, id: 2, token: 'bbb', title: 'Closed list', status: 'closed' },
+    { ...base, id: 3, token: 'ccc', title: 'Old meal train' },
+    { ...base, id: 4, token: 'ddd', title: 'Meals for a family' },
+    { ...base, id: 5, token: 'eee', title: 'Fall pitch-in', eventDate: '2026-10-25', intro: 'Bring a dish.' },
+    { ...base, id: 6, token: 'fff', title: 'Ushers', closesOn: '2026-10-31' },
+    { ...base, id: 7, token: 'ggg', title: 'Past closing', closesOn: '2026-10-01' },
+  ];
+  const dates = new Map<number, (string | null)[]>([
+    [3, ['2026-09-01', '2026-09-02']],
+    [4, ['2026-10-09', '2026-10-16', '2026-10-14']],
+  ]);
+  const got = bulletinSignups(sheets, dates, '2026-10-12', O);
+  // A draft, a closed sheet, a meal train whose days have passed and a sheet
+  // past its closing date are all left out, as on the public page itself.
+  eq('only open sheets, soonest first, undated last',
+     got.map((s) => s.title), ['Meals for a family', 'Fall pitch-in', 'Ushers']);
+  eq('a meal train reads as the range still ahead',
+     got[0]!.when, `${dayLabel('2026-10-14')} to ${dayLabel('2026-10-16')}`);
+  eq('an event reads as its day', got[1]!.when, dayLabel('2026-10-25'));
+  eq('an undated sheet reads as its closing day', got[2]!.when, `Until ${dayLabel('2026-10-31')}`);
+  eq('the link is the public sheet', got[1]!.url, 'https://app.example/signup/eee');
+  eq('the intro rides along', got[1]!.intro, 'Bring a dish.');
+  eq('nothing open, nothing listed', bulletinSignups([], new Map(), '2026-10-12', O), []);
+}
+
+eq('a short intro is kept whole', clipIntro('  Bring   a dish. '), 'Bring a dish.');
+eq('an empty intro is null', clipIntro('   '), null);
+{
+  const long = 'word '.repeat(100);
+  const c = clipIntro(long)!;
+  eq('a long intro is clipped at a word, with an ellipsis',
+     c.length <= 221 && c.endsWith('word…'), true);
+}
+
+/* ==== the printout: pledges, then a line for every place still open ===== */
+
+{
+  const slot = (id: number, capacity: number | null, o: Partial<{ label: string; onDate: string | null }> = {}) =>
+    ({ id, label: `Part ${id}`, detail: null, onDate: null, capacity, ...o });
+  const t = (slotId: number, name: string, note: string | null = null) =>
+    ({ slotId, name, note, headcount: null });
+  const parts = printParts(
+    [slot(1, 3), slot(2, null), slot(3, 2), slot(4, 40), slot(5, 1, { onDate: '2026-10-14' })],
+    [t(1, 'Ruth', 'Ham'), t(3, 'Ada'), t(3, 'Mary'), t(9, 'Elsewhere')],
+    false,
+  );
+  eq('pledges come first, under their part', parts[0]!.filled.map((f) => f.note), ['Ham']);
+  eq('a line for every place still open', parts[0]!.blanks, 2);
+  eq('no limit prints a few lines', parts[1]!.blanks, PRINT_OPEN_LINES);
+  eq('a full part prints no lines', parts[2]!.blanks, 0);
+  eq('a huge limit is capped, and the rest said in words',
+     [parts[3]!.blanks, parts[3]!.more], [PRINT_MAX_BLANKS, 40 - PRINT_MAX_BLANKS]);
+  eq('a meal-train day prints as its day', parts[4]!.label, dayLabel('2026-10-14'));
+  eq('a closed sheet prints no lines at all',
+     printParts([slot(1, 3), slot(2, null)], [], true).map((p) => p.blanks), [0, 0]);
+}
+
+
+/* ==== the printout packs to the foot of the page ========================= */
+// The pastor pins these on a board, so pages are the cost: keeping every part whole
+// left half-empty columns (2026-10-11). The rules are tested here; the page
+// draws exactly the heights they give.
+
+{
+  const part = (label: string, filled: number, blanks: number) => ({
+    label, detail: null, more: 0, blanks,
+    filled: Array.from({ length: filled }, (_, i) => ({ name: `${label} ${i + 1}`, note: 'Ham', headcount: null })),
+  });
+  const colH = (c: PrintItem[]) => c.reduce((n, it) => n + it.h, 0);
+  const firstPage = PAGE_HEIGHT - headerFor({ title: 'Harvest dinner', when: true, intro: 'Bring a dish.' }).height;
+  const o = { firstPage, heads: false, showLabels: true };
+  const capOf = (pg: number) => (pg === 0 ? firstPage : PAGE_HEIGHT - RUNNING_HEAD);
+  const fits = (pages: PrintPage[]) => pages.every((pg, i) => pg.cols.every((c) => colH(c) <= capOf(i)));
+  const rows = (pages: PrintPage[]) => pages.flatMap((pg) => pg.cols.flat()).filter((it) => it.t !== 'head').length;
+
+  // A short sheet: one page, shared between both columns.
+  const short = packPrint([part('Main', 2, 3), part('Side', 1, 5), part('Dessert', 2, 2), part('Rolls', 0, 2)], o);
+  eq('a short sheet is one page', short.length, 1);
+  eq('both columns are used', short[0]!.cols.every((c) => c.length > 0), true);
+  eq('and are within a few lines of each other',
+     Math.abs(colH(short[0]!.cols[0]) - colH(short[0]!.cols[1])) < 80, true);
+
+  // A big pitch-in: as few pages as the lines need, and nothing lost.
+  const bigParts = Array.from({ length: 8 }, (_, i) => part(`Part ${i}`, 4, 12));
+  const big = packPrint(bigParts, o);
+  const lineTotal = bigParts.reduce((n, p) => n + p.filled.length + p.blanks, 0);
+  eq('every line is printed once', rows(big), lineTotal);
+  eq('no column runs past the foot of its page', fits(big), true);
+  eq('only the last page has room to spare: earlier left columns are full',
+     big.slice(0, -1).every((pg, i) => capOf(i) - colH(pg.cols[0]) < 40), true);
+  const all = big.flatMap((pg) => pg.cols);
+  eq('a part that carries on repeats its heading, marked continued',
+     all.some((c) => c[0]?.t === 'head' && c[0].cont), true);
+  eq('a heading never sits alone at the foot of a column',
+     all.every((c) => c[c.length - 1]?.t !== 'head'), true);
+
+  eq('nothing to print is still one page', packPrint([], o).length, 1);
+}
+
+eq('a short note is one line', linesFor('Ham', 180, 8.2), 1);
+eq('a long note wraps', linesFor('Chicken and dumplings with a pan of cornbread, about 6pm', 180, 8.2) > 1, true);
+eq('an empty cell is one line', linesFor('', 180, 8.2), 1);
 
 console.log(fail ? `\n${fail} FAILED` : '\nall passed');
 if (fail) process.exit(1);

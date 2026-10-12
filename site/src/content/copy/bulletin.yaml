@@ -1,33 +1,73 @@
-# The words on the bulletin page.
+# The bulletin page.
 #
-# Edited in the staff app at /website/copy, one file per page. Every key here
-# is read by the page; if one goes missing the page shows the sentence written
-# into it instead, so a mistake never leaves a heading blank.
+# Most of what a reader sees here is NOT in this file, and should not be: the
+# order of service, announcements, prayer requests, who is singing and the
+# month's birthdays all come from the bulletin published in the staff app each
+# week, and the service times and calendar entries come from Settings. This
+# file is only the fixed furniture — the section headings and the standing
+# sentences around them.
 #
-# Names, times, addresses and links are NOT here — they come from Settings, so
-# one edit fixes them everywhere.
+# The bracketed examples ([Announcement heading] and the like) are also not
+# here. They appear only when no bulletin has been published at all, alongside
+# a notice saying so, and exist to show the shape rather than to be read.
+#
+# Anything missing falls back to the words written in bulletin.astro, so a key
+# removed by accident shows the original sentence rather than a blank.
 
 masthead:
   kicker: "This Week"
   headline: "Bulletin"
   lede: "Everything for this Sunday, in one place. Add it to your home screen and it works without signal."
+  # Used as the service heading only when the published bulletin has no title.
+  defaultService: "Morning Worship"
+
+# Shown when nothing has been published for this Sunday yet.
+notPublished:
+  headline: "This week's bulletin isn't published yet."
+  body: 'The order of service below is an example. "This Week" and the service times are live from the church calendar.'
+
+# Shown when last Sunday's bulletin is still the most recent one.
+lastWeek:
+  headline: "This is last week's bulletin."
+  body: "This Sunday's hasn't been published yet."
+
+# The headings down the page. A section with nothing in it is not printed at
+# all, so renaming one here never makes an empty section appear.
 sections:
   text: "Today's Text"
   announcements: "Announcements"
   prayer: "Prayer"
   singing: "Singing"
+  # Every open sign-up sheet in the app, listed automatically.
+  signups: "Sign Up"
+  # Printed after the month, as in "October Celebrations".
   celebrations: "Celebrations"
   thisWeek: "This Week"
   comingUp: "Coming Up"
   missed: "Missed Last Week?"
+
 text:
+  # Printed before the preacher's name, as in "Preaching · Pastor Alan".
   preachingPrefix: "Preaching"
-singing:
-  nextPrefix: "Next Sunday,"
+
 celebrations:
   birthdays: "Birthdays"
   anniversaries: "Anniversaries"
+
+singing:
+  # Printed before the date, as in "Next Sunday, October 5:".
+  nextPrefix: "Next Sunday,"
+
+signups:
+  # The link under each open sheet.
+  link: "Sign up"
+
 comingUp:
   note: "Dates to keep in mind over the next few months."
+
+# The last service, linked to its page. The two fallbacks are used only when
+# there is no recent service to point at.
 missed:
   button: "Watch"
+  fallbackTitle: "Recent services"
+  fallbackNote: "Every service is on our YouTube channel"

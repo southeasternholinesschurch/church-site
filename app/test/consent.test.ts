@@ -41,25 +41,25 @@ const eq = (label: string, got: unknown, want: unknown) => {
 // A stranger texts START from a number nobody has. Create them, or the opt-in
 // goes nowhere and they never appear anywhere staff can see.
 eq('unknown number creates a person',
-   shouldCreatePersonOnStart({ people: 0, guardians: 0, signups: 0 }), true);
+   shouldCreatePersonOnStart({ people: 0, guardians: 0, signups: 0, guests: 0 }), true);
 
 // Already a member. Their consent is recorded on the row that exists.
 eq('a known member does not',
-   shouldCreatePersonOnStart({ people: 1, guardians: 0, signups: 0 }), false);
+   shouldCreatePersonOnStart({ people: 1, guardians: 0, signups: 0, guests: 0 }), false);
 
 // THE ONE THAT MATTERS. A bus-ministry parent is already known — as a
 // guardian. Creating a person row here is how the congregation's people list
 // quietly fills up with non-members.
 eq('a bus-ministry guardian does NOT create a person',
-   shouldCreatePersonOnStart({ people: 0, guardians: 1, signups: 0 }), false);
+   shouldCreatePersonOnStart({ people: 0, guardians: 1, signups: 0, guests: 0 }), false);
 
 // A parent of three children has three guardian rows. Still not a person.
 eq('several guardian rows on one handset still do not',
-   shouldCreatePersonOnStart({ people: 0, guardians: 3, signups: 0 }), false);
+   shouldCreatePersonOnStart({ people: 0, guardians: 3, signups: 0, guests: 0 }), false);
 
 // A guardian who IS a member exists in both tables. Nothing to create.
 eq('a guardian who is also a member does not',
-   shouldCreatePersonOnStart({ people: 1, guardians: 2, signups: 0 }), false);
+   shouldCreatePersonOnStart({ people: 1, guardians: 2, signups: 0, guests: 0 }), false);
 
 /*
  * A SIGN-UP SHEET ROW IS NOT A REASON TO WITHHOLD ONE, and this is a decision
@@ -70,9 +70,16 @@ eq('a guardian who is also a member does not',
  * their opt-in on the floor is the failure this function exists to prevent.
  */
 eq('a number seen only on a sign-up sheet still creates a person',
-   shouldCreatePersonOnStart({ people: 0, guardians: 0, signups: 1 }), true);
+   shouldCreatePersonOnStart({ people: 0, guardians: 0, signups: 1, guests: 0 }), true);
 eq('but a member who also signed up does not',
-   shouldCreatePersonOnStart({ people: 1, guardians: 0, signups: 2 }), false);
+   shouldCreatePersonOnStart({ people: 1, guardians: 0, signups: 2, guests: 0 }), false);
+
+// A GUEST CARD is the same as a sign-up: somebody who filled in a form once,
+// not a record the church keeps. Their START still creates a person.
+eq('a number seen only on a guest card still creates a person',
+   shouldCreatePersonOnStart({ people: 0, guardians: 0, signups: 0, guests: 1 }), true);
+eq('but a member who also left a card does not',
+   shouldCreatePersonOnStart({ people: 1, guardians: 0, signups: 0, guests: 1 }), false);
 
 /* ==== does a STOP reach every table? ===================================== */
 
@@ -108,11 +115,18 @@ const wrote = (writes: Write[], table: unknown): Write[] =>
   const { db, writes } = recordingDb();
   await applyOptOut(db as never, NUMBER);
 
-  // ALL THREE. Unconditionally, with no prior lookup: the cost of updating zero
+  // ALL FOUR. Unconditionally, with no prior lookup: the cost of updating zero
   // rows is nothing, and a branch here is a branch that can be wrong.
   eq('STOP writes to people', wrote(writes, schema.people).length, 1);
   eq('STOP writes to guardians', wrote(writes, schema.kidGuardians).length, 1);
   eq('STOP writes to sign-ups', wrote(writes, schema.signups).length, 1);
+  // THE FOURTH TABLE. Nothing texts a guest card directly, but "Add to People"
+  // carries the card's consent across — so a STOP that missed the card would
+  // be undone by the next press of that button.
+  eq('STOP writes to guest cards', wrote(writes, schema.guestCards).length, 1);
+  const c = wrote(writes, schema.guestCards)[0]!.values;
+  eq('a guest card is marked opted out', c.smsConsent, 'opted_out');
+  eq('no updated_at is written to guest cards', 'updatedAt' in c, false);
 
   const s = wrote(writes, schema.signups)[0]!.values;
   eq('a sign-up is marked opted out', s.smsConsent, 'opted_out');
@@ -153,10 +167,11 @@ const wrote = (writes: Write[], table: unknown): Write[] =>
 {
   const { db, writes } = recordingDb();
   await applyOptIn(db as never, NUMBER);
-  // Three tables. START does NOT touch the queue — there is nothing in it for
+  // Four tables. START does NOT touch the queue — there is nothing in it for
   // somebody who has just opted in, and resurrecting a skipped message would
   // send a reminder for a day that has long since passed.
-  eq('START writes to the three tables and not the queue', writes.length, 3);
+  eq('START writes to the four tables and not the queue', writes.length, 4);
+  eq('a guest card is marked opted in', wrote(writes, schema.guestCards)[0]!.values.smsConsent, 'opted_in');
   const s = wrote(writes, schema.signups)[0]!.values;
   eq('a sign-up is marked opted in', s.smsConsent, 'opted_in');
 

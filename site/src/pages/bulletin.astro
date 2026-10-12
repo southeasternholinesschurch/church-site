@@ -1,10 +1,10 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { copyFor } from '../lib/copy';
 import { getCollection } from 'astro:content';
 import { getUpcomingEvents } from '../lib/ical';
 import { clockText, eventWhen } from '../lib/format';
 import { isVisibleSermon } from '../lib/content';
+import { copyFor } from '../lib/copy';
 
 /**
  * Discreet — deliberately not in the main nav (brief §7).
@@ -31,6 +31,9 @@ const lastSermon = sermons[0];
 
 const [settingsEntry] = await getCollection('settings');
 const settings = settingsEntry.data;
+
+/** Page text, editable at /website/copy. Falls back to the words below. */
+const t = await copyFor('bulletin');
 
 let weekEvents: Awaited<ReturnType<typeof getUpcomingEvents>> = [];
 let comingUp: Awaited<ReturnType<typeof getUpcomingEvents>> = [];
@@ -87,6 +90,9 @@ interface BulletinData {
     slots: SingSlot[];
     next: { sunday: string; slots: SingSlot[] } | null;
   } | null;
+  /** Every sign-up sheet open when the site was built, with its public link.
+   *  Absent on a feed older than this feature. */
+  signups?: { title: string; intro: string | null; url: string; when: string | null }[];
 }
 let bulletin: BulletinData | null = null;
 try {
@@ -100,6 +106,10 @@ try {
 
 const announcements = bulletin?.announcements ?? [];
 const prayers = bulletin?.prayerRequests ?? [];
+// Only ever links to the app's own /signup/ pages: the feed is ours, but a
+// link printed in a pew should not be able to point anywhere else.
+const signups = (bulletin?.signups ?? []).filter((s) =>
+  s.url.startsWith('https://app.yourchurch.org/signup/'));
 // Generated in the app from the bulletin's own service date, so an October
 // bulletin still lists October when the site rebuilds in November. Two source
 // rules, both in lib/celebrations: adults must be directory-listed, so leaving
@@ -133,14 +143,11 @@ const nextSundayLabel = singingNext
       { month: 'long', day: 'numeric', timeZone: 'UTC' })
   : null;
 
-const serviceLabel = bulletin?.title ?? 'Morning Worship';
+const serviceLabel = bulletin?.title ?? t('masthead.defaultService', 'Morning Worship');
 const dateLabel = bulletin
   ? new Date(`${bulletin.serviceDate}T12:00:00Z`).toLocaleDateString('en-US',
       { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   : null;
-
-/** Page text, editable at /website/copy. Falls back to the words below. */
-const t = await copyFor('bulletin');
 ---
 <BaseLayout
   title="This Week's Bulletin"
@@ -162,14 +169,14 @@ const t = await copyFor('bulletin');
 
       {!bulletin && (
         <p class="draft">
-          <strong>This week's bulletin isn't published yet.</strong> The order of service
-          below is an example. "This Week" and the service times are live from the church
-          calendar.
+          <strong>{t('notPublished.headline', "This week's bulletin isn't published yet.")}</strong>
+          {t('notPublished.body', 'The order of service below is an example. "This Week" and the service times are live from the church calendar.')}
         </p>
       )}
       {bulletin && !bulletin.isCurrent && (
         <p class="draft">
-          <strong>This is last week's bulletin.</strong> This Sunday's hasn't been published yet.
+          <strong>{t('lastWeek.headline', "This is last week's bulletin.")}</strong>
+          {t('lastWeek.body', "This Sunday's hasn't been published yet.")}
         </p>
       )}
 
@@ -209,6 +216,21 @@ const t = await copyFor('bulletin');
           </div>
         ))}
       </section>
+
+      <!-- ============ SIGN-UPS (every open sheet, from the app) ============ -->
+      {signups.length > 0 && (
+        <section class="sec reveal">
+          <div class="sec__h"><h3>{t('sections.signups', 'Sign Up')}</h3><div></div></div>
+          {signups.map((s) => (
+            <div class="ann">
+              {s.when && <span class="ann__when">{s.when}</span>}
+              <h4 class="serif">{s.title}</h4>
+              {s.intro && <p>{s.intro}</p>}
+              <a class="ann__link" href={s.url}>{t('signups.link', 'Sign up')} →</a>
+            </div>
+          ))}
+        </section>
+      )}
 
       <!-- ============ PRAYER ============ -->
       {prayers.length > 0 && (
@@ -312,13 +334,13 @@ const t = await copyFor('bulletin');
         <div class="sec__h"><h3>{t('sections.missed', 'Missed Last Week?')}</h3><div></div></div>
         <div class="missed">
           <div>
-            <p class="missed__t serif">{lastSermon?.data.title ?? lastSermon?.data.service ?? 'Recent services'}</p>
+            <p class="missed__t serif">{lastSermon?.data.title ?? lastSermon?.data.service ?? t('missed.fallbackTitle', 'Recent services')}</p>
             <p class="missed__m">
               {lastSermon?.data.speaker ? `${lastSermon.data.speaker} · ` : ''}
               {lastSermon
                 ? lastSermon.data.date.toLocaleDateString('en-US',
                     { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-                : 'Every service is on our YouTube channel'}
+                : t('missed.fallbackNote', 'Every service is on our YouTube channel')}
             </p>
           </div>
           <a href={lastSermon ? `/sermons/${lastSermon.slug}` : '/sermons'} class="btn btn--ink">{t('missed.button', 'Watch')}</a>
@@ -328,7 +350,7 @@ const t = await copyFor('bulletin');
       <div class="bull__foot">
         <p>
           Fairhaven Community Church<br />
-          412 Meadowbrook Road, Fairhaven
+          3957 Southeastern Avenue, Fairhaven
         </p>
       </div>
     </div>
@@ -420,6 +442,8 @@ const t = await copyFor('bulletin');
   .ann p { margin: 0; font-size: 17px; line-height: 1.72; color: var(--ink-soft); }
   .ann__when { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .14em;
                text-transform: uppercase; color: var(--red); margin-bottom: 8px; }
+  .ann__link { display: inline-block; margin-top: 10px; font-size: 15px; font-weight: 700;
+               color: var(--ink); text-underline-offset: 3px; }
 
   .missed { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
   .missed__t { margin: 0 0 5px; font-size: 24px; line-height: 1.24; }

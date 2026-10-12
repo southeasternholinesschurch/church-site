@@ -1,0 +1,251 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import CareItem from '../../components/CareItem.astro';
+import { readForm } from '../../lib/form';
+import { careAction, CARE_DONE } from '../../lib/care-actions';
+import {
+  churchDate, careKindLabel, dayOf, guestName, guestReason, parseWants, shortDate,
+} from '../../lib/care';
+import {
+  refreshMissing, openQueue, careStaff, recentNotes, recentGuests,
+  getCareSettings, setCareSettings, recipientCandidates, reachableRecipients,
+} from '../../lib/care-db';
+import { parseHhmm } from '../../lib/schedules';
+
+/**
+ * Care — who needs a call, a visit or a welcome, and what has been done.
+ *
+ * ADMIN ONLY, by path, in lib/permissions.ts. The People page is open to the
+ * volunteers who take attendance; this is where the pastoral detail goes
+ * instead, so it never has to be written somewhere they can read it.
+ *
+ * The list is rebuilt from attendance every time this page is opened. That is
+ * cheap, safe to repeat (see refreshMissing), and means there is no job to run
+ * and nothing to fall behind.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const today = churchDate();
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+
+  if (form.get('action') === 'settings') {
+    const ids = form.getAll('recipient').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const time = String(form.get('digestTime') ?? '');
+    error = await setCareSettings(env, {
+      digestOn: form.get('digestOn') === 'on',
+      digestTime: parseHhmm(time) !== null ? time : '',
+      alertOn: form.get('alertOn') === 'on',
+      recipientIds: [...new Set(ids)],
+    }, user.email);
+    if (!error) return Astro.redirect('/care?done=settings#texts', 303);
+  } else {
+    const result = await careAction(env, form, user);
+    if (result && 'redirect' in result) return Astro.redirect(result.redirect, 303);
+    if (result && 'done' in result) return Astro.redirect(`/care?done=${result.done}`, 303);
+    if (result && 'error' in result) error = result.error;
+  }
+}
+
+await refreshMissing(env, today);
+const { now, later } = await openQueue(env, today);
+const staff = await careStaff(env);
+const notes = await recentNotes(env, 20);
+const guests = await recentGuests(env, 40);
+const settings = await getCareSettings(env);
+const candidates = (await recipientCandidates(env))
+  .filter((p) => p.phoneE164 && p.smsConsent === 'opted_in');
+const reachable = await reachableRecipients(env, settings.recipientIds);
+const chosen = settings.recipientIds;
+
+const done = Astro.url.searchParams.get('done');
+const counts = {
+  guest: now.filter((i) => i.kind === 'guest').length,
+  missing: now.filter((i) => i.kind === 'missing').length,
+  reminder: now.filter((i) => i.kind === 'reminder').length,
+};
+const summary = [
+  counts.guest && `${counts.guest} guest ${counts.guest === 1 ? 'card' : 'cards'}`,
+  counts.reminder && `${counts.reminder} ${counts.reminder === 1 ? 'reminder' : 'reminders'}`,
+  counts.missing && `${counts.missing} not been in`,
+].filter(Boolean).join(' · ');
+
+/* Three pickers rather than seventy checkboxes: this is the pastors, and the
+ * list of everyone who can be texted is the whole adult church. */
+const slots = [0, 1, 2].map((i) => chosen[i] ?? null);
+---
+<AppLayout title="Care" user={user}>
+  <h1>Care</h1>
+  <p class="muted lede">
+    Who needs a call, a visit or a welcome — and what has already been done. Only
+    admins can see this page.
+  </p>
+
+  {done && CARE_DONE[done] && <p class="notice notice--ok">{CARE_DONE[done]}</p>}
+  {error && <p class="notice">{error}</p>}
+
+  <section id="list">
+    <h2 class="sect">To follow up <span class="muted sect__n">{now.length ? summary : 'nobody right now'}</span></h2>
+    {now.length === 0 ? (
+      <div class="card empty">
+        <p>
+          Nobody is waiting. Guest cards from the website land here, and so does
+          anybody who came to church most weeks and has not been seen for a month
+          — worked out from attendance every time this page opens.
+        </p>
+        <p class="muted">
+          To set a reminder about somebody — "visit after her surgery" — open their
+          care page from <a href="/people">People</a>.
+        </p>
+      </div>
+    ) : (
+      now.map((item) => <CareItem item={item} today={today} staff={staff} />)
+    )}
+  </section>
+
+  <details class="card fold-card" open={later.length > 0 && now.length === 0}>
+    <summary class="fold">Coming up <span class="muted fold__n">{later.length ? `${later.length} · next ${shortDate(later[0]!.dueOn)}` : 'nothing scheduled'}</span></summary>
+    {later.length === 0 ? (
+      <p class="muted fold__body">Reminders and snoozed follow-ups wait here until their day.</p>
+    ) : (
+      <table class="t-stack fold__body">
+        <thead><tr><th>Who</th><th>When</th><th>What</th></tr></thead>
+        <tbody>
+          {later.map((i) => (
+            <tr>
+              <td><a href={i.personId ? `/care/person/${i.personId}` : `/care/guest/${i.guestId}`}>{i.name}</a></td>
+              <td data-label="When">{shortDate(i.dueOn)}</td>
+              <td data-label="What">{i.reason}{i.assignedName && <span class="muted"> · {i.assignedName}</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </details>
+
+  <details class="card fold-card">
+    <summary class="fold">Recent care <span class="muted fold__n">{notes.length ? `last on ${shortDate(notes[0]!.onDate)}` : 'nothing logged yet'}</span></summary>
+    {notes.length === 0 ? (
+      <p class="muted fold__body">Every visit, call and card logged here or on a person's page, newest first — so whoever is on duty can see what the others have done.</p>
+    ) : (
+      <ul class="log fold__body">
+        {notes.map((n) => (
+          <li>
+            <p class="log__h">
+              <a href={n.personId ? `/care/person/${n.personId}` : `/care/guest/${n.guestId}`}>{n.who}</a>
+              <span class="muted"> · {careKindLabel(n.kind)} · {shortDate(n.onDate)}{n.authorName && ` · ${n.authorName}`}</span>
+            </p>
+            {n.body && <p class="log__b">{n.body}</p>}
+          </li>
+        ))}
+      </ul>
+    )}
+  </details>
+
+  <details class="card fold-card" id="guests">
+    <summary class="fold">Guest cards <span class="muted fold__n">{guests.length ? `${guests.length} · newest ${shortDate(dayOf(guests[0]!.createdAt))}` : 'none yet'}</span></summary>
+    <div class="fold__body">
+      <p class="muted" style="margin-top:0;">
+        From the card on the website — <code>yourchurch.org/welcome</code>
+        for the pew tags and the link-tree, and the "let us know you're coming" form
+        on Plan Your Visit. Each one goes on the list above until somebody has been
+        in touch.
+      </p>
+      {guests.length > 0 && (
+        <table class="t-stack">
+          <thead><tr><th>Name</th><th>Card</th><th>Received</th></tr></thead>
+          <tbody>
+            {guests.map((g) => (
+              <tr>
+                <td><a href={`/care/guest/${g.id}`}>{guestName(g)}</a>{g.personId && <span class="chip" style="margin-left:8px;">On People</span>}</td>
+                <td data-label="Card">{guestReason({ ...g, wants: parseWants(g.wants) })}</td>
+                <td data-label="Received">{shortDate(dayOf(g.createdAt))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  </details>
+
+  <details class="card fold-card" id="texts" open={done === 'settings' || Boolean(error)}>
+    <summary class="fold">Texts to the pastors
+      <span class="muted fold__n">
+        {settings.digestOn ? `Monday digest at ${settings.digestTime}` : 'Monday digest off'}
+        {' · '}{settings.alertOn ? 'guest alerts on' : 'guest alerts off'}
+      </span>
+    </summary>
+    <form method="POST" class="fold__body settings">
+      <input type="hidden" name="action" value="settings" />
+      <p class="muted" style="margin-top:0;">
+        Two texts, to the people chosen below. The <strong>Monday digest</strong> is
+        last week's attendance, who is on the follow-up list, the week's birthdays
+        and who is singing, with a link to the full page — <a href="/digest">see it
+        now</a>. A <strong>guest alert</strong> arrives within a few minutes of a card
+        being filled in, so a visitor can be greeted before they leave.
+      </p>
+
+      <label class="check">
+        <input type="checkbox" name="digestOn" checked={settings.digestOn} />
+        <span><strong>Send the Monday digest</strong>, at
+          <input type="time" name="digestTime" value={settings.digestTime} aria-label="Time on Monday" />
+        </span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="alertOn" checked={settings.alertOn} />
+        <span><strong>Text when a guest card arrives</strong></span>
+      </label>
+
+      <p class="label" style="margin:18px 0 8px; color:var(--red);">Who gets them</p>
+      {candidates.length === 0 ? (
+        <p class="notice">Nobody on the People list is opted in to texts with a mobile number yet.</p>
+      ) : (
+        <div class="who">
+          {slots.map((id, i) => (
+            <label class="field"><span>Person {i + 1}</span>
+              <select name="recipient">
+                <option value="">—</option>
+                {candidates.map((p) => (
+                  <option value={p.id} selected={p.id === id}>{p.firstName} {p.lastName}</option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+      {chosen.length > 0 && reachable.length < chosen.length && (
+        <p class="notice">
+          {chosen.length - reachable.length} of the people chosen cannot be texted
+          right now — no mobile number, or not opted in — and will be skipped.
+        </p>
+      )}
+      <p class="muted" style="font-size:14px;">
+        Only people opted in to texts are offered. The link in each text opens the
+        app, so it is only any use to someone who can sign in as an admin.
+      </p>
+      <button class="btn" type="submit">Save</button>
+    </form>
+  </details>
+</AppLayout>
+
+<style>
+  .lede { max-width: 62ch; margin: -4px 0 22px; }
+  .sect { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 6px 0 14px; }
+  .sect__n { font-size: 15px; font-weight: 400; }
+  .empty p { margin: 0 0 10px; max-width: 62ch; }
+  .empty p:last-child { margin-bottom: 0; }
+  .fold-card { margin-top: 22px; }
+  .fold__body { margin-top: 16px; }
+  .log { list-style: none; padding: 0; }
+  .log li { padding: 10px 0; border-bottom: 1px solid var(--hair); }
+  .log li:last-child { border-bottom: 0; }
+  .log__h { margin: 0; }
+  .log__b { margin: 4px 0 0; white-space: pre-line; color: var(--ink-soft); }
+  .check { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+  .check input[type=checkbox] { width: 20px; height: 20px; }
+  .check input[type=time] { font: inherit; padding: 6px 8px; border: 1px solid var(--hair); border-radius: 6px; }
+  .who { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 14px; }
+  @media (max-width: 700px) { .who { grid-template-columns: 1fr; } }
+</style>

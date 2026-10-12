@@ -2,6 +2,8 @@
 import AppLayout from '../layouts/AppLayout.astro';
 import { getDb, schema } from '../db';
 import { sql, eq, desc } from 'drizzle-orm';
+import { canAccess } from '../lib/permissions';
+import { dueCounts, refreshMissing } from '../lib/care-db';
 
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
@@ -49,6 +51,32 @@ const recent = await db.select().from(schema.services)
 
 const total = counts?.total ?? 0;
 const unknown = counts?.unknown ?? 0;
+
+/*
+ * The follow-up list, as a notice and not as a tile — the same reasoning as the
+ * unconfirmed notice above: it is not reporting a number, it is asking for
+ * something to be done, and it disappears when there is nothing to do. Admins
+ * only, because that is who can open what it links to.
+ */
+const careEnv = Astro.locals.runtime.env;
+// Brought up to date first, like /care itself, so the dashboard is never the
+// one place that has not noticed a regular stopped coming.
+//
+// Caught, because this is the page everybody lands on: a notice that cannot be
+// worked out (the care tables not migrated yet, a slow database) is a notice
+// left off, never a dashboard that will not load.
+let care: Awaited<ReturnType<typeof dueCounts>> | null = null;
+if (canAccess(user.role, '/care')) {
+  try {
+    await refreshMissing(careEnv);
+    care = await dueCounts(careEnv);
+  } catch { care = null; }
+}
+const careLine = care && care.total > 0 ? [
+  care.guest && `${care.guest} guest ${care.guest === 1 ? 'card' : 'cards'}`,
+  care.reminder && `${care.reminder} ${care.reminder === 1 ? 'reminder' : 'reminders'}`,
+  care.missing && `${care.missing} ${care.missing === 1 ? 'regular who has' : 'regulars who have'} not been in`,
+].filter(Boolean).join(', ') : null;
 ---
 <AppLayout title="Dashboard" user={user} backdrop>
   <h1>Dashboard</h1>
@@ -71,6 +99,12 @@ const unknown = counts?.unknown ?? 0;
       The Breeze export had no age, birthday or family role for them. Until that is
       set they are treated as children — kept out of the directory and counted as
       children in attendance. <a href="/people?filter=unknown">Review them</a>.
+    </p>
+  )}
+
+  {careLine && (
+    <p class="notice notice--care">
+      <strong>To follow up:</strong> {careLine}. <a href="/care">Open Care</a>.
     </p>
   )}
 
@@ -150,6 +184,9 @@ const unknown = counts?.unknown ?? 0;
    * edge of every card on the page. Flooring the track at 0 makes the columns
    * a pure division of the row, which is the only way these line up at every
    * width rather than at the one that was checked. */
+  /* Green rather than the warning red: a guest card is good news. */
+  .notice--care { border-color: var(--ok); background: #e8f2eb; color: #16532c; }
+  .notice--care a { color: #16532c; font-weight: 700; }
   .quick {
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 14px; margin-bottom: 26px;

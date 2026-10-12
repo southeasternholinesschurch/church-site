@@ -53,7 +53,13 @@ const sunday = nextSunday();
 const haveThisWeek = all.some((b) => b.serviceDate === sunday);
 ---
 <AppLayout title="Bulletin" user={user}>
-  <h1>Bulletin</h1>
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+    <h1>Bulletin</h1>
+    {/* The singing schedule is planned a quarter at a time, not every week, so
+        it is a door from here rather than a tab of its own — the bulletin is
+        where the singers' names appear. */}
+    <a href="/singing">Singing schedule →</a>
+  </div>
 
   <div class="card" style="margin-bottom:24px;">
     <h2>{haveThisWeek ? 'Another week' : `Start ${formatServiceDate(sunday)}`}</h2>

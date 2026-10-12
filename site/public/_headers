@@ -15,12 +15,15 @@
 # No report collection endpoint is configured, so violations are visible in
 # DevTools only, not aggregated anywhere.
 
+# form-action carries the staff app because the guest card (/welcome, and the
+# form on /visit) posts straight to it — see site/src/lib/app.ts.
+#
 # script-src and connect-src carry cloudflareinsights.com for the Web Analytics
 # beacon: it loads from static.cloudflareinsights.com and POSTs its results to
 # cloudflareinsights.com. Both are needed — allowing only the script leaves the
 # beacon loading and silently unable to report anything.
 /*
-  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self' https://api.web3forms.com; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://cloudflareinsights.com; media-src 'self'
+  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self' https://api.web3forms.com https://app.yourchurch.org; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://cloudflareinsights.com; media-src 'self'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

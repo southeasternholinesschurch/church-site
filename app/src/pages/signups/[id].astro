@@ -706,9 +706,18 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
       </p>
     )}
     <p class="muted hint">
-      Paste it into the bulletin, into a text, or onto the link-tree the pew tags
-      point at.
+      While it is open it goes into the bulletin on its own. Paste it into a
+      text, or onto the link-tree the pew tags point at.
     </p>
+
+    {/* Paper, for the foyer table. What is written on it is typed back in
+        under "Who has signed up" above. */}
+    <h3 style="margin:22px 0 4px;">On paper</h3>
+    <p class="muted sec__why">
+      Everyone signed up so far, then a blank line for every place still open,
+      for people to write their name on.
+    </p>
+    <a class="btn btn--ghost" href={`/signups/${id}/print`}>Print a sign-up sheet</a>
   </div>
 </AppLayout>
 

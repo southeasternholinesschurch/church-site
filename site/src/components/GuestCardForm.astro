@@ -1,0 +1,225 @@
+---
+/**
+ * The guest card — one form, two places.
+ *
+ *   here      the pew card at /welcome, filled in during or after a service
+ *   planning  "let us know you're coming", on Plan Your Visit
+ *
+ * Posts STRAIGHT TO THE STAFF APP, which keeps the card, puts it on the
+ * pastors' follow-up list, and redirects back to this site's thank-you page.
+ * A plain form post with no script required, so it works on any phone in any
+ * pew; the small script below only adds niceties (showing why a card was sent
+ * back, and putting back what was typed).
+ *
+ * Every word is the host page's copy, editable at /website/copy, so this
+ * component carries none of its own.
+ */
+import type { Copy } from '../lib/copy';
+import { GUEST_CARD_URL } from '../lib/app';
+
+interface Props {
+  mode: 'here' | 'planning';
+  t: Copy;
+  /** The Twilio number, for the consent line. Blank hides the tick-box. */
+  smsNumber?: string;
+}
+const { mode, t, smsNumber } = Astro.props;
+
+const WANTS = [
+  { id: 'visit', label: t('card.wantVisit', 'A visit from the pastor') },
+  { id: 'call', label: t('card.wantCall', 'A call or a text') },
+  { id: 'kids', label: t('card.wantKids', 'To hear about Fairhaven Kids and Fairhaven Youth') },
+  { id: 'faith', label: t('card.wantFaith', 'To talk about following Jesus') },
+].filter((w) => w.label);
+
+const HEARD = [
+  t('card.heard1', 'A friend or family member'),
+  t('card.heard2', 'Drove past'),
+  t('card.heard3', 'Facebook or Instagram'),
+  t('card.heard4', 'Searching online'),
+  t('card.heard5', 'Something else'),
+].filter(Boolean);
+
+const PROBLEMS: Record<string, string> = {
+  name: t('problems.name', 'Please tell us your first name.'),
+  email: t('problems.email', "That email address doesn't look quite right — could you check it?"),
+  phone: t('problems.phone', "That phone number doesn't look quite right — could you check it?"),
+  contact: t('problems.contact', 'You asked for a visit or a call — please leave a phone number or an email so we can reach you.'),
+  date: t('problems.date', 'Please pick a day in the next few months, or leave it blank if you are not sure yet.'),
+};
+---
+<form class="gc" id="card" action={GUEST_CARD_URL} method="POST" data-problems={JSON.stringify(PROBLEMS)}>
+  <input type="hidden" name="kind" value={mode} />
+  {/* The honeypot. Hidden from people and from screen readers; a bot fills in
+      everything it finds, and a card with this filled in is quietly dropped. */}
+  <div class="gc__hp" aria-hidden="true">
+    <label>Website <input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+  </div>
+
+  <p class="gc__problem" role="alert" hidden></p>
+
+  <div class="gc__two">
+    <label class="f"><span class="f__l">{t('card.firstLabel', 'First name')}</span>
+      <input type="text" name="first" required maxlength="60" autocomplete="given-name" /></label>
+    <label class="f"><span class="f__l">{t('card.lastLabel', 'Last name')}</span>
+      <input type="text" name="last" maxlength="60" autocomplete="family-name" /></label>
+  </div>
+  <div class="gc__two">
+    <label class="f"><span class="f__l">{t('card.phoneLabel', 'Phone')}</span>
+      <input type="tel" name="phone" maxlength="40" autocomplete="tel" inputmode="tel" /></label>
+    <label class="f"><span class="f__l">{t('card.emailLabel', 'Email')}</span>
+      <input type="email" name="email" maxlength="120" autocomplete="email" /></label>
+  </div>
+
+  {mode === 'planning' ? (
+    <div class="gc__two">
+      <label class="f"><span class="f__l">{t('card.dateLabel', 'When are you thinking of coming?')}</span>
+        <input type="date" name="visitDate" />
+        <span class="f__hint">{t('card.dateHint', 'Leave it blank if you are not sure yet.')}</span></label>
+      <label class="f"><span class="f__l">{t('card.partyLabel', "Who's coming with you?")}</span>
+        <input type="text" name="party" maxlength="200" placeholder={t('card.partyPlaceholder', 'e.g. two adults and two kids')} /></label>
+    </div>
+  ) : (
+    <label class="gc__check gc__first">
+      <input type="checkbox" name="firstTime" value="yes" />
+      <span>{t('card.firstTimeLabel', 'This is my first time here')}</span>
+    </label>
+  )}
+
+  {WANTS.length > 0 && (
+    <fieldset class="gc__wants">
+      <legend class="f__l">{t('card.wantsLabel', "I'd like")}</legend>
+      {WANTS.map((w) => (
+        <label class="gc__check">
+          <input type="checkbox" name="wants" value={w.id} />
+          <span>{w.label}</span>
+        </label>
+      ))}
+    </fieldset>
+  )}
+
+  <label class="f"><span class="f__l">{t('card.messageLabel', "Anything you'd like us to know?")}</span>
+    <textarea name="message" rows="3" maxlength="2000"></textarea></label>
+
+  {HEARD.length > 0 && (
+    <label class="f"><span class="f__l">{t('card.heardLabel', 'How did you hear about us?')} <em>{t('card.optionalWord', 'optional')}</em></span>
+      <select name="heard">
+        <option value=""></option>
+        {HEARD.map((h) => <option value={h}>{h}</option>)}
+      </select></label>
+  )}
+
+  {/* The tick-box IS the consent, the same as the sign-up sheets: unticked, the
+      app stores no consent at all. Only offered when the church has a number. */}
+  {smsNumber && (
+    <label class="gc__check gc__sms">
+      <input type="checkbox" name="sms" />
+      <span>{t('card.smsLabel', 'Fairhaven Community may text me at this number. Message frequency varies; message and data rates may apply. Reply STOP to opt out at any time.')}</span>
+    </label>
+  )}
+
+  <button type="submit" class="btn btn--ink gc__btn">
+    {mode === 'planning' ? t('card.button', "Let us know you're coming") : t('card.button', 'Send to the pastor')}
+  </button>
+  <p class="gc__fine">{t('card.privacy', 'This goes to the pastors and no one else.')}</p>
+</form>
+
+<script is:inline>
+  /* Three small kindnesses, none of them required for the form to work:
+   *   1. a card sent back says why, in words, beside the form;
+   *   2. what was typed is put back, so nobody fills it in twice;
+   *   3. asking for a visit or a call with no way to be reached is caught here,
+   *      before the trip to the server and back.
+   * Wrapped so that a browser without storage (private mode) simply skips 2. */
+  (function () {
+    var form = document.getElementById('card');
+    if (!form) return;
+    var KEY = 'guest-card:' + form.querySelector('[name=kind]').value;
+    var box = form.querySelector('.gc__problem');
+    var problems = {};
+    try { problems = JSON.parse(form.getAttribute('data-problems') || '{}'); } catch (e) {}
+    var show = function (msg) { box.textContent = msg; box.hidden = false; box.scrollIntoView({ block: 'center' }); };
+
+    var problem = new URLSearchParams(location.search).get('problem');
+    if (problem && problems[problem]) {
+      show(problems[problem]);
+      try {
+        var saved = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+        if (saved) {
+          Object.keys(saved).forEach(function (name) {
+            var v = saved[name];
+            form.querySelectorAll('[name="' + name + '"]').forEach(function (el) {
+              if (el.type === 'checkbox') el.checked = Array.isArray(v) ? v.indexOf(el.value) >= 0 : v === el.value || v === 'on';
+              else el.value = v;
+            });
+          });
+        }
+      } catch (e) {}
+    }
+
+    var dateInput = form.querySelector('[name=visitDate]');
+    if (dateInput) {
+      var now = new Date();
+      dateInput.min = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    }
+
+    form.addEventListener('submit', function (e) {
+      var wants = Array.prototype.map.call(form.querySelectorAll('[name=wants]:checked'), function (el) { return el.value; });
+      var reach = form.phone.value.trim() || form.email.value.trim();
+      if (!reach && (wants.indexOf('visit') >= 0 || wants.indexOf('call') >= 0)) {
+        e.preventDefault();
+        show(problems.contact);
+        return;
+      }
+      try {
+        var data = {};
+        new FormData(form).forEach(function (v, k) {
+          if (k === 'website' || k === 'kind') return;
+          if (k === 'wants') { (data.wants = data.wants || []).push(v); } else { data[k] = v; }
+        });
+        sessionStorage.setItem(KEY, JSON.stringify(data));
+      } catch (err) {}
+    });
+  })();
+</script>
+
+<style>
+  .gc { border: 1px solid var(--hair); border-radius: var(--radius-lg); background: var(--cream);
+        padding: clamp(24px, 3.4vw, 42px); }
+  .gc__hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+  .gc__problem { margin: 0 0 24px; font-size: 16px; line-height: 1.6; color: var(--red-deep);
+                 background: #f7e9e9; border-left: 3px solid var(--red); padding: 12px 16px;
+                 border-radius: 0 var(--radius) var(--radius) 0; }
+  .gc__two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
+
+  .f { display: block; margin-bottom: 22px; }
+  .f__l { display: block; font-size: 11px; font-weight: 700; letter-spacing: .16em;
+          text-transform: uppercase; color: var(--ink-soft); margin-bottom: 8px; }
+  .f__l em { font-style: normal; letter-spacing: .1em; color: rgba(74,64,56,.6); }
+  .f__hint { display: block; margin-top: 6px; font-size: 13px; color: var(--ink-soft); }
+  .f input, .f textarea, .f select {
+    width: 100%; font: inherit; font-size: 17px; color: var(--ink);
+    background: transparent; border: 0; border-bottom: 1px solid var(--hair);
+    padding: 9px 0; border-radius: 0; min-height: 44px;
+  }
+  .f textarea { resize: vertical; line-height: 1.6; }
+  .f input:focus, .f textarea:focus, .f select:focus { outline: none; border-bottom-color: var(--red); }
+  .f input:focus-visible, .f textarea:focus-visible, .f select:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
+
+  .gc__wants { border: 0; padding: 0; margin: 0 0 22px; }
+  .gc__wants legend { padding: 0; }
+  .gc__check { display: flex; gap: 12px; align-items: flex-start; font-size: 17px; line-height: 1.45;
+               padding: 8px 0; cursor: pointer; }
+  .gc__check input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--red); }
+  .gc__sms { font-size: 14px; color: var(--ink-soft); margin: 4px 0 18px; }
+  /* A <button> does not inherit the page's font the way a link does, which is
+     why this one rendered in the browser's default face. */
+  .gc__btn { margin-top: 8px; font-family: inherit; cursor: pointer; }
+  .gc__first { margin-bottom: 14px; }
+  .gc__fine { margin: 14px 0 0; font-size: 13px; color: var(--ink-soft); }
+
+  @media (max-width: 640px) {
+    .gc__two { grid-template-columns: 1fr; }
+    .gc__btn { width: 100%; }
+  }
+</style>

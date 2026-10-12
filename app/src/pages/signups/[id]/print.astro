@@ -1,0 +1,231 @@
+---
+import { getDb, schema } from '../../../db';
+import { asc, eq } from 'drizzle-orm';
+import { closedReason, dayLabel, printParts, SIGNUP_KINDS } from '../../../lib/signups';
+import { headerFor, packPrint, PAGE_HEIGHT, RUNNING_HEAD, ROW_LINE, HEAD_DETAIL_LINE } from '../../../lib/signup-print';
+import { localNow } from '../../../lib/schedules';
+import { CHURCH_TZ } from '../../../lib/services';
+
+/**
+ * A sign-up sheet, for paper: what has been pledged so far, then a blank line
+ * for every place still open, to pin on the board or lay on the foyer table
+ * and be written on (the pastor, 2026-10-10). Whatever is written on it is typed
+ * back in on the sheet's page, under "Who has signed up".
+ *
+ * Built like /singing/print: its own page in the church's own type, sheets of
+ * paper on screen with a Print button above them that does not print.
+ *
+ * THE LAYOUT IS DONE IN lib/signup-print.ts, page by page, in two columns that
+ * fill to the foot before moving on. Read the note at the top of that file
+ * before changing anything here: CSS columns do not print in Safari, keeping
+ * parts whole wasted paper, and every height below is set from the numbers
+ * there, so a change to a font size or a padding here must be made there too.
+ * What you see on screen is page for page what prints.
+ *
+ * Phone numbers are never printed. Names and notes are, because the public
+ * page already shows them to anyone with the link.
+ */
+const db = getDb(Astro.locals.runtime.env);
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id)) return Astro.redirect('/signups', 302);
+
+const [sheet] = await db.select().from(schema.signupSheets)
+  .where(eq(schema.signupSheets.id, id)).limit(1);
+if (!sheet) return new Response('Not found', { status: 404 });
+
+// The same order as the sheet's own page and the public link.
+const slots = await db.select().from(schema.signupSlots)
+  .where(eq(schema.signupSlots.sheetId, id))
+  .orderBy(asc(schema.signupSlots.onDate), asc(schema.signupSlots.sort), asc(schema.signupSlots.id));
+const taken = await db.select({
+  slotId: schema.signups.slotId, name: schema.signups.name,
+  note: schema.signups.note, headcount: schema.signups.headcount,
+}).from(schema.signups)
+  .where(eq(schema.signups.sheetId, id))
+  .orderBy(asc(schema.signups.slotId), asc(schema.signups.seat));
+
+const today = localNow(new Date()).date;
+const shut = closedReason(sheet, slots.map((s) => s.onDate), today);
+const parts = printParts(slots, taken, Boolean(shut));
+
+const dated = slots.map((s) => s.onDate).filter((d): d is string => Boolean(d)).sort();
+const when = dated.length > 1
+  ? `${dayLabel(dated[0]!)} to ${dayLabel(dated[dated.length - 1]!)}`
+  : dated[0] ? dayLabel(dated[0])
+  : sheet.eventDate ? dayLabel(sheet.eventDate) : null;
+
+/* A plain list has one part, and the title has already said what it is. */
+const showLabels = !(sheet.kind === 'list' && slots.length === 1);
+const heads = sheet.askHeadcount;
+const noteHead = sheet.kind === 'dish' ? 'Bringing' : 'Note';
+
+const header = headerFor({ title: sheet.title, when: Boolean(when), intro: sheet.intro });
+const pages = packPrint(parts, { firstPage: PAGE_HEIGHT - header.height, heads, showLabels });
+
+const kind = SIGNUP_KINDS.find((k) => k.id === sheet.kind)?.label ?? 'Sign-up';
+const printed = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: CHURCH_TZ });
+const px = (n: number) => `${n}px`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{sheet.title} · Sign-up sheet</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/staff-icons/favicon-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style is:global>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+      :root {
+        --ink:#1a1512; --ink-soft:#5a4f46; --red:#b01818; --cream:#f4efe7; --hair:rgba(26,21,18,.16);
+        --serif:'Instrument Serif', Georgia, 'Times New Roman', serif;
+        --sans:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; background: var(--cream); color: var(--ink); font-family: var(--sans); }
+
+      /* ---- the bar above the paper, screen only ---- */
+      .bar { position: sticky; top: 0; z-index: 2; background: var(--ink); color: var(--cream);
+             display: flex; gap: 14px; align-items: center; justify-content: space-between;
+             flex-wrap: wrap; padding: 10px clamp(16px, 4vw, 32px); }
+      .bar a { color: rgba(244,239,231,.85); font-size: 15px; }
+      .bar span { font-size: 15px; color: rgba(244,239,231,.85); }
+      .bar button { font: inherit; font-weight: 700; font-size: 15px; cursor: pointer;
+                    background: var(--cream); color: var(--ink); border: 0; border-radius: 6px;
+                    min-height: 40px; padding: 8px 18px; }
+
+      /* ---- each sheet of paper: Letter, 0.55in top and bottom, 0.65in sides ---- */
+      .page { width: 8.5in; height: 11in; margin: 28px auto; background: #fff; overflow: hidden;
+              padding: 0.55in 0.65in; box-shadow: 0 2px 24px rgba(26,21,18,.14); }
+      /* SCREEN only, as on /singing/print: without `screen` this matches the
+         Letter print viewport too. */
+      @media screen and (max-width: 9in) {
+        .page { width: auto; height: auto; margin: 16px; padding: 24px 18px; }
+        .col, .col + .col { float: none !important; width: auto !important; }
+      }
+
+      /* ---- the top of page one ---- */
+      .top { overflow: hidden; }
+      .kicker { margin: 0; height: 22px; display: flex; justify-content: space-between; gap: 12px;
+                font-size: 9pt; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--red); }
+      .kicker span:last-child { color: var(--ink-soft); letter-spacing: .08em; white-space: nowrap; }
+      h1 { margin: 0 0 6px; font-family: var(--serif); font-weight: 400; font-size: 36pt;
+           line-height: 46px; letter-spacing: -.01em; overflow: hidden;
+           display: -webkit-box; -webkit-box-orient: vertical; }
+      .when { margin: 0; height: 30px; font-family: var(--serif); font-style: italic; font-size: 16pt;
+              line-height: 26px; color: var(--ink-soft); }
+      .intro { margin: 0 0 8px; font-size: 11pt; line-height: 20px; color: var(--ink-soft); overflow: hidden;
+               display: -webkit-box; -webkit-box-orient: vertical; }
+      .how { margin: 0; height: 26px; font-size: 10pt; line-height: 20px; color: var(--ink-soft); }
+      .how--closed { font-weight: 700; color: var(--red); }
+
+      /* ---- pages after the first ---- */
+      .running { margin: 0; display: flex; justify-content: space-between; gap: 12px;
+                 font-size: 9pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+                 color: var(--ink-soft); white-space: nowrap; overflow: hidden; }
+
+      /* ---- two columns, floated (flex and CSS columns both misbehave in Safari) ---- */
+      .cols { display: flow-root; }
+      .col { float: left; width: calc(50% - 19px); }
+      .col + .col { float: right; }
+
+      .head { overflow: hidden; }
+      .head h2 { margin: 0; height: 18px; font-size: 9.5pt; line-height: 18px; font-weight: 700;
+                 letter-spacing: .18em; text-transform: uppercase; color: var(--red);
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .head h2 em { font-style: normal; font-weight: 400; letter-spacing: .06em; text-transform: none; color: var(--ink-soft); }
+      .head p { margin: 0; font-size: 10pt; line-height: 15px; color: var(--ink-soft); overflow: hidden;
+                display: -webkit-box; -webkit-box-orient: vertical; }
+
+      .row { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0 12px; align-items: start;
+             padding: 4px 0 3px; border-bottom: 1px solid var(--hair); overflow: hidden; }
+      .row--heads { grid-template-columns: 1fr 1.4fr 48px; }
+      .row span { font-size: 11pt; line-height: 18px; overflow: hidden; overflow-wrap: anywhere;
+                  display: -webkit-box; -webkit-box-orient: vertical; }
+      .row .n { text-align: right; }
+      .row--cols { height: 22px; padding: 6px 0 0; border-bottom: 2px solid var(--ink); align-items: end; }
+      .row--cols span { font-size: 7.5pt; line-height: 12px; font-weight: 700; letter-spacing: .14em;
+                        text-transform: uppercase; color: var(--ink-soft); white-space: nowrap; }
+      /* A line to write on: tall enough for handwriting, a darker rule. */
+      .row--blank { border-bottom-color: rgba(26,21,18,.42); }
+      .note { margin: 0; font-size: 10pt; line-height: 22px; font-style: italic; color: var(--ink-soft); }
+
+      @page { size: letter portrait; margin: 0.55in 0; }
+      @media print {
+        body { background: #fff; }
+        .bar { display: none; }
+        .page { width: auto; height: auto; margin: 0; padding: 0 0.65in; box-shadow: none; overflow: visible;
+                break-after: page; page-break-after: always; }
+        .page:last-child { break-after: auto; page-break-after: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <a href={`/signups/${id}`}>← Back to the sheet</a>
+      <span>{pages.length === 1 ? 'One page' : `${pages.length} pages`}</span>
+      <button type="button" onclick="window.print()">Print</button>
+    </div>
+
+    {pages.map((pg, i) => (
+      <section class="page">
+        {i === 0 ? (
+          <div class="top" style={`height:${px(header.height)}`}>
+            <p class="kicker"><span>Fairhaven Community Church · {kind}</span><span>Printed {printed}</span></p>
+            <h1 style={`-webkit-line-clamp:${header.titleLines};max-height:${px(header.titleLines * 46)}`}>{sheet.title}</h1>
+            {when && <p class="when">{when}</p>}
+            {header.introLines > 0 && (
+              <p class="intro" style={`-webkit-line-clamp:${header.introLines};max-height:${px(header.introLines * 20)}`}>{sheet.intro}</p>
+            )}
+            {shut
+              ? <p class="how how--closed">This sign-up has closed. The list below is final.</p>
+              : <p class="how">Write your name on an open line. Already signed up online? You are listed below.</p>}
+          </div>
+        ) : (
+          <p class="running" style={`height:${px(RUNNING_HEAD)}`}>
+            <span>{sheet.title} · continued</span><span>Page {i + 1} of {pages.length}</span>
+          </p>
+        )}
+
+        <div class="cols">
+          {pg.cols.map((col) => (
+            <div class="col">
+              {col.map((it) =>
+                it.t === 'head' ? (
+                  <div class="head" style={`height:${px(it.h)};padding-top:${it.gap ? '14px' : '0'}`}>
+                    {it.label !== null && <h2>{it.label}{it.cont && <em> · continued</em>}</h2>}
+                    {it.detail && (
+                      <p style={`-webkit-line-clamp:${it.detailLines};max-height:${px(it.detailLines * HEAD_DETAIL_LINE)}`}>{it.detail}</p>
+                    )}
+                    <div class:list={['row', 'row--cols', heads && 'row--heads']} aria-hidden="true">
+                      <span>Name</span><span>{noteHead}</span>{heads && <span class="n">Count</span>}
+                    </div>
+                  </div>
+                ) : it.t === 'row' ? (
+                  <div class:list={['row', heads && 'row--heads']} style={`height:${px(it.h)}`}>
+                    <span style={`-webkit-line-clamp:${it.lines};max-height:${px(it.lines * ROW_LINE)}`}>{it.name}</span>
+                    <span style={`-webkit-line-clamp:${it.lines};max-height:${px(it.lines * ROW_LINE)}`}>{it.note ?? ''}</span>
+                    {heads && <span class="n">{it.headcount ?? ''}</span>}
+                  </div>
+                ) : it.t === 'blank' ? (
+                  <div class:list={['row', 'row--blank', heads && 'row--heads']} style={`height:${px(it.h)}`}></div>
+                ) : it.t === 'more' ? (
+                  <p class="note" style={`height:${px(it.h)}`}>…and room for {it.n} more.</p>
+                ) : (
+                  <p class="note" style={`height:${px(it.h)}`}>Nobody signed up.</p>
+                ),
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+    ))}
+  </body>
+</html>

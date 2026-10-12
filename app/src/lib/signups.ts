@@ -481,3 +481,111 @@ export function sheetSummary(
   if (kind === 'dish') return `${taken} of ${places} claimed`;
   return `${taken} of ${places} signed up`;
 }
+
+/* -------------------------------------------------------- the bulletin -- */
+
+/** One open sheet as the bulletin prints it. */
+export interface BulletinSignup {
+  title: string;
+  /** The sheet's intro, clipped: a bulletin entry, not the whole page. */
+  intro: string | null;
+  url: string;
+  /** "Tuesday, 14 October", a range for a meal train, or null. */
+  when: string | null;
+}
+
+/** Long enough for a sentence or two, short enough to stay an entry. */
+export const BULLETIN_INTRO_MAX = 220;
+
+export function clipIntro(intro: string | null | undefined, max = BULLETIN_INTRO_MAX): string | null {
+  const s = (intro ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,.;:–—-]+$/, '')}…`;
+}
+
+/**
+ * Every OPEN sheet, for the bulletin (the pastor, 2026-10-10: "if there is an open
+ * sign up sheet, it automatically goes in any bulletin").
+ *
+ * Open means exactly what the public page means: status 'open' AND
+ * closedReason says nothing. A draft never appears, and neither does a meal
+ * train whose days have all passed though nobody pressed Close.
+ *
+ * Soonest first, by the first date still ahead; undated sheets go last.
+ */
+export function bulletinSignups(
+  sheets: (SheetTiming & { id: number; token: string; title: string; intro: string | null })[],
+  slotDates: Map<number, (string | null)[]>,
+  today: string,
+  origin: string,
+): BulletinSignup[] {
+  return sheets
+    .filter((s) => s.status === 'open' && closedReason(s, slotDates.get(s.id) ?? [], today) === null)
+    .map((s) => {
+      const ahead = (slotDates.get(s.id) ?? [])
+        .filter((d): d is string => isIsoDate(d) && d! >= today).sort();
+      const first = ahead[0] ?? (isIsoDate(s.eventDate) && s.eventDate! >= today ? s.eventDate! : null);
+      const last = ahead[ahead.length - 1];
+      const when = ahead.length > 1 && last !== first
+        ? `${dayLabel(first!)} to ${dayLabel(last!)}`
+        : first ? dayLabel(first)
+        : isIsoDate(s.closesOn) ? `Until ${dayLabel(s.closesOn!)}` : null;
+      return {
+        sort: first ?? '9999-12-31',
+        item: { title: s.title, intro: clipIntro(s.intro), url: `${origin}/signup/${s.token}`, when },
+      };
+    })
+    .sort((a, b) => a.sort.localeCompare(b.sort) || a.item.title.localeCompare(b.item.title))
+    .map((x) => x.item);
+}
+
+/* ------------------------------------------------------- the printout -- */
+
+/** Blank lines under a part with no limit: room for a few, not a whole page. */
+export const PRINT_OPEN_LINES = 4;
+/** No part prints more blank lines than this, whatever its limit says. */
+export const PRINT_MAX_BLANKS = 12;
+
+export interface PrintPart {
+  label: string;
+  detail: string | null;
+  filled: { name: string; note: string | null; headcount: number | null }[];
+  /** Empty lines to write a name on. */
+  blanks: number;
+  /** Places beyond the blank lines printed, said in words. */
+  more: number;
+}
+
+/**
+ * The sheet as paper: who has pledged what, then a blank line for every place
+ * still open, so it can sit on the foyer table and be written on (the pastor,
+ * 2026-10-10).
+ *
+ * A CLOSED SHEET PRINTS NO BLANK LINES. It is a record then, and a line to
+ * write on would invite a name nobody will ever see.
+ */
+export function printParts(
+  slots: { id: number; label: string; detail: string | null; onDate: string | null; capacity: number | null }[],
+  taken: { slotId: number; name: string; note: string | null; headcount: number | null }[],
+  closed: boolean,
+): PrintPart[] {
+  return slots.map((s) => {
+    const filled = taken.filter((t) => t.slotId === s.id)
+      .map((t) => ({ name: t.name, note: t.note, headcount: t.headcount }));
+    const open = closed ? 0
+      : s.capacity === null ? PRINT_OPEN_LINES
+      : Math.max(0, s.capacity - filled.length);
+    const blanks = Math.min(open, PRINT_MAX_BLANKS);
+    return {
+      label: s.onDate ? dayLabel(s.onDate) : s.label,
+      detail: s.detail,
+      filled,
+      blanks,
+      more: s.capacity === null ? 0 : open - blanks,
+    };
+  });
+}
+

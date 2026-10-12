@@ -8,7 +8,7 @@ export default defineConfig({
   // The only place the origin is configured. It builds the canonical tags and
   // the Contact form's redirect, so it must always name the address the site
   // is actually served from. Cutover from the old Tithely site is done.
-  site: 'https://example.org',
+  site: 'https://yourchurch.org',
   output: 'static',
   image: {
     // Astro's built-in image pipeline (sharp) — automatic WebP + responsive
@@ -25,7 +25,10 @@ export default defineConfig({
     // sitemap while telling robots not to index it is a contradiction, and
     // the bulletin carries members' and children's names beside their dates.
     sitemap({
-      filter: (page) => !/\/(bulletin|admin)\/?$/.test(new URL(page).pathname),
+      // The pew card and the two thank-you pages are noindex as well: a card
+      // handed out in the building, and pages that only make sense after it.
+      filter: (page) => !/\/(bulletin|admin|welcome|welcome\/thanks|visit\/thanks|contact\/thank-you)\/?$/
+        .test(new URL(page).pathname),
     }),
   ],
 });

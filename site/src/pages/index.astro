@@ -1,6 +1,5 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { copyFor } from '../lib/copy';
 import EventCard from '../components/EventCard.astro';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
@@ -10,6 +9,10 @@ import { clockLabel } from '../lib/format';
 import heroImg from '../assets/photos/worship.jpg';
 import quoteImg from '../assets/photos/prayer.jpg';
 import { MINISTRY_PHOTOS } from '../lib/ministry-assets';
+import { copyFor } from '../lib/copy';
+import { churchJsonLd, websiteJsonLd } from '../lib/structured-data';
+import { getImage } from 'astro:assets';
+import buildingPhoto from '../assets/photos/exterior.jpg';
 
 const [settingsEntry] = await getCollection('settings');
 const settings = settingsEntry.data;
@@ -34,11 +37,18 @@ const ministries = (await getCollection('ministries')).sort((a, b) => a.data.ord
  */
 const ministryImages = MINISTRY_PHOTOS;
 
-
 /** Page text, editable at /website/copy. Falls back to the words below. */
 const t = await copyFor('home');
+
+/* The building, for the church's listing in search — a map result shows a
+ * photograph, and the front of the church is the one that helps someone find it. */
+const building = await getImage({ src: buildingPhoto, width: 1200, format: 'jpg' });
+
 ---
-<BaseLayout title="Home">
+<BaseLayout
+  title="A Church Family in Fairhaven"
+  jsonLd={[churchJsonLd(settings, Astro.site, building.src), websiteJsonLd(settings, Astro.site)]}
+>
   <!-- ============ HERO ============ -->
   <section class="hero grain" data-par-frame>
     <!-- The photo drifts as the hero crosses the viewport while the copy
@@ -68,11 +78,10 @@ const t = await copyFor('home');
         <p class="label load d1 hero__eyebrow">{t('hero.eyebrow', 'Welcome · Worship · Word')}</p>
         <h1 class="serif load d2">{t('hero.headline', 'A place to')} <em>{t('hero.headlineEmphasis', 'call home')}</em></h1>
         <p class="hero__lede load d3">
-          More than a congregation — a family where hearts are mended, hope is
-          restored, and lives are changed.
+          {t('hero.lede', 'More than a congregation — a family where hearts are mended, hope is restored, and lives are changed.')}
         </p>
         <div class="hero__acts load d4">
-          <a href="/about" class="btn btn--solid">{t('hero.primaryButton', 'Plan Your Visit')}</a>
+          <a href="/visit" class="btn btn--solid">{t('hero.primaryButton', 'Plan Your Visit')}</a>
           <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--ghost">{t('hero.secondaryButton', 'Get Directions')}</a>
         </div>
       </div>
@@ -82,15 +91,15 @@ const t = await copyFor('home');
         <div class="times__rule growx"></div>
         <p class="label times__h">{t('gather.eyebrow', 'We Gather')}</p>
         {settings.serviceTimes.map((s) => {
-          const t = clockLabel(s.time);
+          const clock = clockLabel(s.time);
           return (
             <div class="times__row">
-              <div class="serif times__n">{t.time}<span>{t.suffix}</span></div>
+              <div class="serif times__n">{clock.time}<span>{clock.suffix}</span></div>
               <div class="label times__l">{s.label}</div>
             </div>
           );
         })}
-        <p class="times__addr">412 Meadowbrook Road<br />Fairhaven, IN 46140</p>
+        <p class="times__addr">3957 Southeastern Ave<br />Fairhaven, IN 46203</p>
       </div>
     </div>
   </section>
@@ -107,16 +116,16 @@ const t = await copyFor('home');
       <p class="label gather__h reveal">{t('gather.eyebrow', 'We Gather')}</p>
       <dl class="gather__list">
         {settings.serviceTimes.map((s) => {
-          const t = clockLabel(s.time);
+          const clock = clockLabel(s.time);
           return (
             <div class="gather__row reveal">
-              <dt class="serif gather__n">{t.time}<span>{t.suffix}</span></dt>
+              <dt class="serif gather__n">{clock.time}<span>{clock.suffix}</span></dt>
               <dd class="label gather__l">{s.label}</dd>
             </div>
           );
         })}
       </dl>
-      <p class="gather__addr reveal">412 Meadowbrook Road<br />Fairhaven, IN 46140</p>
+      <p class="gather__addr reveal">3957 Southeastern Ave<br />Fairhaven, IN 46203</p>
     </div>
   </section>
 
@@ -124,8 +133,8 @@ const t = await copyFor('home');
   <section class="mission wrap">
     <h2 class="label reveal mission__h">{t('mission.eyebrow', "Why We're Here")}</h2>
     <p class="serif reveal mission__stmt">
-      We exist to glorify God by making Christ known, nurturing believers, and
-      serving our community with <em>love and truth</em>.
+      {t('mission.statement', 'We exist to glorify God by making Christ known, nurturing believers, and serving our community with')}
+      <em>{t('mission.statementEmphasis', 'love and truth')}</em>.
     </p>
     <div class="growx mission__rule"></div>
   </section>
@@ -136,22 +145,19 @@ const t = await copyFor('home');
       <div class="serif beat__n">01</div>
       <div class="beat__rule"></div>
       <h3 class="serif">{t('expect.welcome.title', 'A warm welcome')}</h3>
-      <p>You'll be greeted, not processed. Come as you are — no dress code, and no
-         expectation that you already know anyone.</p>
+      <p>{t('expect.welcome.body', "You'll be greeted, not processed. Come as you are — no dress code, and no expectation that you already know anyone.")}</p>
     </div>
     <div class="beat reveal">
       <div class="serif beat__n">02</div>
       <div class="beat__rule"></div>
       <h3 class="serif">{t('expect.worship.title', 'Heartfelt worship')}</h3>
-      <p>Hymns sung together, from the book. Reverence and joy in the same room —
-         tradition held with authenticity.</p>
+      <p>{t('expect.worship.body', 'Hymns sung together, from the book. Reverence and joy in the same room — tradition held with authenticity.')}</p>
     </div>
     <div class="beat reveal">
       <div class="serif beat__n">03</div>
       <div class="beat__rule"></div>
       <h3 class="serif">{t('expect.preaching.title', 'Preaching for real life')}</h3>
-      <p>Biblical and direct, grounded in the week you actually just had —
-         conviction carried with compassion.</p>
+      <p>{t('expect.preaching.body', 'Biblical and direct, grounded in the week you actually just had — conviction carried with compassion.')}</p>
     </div>
   </section>
 
@@ -170,8 +176,8 @@ const t = await copyFor('home');
     <div class="band__grade"></div>
     <div class="band__body wrap">
       <p class="serif band__quote par-fg fade" data-par="-40">
-        “Whether you're seeking answers, carrying a burden, or just looking for a
-        spiritual home — <em>you're always welcome here.</em>”
+        “{t('quote.text', "Whether you're seeking answers, carrying a burden, or just looking for a spiritual home —")}
+        <em>{t('quote.emphasis', "you're always welcome here.")}</em>”
       </p>
     </div>
   </section>

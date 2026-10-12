@@ -1,6 +1,5 @@
 ---
 import { Image } from 'astro:assets';
-import { copyFor } from '../lib/copy';
 import type { CollectionEntry } from 'astro:content';
 // Two versions of the same wordmark, named by WHERE they go rather than what
 // colour they are — picking the wrong one is the easy mistake. Both are
@@ -8,6 +7,7 @@ import type { CollectionEntry } from 'astro:content';
 // shift in the layout.
 import wordmarkOnDark from '../assets/brand/wordmark-on-dark.png';
 import wordmarkOnLight from '../assets/brand/wordmark-on-light.png';
+import { copyFor } from '../lib/copy';
 
 interface Props {
   settings: CollectionEntry<'settings'>['data'];
@@ -16,19 +16,21 @@ interface Props {
 const { settings, theme = 'dark' } = Astro.props;
 const wordmark = theme === 'light' ? wordmarkOnLight : wordmarkOnDark;
 
+/** Nav and footer text, editable at /website/copy. */
+const t = await copyFor('navigation');
+
 // Bulletin and Directory are deliberately absent — both are discreet pages
 // reachable by direct URL or PWA shortcut only (brief §3, §7, §8).
 const links = [
-  { href: '/about', label: 'About' },
-  { href: '/ministries', label: 'Ministries' },
-  { href: '/sermons', label: 'Sermons' },
-  { href: '/events', label: 'Events' },
-  { href: '/give', label: 'Give' },
+  { href: '/visit', label: t('nav.visit', 'Plan a Visit') },
+  { href: '/about', label: t('nav.about', 'About') },
+  { href: '/ministries', label: t('nav.ministries', 'Ministries') },
+  { href: '/sermons', label: t('nav.sermons', 'Sermons') },
+  { href: '/events', label: t('nav.events', 'Events') },
+  { href: '/give', label: t('nav.give', 'Give') },
 ];
 const current = Astro.url.pathname;
 
-/** Page text, editable at /website/copy. Falls back to the words below. */
-const t = await copyFor('navigation');
 ---
 <header data-site-header class:list={['nav', theme === 'light' && 'nav--light']}>
   <div class="nav__inner">
@@ -75,7 +77,7 @@ const t = await copyFor('navigation');
   .nav__brand :global(.nav__wordmark) { height: 34px; width: auto; display: block; }
 
   .nav__links { display: flex; align-items: center; gap: 34px; }
-  .nav__links a { color: rgba(244,239,231,.74); font-size: 14px; }
+  .nav__links a { color: rgba(244,239,231,.74); font-size: 14px; white-space: nowrap; }
   .nav__links a:hover,
   .nav__links a[aria-current='page'] { color: var(--cream); }
   .nav__cta {
@@ -105,7 +107,9 @@ const t = await copyFor('navigation');
 
   .nav__panel { display: none; }
 
-  @media (max-width: 860px) {
+  /* 1000, not the site's usual 860: with Plan a Visit the links need about
+     920px on one line, and below that they wrapped into the wordmark. */
+  @media (max-width: 1000px) {
     .nav__links { display: none; }
     .nav__burger { display: block; }
     .nav__panel[hidden] { display: none; }

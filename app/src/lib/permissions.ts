@@ -77,7 +77,17 @@ const KIDS_DIRECTOR_ONLY = [
  * carries links into Cloudflare and Twilio consoles, which is not a list an
  * editor needs either.
  */
-const ADMIN_ONLY = ['/staff', '/website', '/api/site'];
+const ADMIN_ONLY = ['/staff', '/website', '/api/site', '/care', '/digest'];
+
+/*
+ * /care and /digest are pastoral, and that is the whole reason they are here.
+ *
+ * The care log is where a pastor writes "hospital Tuesday, the biopsy came back"
+ * — and the People page, where such things used to have nowhere better to go
+ * than the notes box, is open to every volunteer who takes attendance. The
+ * digest summarises the same list. An editor is somebody trusted with the
+ * register, not with that; making them an admin is the way to give them both.
+ */
 
 /*
  * /api/site is listed separately and deliberately. The screens live under

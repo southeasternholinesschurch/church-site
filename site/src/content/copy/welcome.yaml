@@ -1,0 +1,60 @@
+# The guest card — the page the pew NFC tags and the link-tree open
+# (yourchurch.org/welcome).
+#
+# Edited in the staff app at /website/copy. What people send arrives in the
+# staff app under Care, not in the church inbox. Anything missing here falls
+# back to the words in welcome.astro; an empty "" hides that line.
+
+hero:
+  eyebrow: "Welcome"
+  headline: "We're glad you're here."
+  lede: "Whether it's your first Sunday or your fiftieth, let us know you came. Only your first name is needed — and if you'd like a visit or a call, this is the way to ask."
+
+card:
+  firstLabel: "First name"
+  lastLabel: "Last name"
+  phoneLabel: "Phone"
+  emailLabel: "Email"
+  firstTimeLabel: "This is my first time here"
+  wantsLabel: "I'd like"
+  # Clear one of these ("") to take it off the card.
+  wantVisit: "A visit from the pastor"
+  wantCall: "A call or a text"
+  wantKids: "To hear about Fairhaven Kids and Fairhaven Youth"
+  wantFaith: "To talk about following Jesus"
+  messageLabel: "Anything you'd like us to know?"
+  heardLabel: "How did you hear about us?"
+  optionalWord: "optional"
+  # The choices under "How did you hear about us?". Clear one to remove it.
+  heard1: "A friend or family member"
+  heard2: "Drove past"
+  heard3: "Facebook or Instagram"
+  heard4: "Searching online"
+  heard5: "Something else"
+  # The tick-box. Its wording IS the texting consent, so keep the STOP line.
+  smsLabel: "Fairhaven Community may text me at this number. Message frequency varies; message and data rates may apply. Reply STOP to opt out at any time."
+  button: "Send to the pastor"
+  privacy: "This goes to the pastors and no one else."
+
+# Shown above the card when it is sent back.
+problems:
+  name: "Please tell us your first name."
+  email: "That email address doesn't look quite right — could you check it?"
+  phone: "That phone number doesn't look quite right — could you check it?"
+  contact: "You asked for a visit or a call — please leave a phone number or an email so we can reach you."
+  date: "Please pick a day in the next few months, or leave it blank if you are not sure yet."
+
+links:
+  heading: "While you are here"
+  bulletin: "This week's bulletin"
+  ministries: "For kids, youth and families"
+  beliefs: "What we believe"
+  give: "Give"
+
+# The page after the card is sent (/welcome/thanks).
+thanks:
+  eyebrow: "Received"
+  headline: "Thank you — we're so glad you came."
+  body: "Your card has gone straight to the pastor. If you asked for a visit or a call, we will be in touch soon."
+  bulletinButton: "This week's bulletin"
+  homeButton: "Back to home"

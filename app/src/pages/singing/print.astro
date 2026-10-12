@@ -1,0 +1,224 @@
+---
+import { quarterOf, quarterFromKey, sundaysBetween, monthName, printRow, type PrintRow } from '../../lib/singing';
+import { scheduleSource, scheduleRows, rosterDays, getPrintNote } from '../../lib/singing-db';
+import { churchDate } from '../../lib/care';
+import { CHURCH_TZ } from '../../lib/services';
+
+/**
+ * The singing schedule, for paper — one quarter on one Letter page, to pin on
+ * the board or hand to the singers.
+ *
+ * Its own page rather than a print stylesheet on /singing: the editor is a
+ * form full of inputs and status chips, and making that print well would mean
+ * hiding most of it. This is the schedule as a document, in the church's own
+ * type — Instrument Serif and Texta, the same as the website and the bulletin.
+ *
+ * On screen it shows as a sheet of paper with a Print button above it; the
+ * button and the bar it sits in do not print.
+ */
+const env = Astro.locals.runtime.env;
+const today = churchDate();
+const q = quarterFromKey(Astro.url.searchParams.get('q')) ?? quarterOf(today);
+
+const source = await scheduleSource(env);
+let rows: { sunday: string; morning: string | null; evening: string | null }[] = [];
+if (source === 'app') {
+  rows = await scheduleRows(env, q.start, q.end);
+} else if (source === 'sheet') {
+  // Still on the sheet: print what it says, the same way the bulletin reads it.
+  rows = ((await rosterDays(env)) ?? [])
+    .filter((d) => d.sunday >= q.start && d.sunday <= q.end)
+    .map((d) => {
+      const text = (label: string) => {
+        const slot = d.slots.find((x) => x.label === label);
+        return slot ? (slot.note ?? slot.names.join(', ')) : null;
+      };
+      return { sunday: d.sunday, morning: text('Morning'), evening: text('Evening') };
+    });
+}
+const byDate = new Map(rows.map((r) => [r.sunday, r]));
+
+/* Every Sunday of the quarter is printed, filled in or not — a gap on paper is
+ * a question somebody can answer, a missing line is one nobody notices. */
+const months: { name: string; days: PrintRow[] }[] = [];
+for (const sunday of sundaysBetween(q.start, q.end)) {
+  const r = byDate.get(sunday) ?? { sunday, morning: null, evening: null };
+  const name = monthName(sunday);
+  if (months[months.length - 1]?.name !== name) months.push({ name, days: [] });
+  months[months.length - 1]!.days.push(printRow(r));
+}
+
+/*
+ * ONE PAGE, WHATEVER THE QUARTER. Most quarters fit comfortably; a quarter
+ * with fourteen Sundays and three long names in every cell does not, and a
+ * schedule that runs onto a second sheet gets pinned up without it. So the
+ * height is estimated from the text — rows are measured in wrapped lines — and
+ * the type steps down a size, or two, when it would not fit. The figures are
+ * the measured heights of the rendered rows in CSS pixels at each size.
+ */
+const SIZES = [
+  { cls: '', perLine: 38, row: 39, line: 21, pad: 18, month: 34, chrome: 227 },
+  { cls: 'paper--dense', perLine: 44, row: 30, line: 18, pad: 8, month: 30, chrome: 190 },
+  { cls: 'paper--densest', perLine: 50, row: 26, line: 16, pad: 6, month: 26, chrome: 170 },
+];
+const FITS = 930;   // the Letter page less its margins, with a little to spare
+const estimate = (z: (typeof SIZES)[number]) => {
+  const lines = (t: string | undefined) => (t ? Math.max(1, Math.ceil(t.length / z.perLine)) : 1);
+  let h = z.chrome + months.length * z.month;
+  for (const m of months) {
+    for (const d of m.days) {
+      const n = 'span' in d ? 1 : Math.max(lines(d.morning?.text), lines(d.evening?.text));
+      h += Math.max(z.row, z.pad + n * z.line);
+    }
+  }
+  return h;
+};
+const size = SIZES.find((z) => estimate(z) <= FITS) ?? SIZES[SIZES.length - 1]!;
+
+const note = await getPrintNote(env);
+const printed = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: CHURCH_TZ });
+const dayNum = (iso: string) => Number(iso.slice(8, 10));
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Special Singing · {q.label}</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/staff-icons/favicon-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style is:global>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+      :root {
+        --ink:#1a1512; --ink-soft:#5a4f46; --red:#b01818; --cream:#f4efe7; --hair:rgba(26,21,18,.16);
+        --serif:'Instrument Serif', Georgia, 'Times New Roman', serif;
+        --sans:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; background: var(--cream); color: var(--ink); font-family: var(--sans); }
+
+      /* ---- the bar above the paper, screen only ---- */
+      .bar { position: sticky; top: 0; z-index: 2; background: var(--ink); color: var(--cream);
+             display: flex; gap: 14px; align-items: center; justify-content: space-between;
+             flex-wrap: wrap; padding: 10px clamp(16px, 4vw, 32px); }
+      .bar a { color: rgba(244,239,231,.85); font-size: 15px; }
+      .bar button { font: inherit; font-weight: 700; font-size: 15px; cursor: pointer;
+                    background: var(--cream); color: var(--ink); border: 0; border-radius: 6px;
+                    min-height: 40px; padding: 8px 18px; }
+
+      /* ---- the paper ---- */
+      .paper { width: 8.5in; min-height: 11in; margin: 28px auto 60px; background: #fff;
+               padding: 0.6in 0.65in 0.55in; box-shadow: 0 2px 24px rgba(26,21,18,.14);
+               display: flex; flex-direction: column; }
+      /* SCREEN only. A Letter page is itself 8.5in wide, so without `screen`
+         this rule caught the printout too and printed it with 20px margins. */
+      @media screen and (max-width: 9in) {
+        .paper { width: auto; min-height: 0; margin: 16px; padding: 28px 20px; }
+      }
+
+      .kicker { margin: 0; font-size: 9.5pt; font-weight: 700; letter-spacing: .24em;
+                text-transform: uppercase; color: var(--red); }
+      h1 { margin: 8px 0 0; font-family: var(--serif); font-weight: 400; font-size: 40pt;
+           line-height: .95; letter-spacing: -.01em; }
+      .range { margin: 8px 0 0; font-family: var(--serif); font-style: italic; font-size: 17pt;
+               color: var(--ink-soft); }
+
+      .cols { display: grid; grid-template-columns: 0.75in 1fr 1fr; gap: 0 18px;
+              margin-top: 22px; padding-bottom: 6px; border-bottom: 2px solid var(--ink); }
+      .cols span { font-size: 8.5pt; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+                   color: var(--ink-soft); }
+
+      .month { break-inside: avoid; }
+      .month h2 { margin: 14px 0 2px; font-size: 9pt; font-weight: 700; letter-spacing: .24em;
+                  text-transform: uppercase; color: var(--red); }
+      .day { display: grid; grid-template-columns: 0.75in 1fr 1fr; gap: 0 18px; align-items: baseline;
+             padding: 5px 0 6px; border-bottom: 1px solid var(--hair); break-inside: avoid; }
+      .day__n { font-family: var(--serif); font-size: 20pt; line-height: 1; }
+      .day__c { font-size: 11.5pt; line-height: 1.35; }
+      .day__c--note, .day__span { font-family: var(--serif); font-style: italic; font-size: 14pt; color: var(--red); }
+      .day__span { grid-column: 2 / 4; }
+      .day__c--empty { color: rgba(26,21,18,.28); }
+
+      .foot { margin-top: auto; padding-top: 22px; display: flex; justify-content: space-between;
+              align-items: flex-end; gap: 24px; }
+      .foot__note { margin: 0; max-width: 5.2in; font-size: 10pt; line-height: 1.5; color: var(--ink-soft); }
+      .foot__mark { margin: 0; font-family: var(--serif); font-style: italic; font-size: 13pt;
+                    color: var(--ink); white-space: nowrap; }
+
+      /* A crowded quarter, a size smaller — see SIZES above. */
+      .paper--dense h1 { font-size: 32pt; }
+      .paper--dense .range { font-size: 14pt; }
+      .paper--dense .cols { margin-top: 16px; }
+      .paper--dense .month h2 { margin-top: 10px; }
+      .paper--dense .day { padding: 3px 0 4px; }
+      .paper--dense .day__n { font-size: 16pt; }
+      .paper--dense .day__c { font-size: 10pt; }
+      .paper--dense .day__c--note, .paper--dense .day__span { font-size: 12pt; }
+      .paper--densest h1 { font-size: 28pt; }
+      .paper--densest .range { font-size: 13pt; }
+      .paper--densest .cols { margin-top: 12px; }
+      .paper--densest .month h2 { margin-top: 8px; }
+      .paper--densest .day { padding: 2px 0 3px; }
+      .paper--densest .day__n { font-size: 14pt; }
+      .paper--densest .day__c { font-size: 9pt; }
+      .paper--densest .day__c--note, .paper--densest .day__span { font-size: 11pt; }
+      .paper--densest .foot { padding-top: 12px; }
+
+      @page { size: letter portrait; margin: 0; }
+      @media print {
+        body { background: #fff; }
+        .bar { display: none; }
+        .paper { width: auto; min-height: 11in; margin: 0; box-shadow: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <a href={`/singing?q=${q.key}`}>← Back to the schedule</a>
+      <button type="button" onclick="window.print()">Print</button>
+    </div>
+
+    <main class:list={['paper', size.cls]}>
+      <p class="kicker">Fairhaven Community Church</p>
+      <h1>Special Singing</h1>
+      <p class="range">{q.label}</p>
+
+      <div class="cols" aria-hidden="true"><span>Sunday</span><span>Morning</span><span>Evening</span></div>
+
+      {months.map((m) => (
+        <section class="month">
+          <h2>{m.name}</h2>
+          {m.days.map((d) => (
+            <div class="day">
+              <span class="day__n">{dayNum(d.sunday)}</span>
+              {'span' in d ? (
+                <span class="day__span">{d.span}</span>
+              ) : (
+                <>
+                  <span class:list={['day__c', d.morning?.note && 'day__c--note', !d.morning && 'day__c--empty']}>
+                    {d.morning?.text ?? '—'}
+                  </span>
+                  <span class:list={['day__c', d.evening?.note && 'day__c--note', !d.evening && 'day__c--empty']}>
+                    {d.evening?.text ?? '—'}
+                  </span>
+                </>
+              )}
+            </div>
+          ))}
+        </section>
+      ))}
+
+      <footer class="foot">
+        {note ? <p class="foot__note">{note}</p> : <span></span>}
+        <p class="foot__mark">Printed {printed}</p>
+      </footer>
+    </main>
+  </body>
+</html>

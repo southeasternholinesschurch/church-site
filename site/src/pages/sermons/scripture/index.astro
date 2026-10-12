@@ -1,0 +1,151 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
+import { copyFor } from '../../../lib/copy';
+import { isVisibleSermon } from '../../../lib/content';
+import { SERVICE_TYPE_LABELS } from '../../../lib/sermons';
+import { BOOKS, parseScripture, formatPassage, comparePassages, type Passage } from '../../../lib/scripture';
+
+/**
+ * Sermons by Scripture — every message that has a passage, under the book it
+ * was preached from, in the order the Bible reads.
+ *
+ * Built from the `scripture` field on each sermon: what the transcript-cleaning
+ * routine suggests and the pastor approves in the staff app, so nothing here is
+ * guessed from a transcript. A sermon without one simply is not listed yet, and
+ * appears the day somebody adds it. A passage the reader cannot make sense of
+ * is left out rather than filed somewhere wrong — the staff app's sermon editor
+ * says so as it is typed.
+ *
+ * One page, with a book list to jump from: at three sermons a week this is a
+ * few hundred lines a year, which reads fine as one page and is searchable with
+ * the browser's own Find.
+ */
+const t = await copyFor('sermons');
+const sermons = (await getCollection('sermons', ({ data }) => isVisibleSermon(data)))
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+interface Row { slug: string; passages: Passage[]; heading: string; kicker: string; date: string; speaker?: string; first: Passage }
+const byBook = new Map<number, Row[]>();
+for (const s of sermons) {
+  const passages = parseScripture(s.data.scripture);
+  if (!passages.length) continue;
+  const heading = s.data.title?.trim() || s.data.service;
+  const date = s.data.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  // A sermon on two books appears under both, with only that book's passages.
+  for (const id of new Set(passages.map((p) => p.book))) {
+    const mine = passages.filter((p) => p.book === id).sort(comparePassages);
+    const rows = byBook.get(id) ?? [];
+    rows.push({ slug: s.slug, passages: mine, first: mine[0]!, heading, date, speaker: s.data.speaker,
+                kicker: s.data.title?.trim() ? s.data.service : SERVICE_TYPE_LABELS[s.data.serviceType] });
+    byBook.set(id, rows);
+  }
+}
+for (const rows of byBook.values()) rows.sort((a, b) => comparePassages(a.first, b.first));
+
+const books = BOOKS.filter((b) => byBook.has(b.id));
+const old = books.filter((b) => b.testament === 'old');
+const testamentNew = books.filter((b) => b.testament === 'new');
+const total = new Set([...byBook.values()].flat().map((r) => r.slug)).size;
+---
+<BaseLayout
+  title="Sermons by Scripture"
+  description="Messages from Fairhaven Community Church, arranged by the book of the Bible they were preached from."
+>
+  <section class="phead">
+    <div class="phead__body">
+      <a href="/sermons" class="phead__back load d1">{t('scripture.back', '← All sermons')}</a>
+      <p class="label load d1 phead__eyebrow">{t('scripture.eyebrow', 'The Archive')}</p>
+      <h1 class="serif load d2">{t('scripture.headline', 'By Scripture')}</h1>
+      <p class="phead__lede load d3">
+        {t('scripture.lede', 'Every message with a passage, under the book it was preached from, in the order the Bible reads. Looking for a particular passage? Search the archive for it — “John 3” finds John 3:16.')}
+      </p>
+    </div>
+  </section>
+
+  {books.length === 0 ? (
+    <section class="wrap empty">
+      <p>{t('scripture.empty', 'Passages are being added to the archive. Until then, every service is in the full archive.')}</p>
+      <a href="/sermons" class="btn btn--ink">{t('scripture.emptyButton', 'All sermons')}</a>
+    </section>
+  ) : (
+    <>
+      <section class="wrap jump-wrap">
+        <p class="jump__count">{total} {total === 1 ? 'message' : 'messages'} in {books.length} {books.length === 1 ? 'book' : 'books'}</p>
+        {[{ label: t('scripture.oldTestament', 'Old Testament'), list: old },
+          { label: t('scripture.newTestament', 'New Testament'), list: testamentNew }]
+          .filter((g) => g.list.length).map((g) => (
+          <nav class="jump" aria-label={g.label}>
+            <p class="label jump__h">{g.label}</p>
+            <div class="jump__chips">
+              {g.list.map((b) => (
+                <a class="chip" href={`#${b.slug}`}>{b.name} <span>{byBook.get(b.id)!.length}</span></a>
+              ))}
+            </div>
+          </nav>
+        ))}
+      </section>
+
+      <section class="wrap books-wrap">
+        {books.map((b) => (
+          <article class="book" id={b.slug}>
+            <h2 class="serif book__h">{b.name}</h2>
+            <ul class="book__list">
+              {byBook.get(b.id)!.map((r) => (
+                <li>
+                  <a href={`/sermons/${r.slug}`} class="row">
+                    <span class="row__ref">{r.passages.map(formatPassage).join('; ')}</span>
+                    <span class="row__body">
+                      <span class="row__title serif">{r.heading}</span>
+                      <span class="row__meta">{r.kicker} · {r.date}{r.speaker && ` · ${r.speaker}`}</span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </section>
+    </>
+  )}
+</BaseLayout>
+
+<style>
+  .phead { position: relative; background: var(--ink); color: var(--cream); overflow: clip; }
+  .phead__body { position: relative; z-index: 3; padding: 150px var(--pad) 86px; }
+  .phead__back { display: inline-block; font-size: 14px; font-weight: 700; color: rgba(244,239,231,.7); margin-bottom: 22px; }
+  .phead__back:hover { color: var(--cream); }
+  .phead__eyebrow { color: rgba(244,239,231,.6); margin: 0 0 20px; }
+  .phead h1 { margin: 0; font-size: clamp(46px,6vw,88px); line-height: 1; letter-spacing: -.02em; }
+  .phead__lede { margin: 22px 0 0; max-width: 56ch; font-size: 18px; line-height: 1.68; color: rgba(244,239,231,.78); }
+
+  .empty { padding-block: clamp(60px,7vw,100px); }
+  .empty p { max-width: 56ch; font-size: 17px; line-height: 1.75; color: var(--ink-soft); }
+
+  .jump-wrap { padding-block: 46px 0; }
+  .jump__count { margin: 0 0 18px; font-size: 14px; color: var(--ink-soft); }
+  .jump { margin-bottom: 18px; }
+  .jump__h { color: var(--red); margin: 0 0 10px; }
+  .jump__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-size: 14px; font-weight: 700; padding: 8px 14px; border-radius: 999px;
+          border: 1px solid var(--hair); color: var(--ink); }
+  .chip span { font-weight: 400; color: var(--ink-soft); margin-left: 4px; }
+  .chip:hover { border-color: var(--ink); }
+
+  .books-wrap { padding-block: 30px clamp(80px,9vw,130px); }
+  .book { padding-top: 36px; scroll-margin-top: 90px; }
+  .book__h { margin: 0 0 6px; font-size: clamp(30px,3.6vw,44px); line-height: 1.05;
+             border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+  .book__list { list-style: none; margin: 0; padding: 0; }
+  .row { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 6px 30px;
+         padding: 16px 0; border-bottom: 1px solid var(--hair); color: var(--ink); }
+  .row:hover .row__title { color: var(--red); }
+  .row__ref { font-size: 15px; font-weight: 700; color: var(--red); padding-top: 4px; }
+  .row__title { display: block; font-size: 22px; line-height: 1.2; }
+  .row__meta { display: block; margin-top: 4px; font-size: 14px; color: var(--ink-soft); }
+
+  @media (max-width: 860px) {
+    .phead__body { padding: 110px var(--pad) 52px; }
+    .row { grid-template-columns: 1fr; }
+  }
+</style>

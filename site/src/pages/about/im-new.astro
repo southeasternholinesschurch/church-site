@@ -1,23 +1,23 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { copyFor } from '../../lib/copy';
 import { Image } from 'astro:assets';
 import { getCollection } from 'astro:content';
 import { clockText } from '../../lib/format';
 import heroImg from '../../assets/photos/welcome.jpg';
+import { copyFor } from '../../lib/copy';
 
 const [settingsEntry] = await getCollection('settings');
 const settings = settingsEntry.data;
 
-// Grouped the way a visitor thinks about a week, not the way the data is stored.
-const groups = [
-  { label: 'Sunday Morning', times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time < '12:00') },
-  { label: 'Sunday Evening', times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time >= '12:00') },
-  { label: 'Wednesday Night', times: settings.serviceTimes.filter((s) => s.day === 'Wednesday') },
-].filter((g) => g.times.length);
-
 /** Page text, editable at /website/copy. Falls back to the words below. */
 const t = await copyFor('im-new');
+
+// Grouped the way a visitor thinks about a week, not the way the data is stored.
+const groups = [
+  { label: t('times.sundayMorning', 'Sunday Morning'), times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time < '12:00') },
+  { label: t('times.sundayEvening', 'Sunday Evening'), times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time >= '12:00') },
+  { label: t('times.wednesday', 'Wednesday Night'), times: settings.serviceTimes.filter((s) => s.day === 'Wednesday') },
+].filter((g) => g.times.length);
 ---
 <BaseLayout
   title="I'm New"
@@ -35,7 +35,7 @@ const t = await copyFor('im-new');
       <p class="label load d1 nhero__eyebrow">{t('hero.eyebrow', "I'm New")}</p>
       <h1 class="serif load d2">{t('hero.headline', "We're so glad you're here.")}</h1>
       <p class="nhero__lede load d3">
-        {t('hero.lede', "Whether you're exploring faith, looking for a church home, or just visiting the area — there's a place for you at Fairhaven Community Church. We're a friendly, Bible-centered church on the southeast side of Fairhaven, five minutes off I-465 at the Meadowbrook Road exit.")}
+        {t('hero.lede', "Whether you're exploring faith, looking for a church home, or just visiting the area — there's a place for you at Fairhaven Community. We're a friendly, Bible-centered church on the southeast side of Fairhaven, five minutes off I-465 at the Southeastern Avenue exit.")}
       </p>
     </div>
   </section>
@@ -66,8 +66,8 @@ const t = await copyFor('im-new');
         <div class="tgroup reveal">
           <p class="tgroup__day">{g.label}</p>
           <ul class="tgroup__list">
-            {g.times.map((t) => (
-              <li><span class="tgroup__name">{t.label}</span><span class="tgroup__time">{clockText(t.time)}</span></li>
+            {g.times.map((service) => (
+              <li><span class="tgroup__name">{service.label}</span><span class="tgroup__time">{clockText(service.time)}</span></li>
             ))}
           </ul>
         </div>
@@ -85,8 +85,9 @@ const t = await copyFor('im-new');
           {t('plan.body', 'Message us on Facebook or give us a call, so we can look out for you, answer any questions, and help you feel at home from the start.')}
         </p>
         <div class="plan__acts">
+          <a href="/visit" class="btn btn--red">{t('plan.visitButton', 'Plan your visit')}</a>
           {settings.phone && (
-            <a href={`tel:${settings.phone.replace(/[^\d+]/g, '')}`} class="btn btn--ink">
+            <a href={`tel:${settings.phone.replace(/[^\d+]/g, '')}`} class="btn btn--line">
               {t('plan.callPrefix', 'Call')} {settings.phone}
             </a>
           )}
@@ -98,10 +99,9 @@ const t = await copyFor('im-new');
       <aside class="plan__side">
         <p class="label plan__sl">{t('connect.eyebrow', 'Get Connected')}</p>
         <p class="plan__sp">
-          The best way to get plugged in is to show up and say hello. You can also
-          follow us on <a href={settings.socials.facebook} target="_blank" rel="noreferrer">Facebook</a>
-          to stay in the loop, or talk to a greeter or pastor after any service —
-          we're here to serve.
+          {t('connect.body', 'The best way to get plugged in is to show up and say hello. You can also follow us on')}
+          <a href={settings.socials.facebook} target="_blank" rel="noreferrer">{t('connect.facebookWord', 'Facebook')}</a>
+          {t('connect.bodyTail', "to stay in the loop, or talk to a greeter or pastor after any service — we're here to serve.")}
         </p>
         <a href="/ministries" class="plan__link">{t('connect.link', "See what's on for your family →")}</a>
       </aside>
@@ -114,7 +114,7 @@ const t = await copyFor('im-new');
       <div>
         <h2 class="serif cta__title">{t('cta.title', 'Come this Sunday.')}</h2>
         <p class="cta__p">
-          {settings.address}. Nobody expects you to have it figured out before you walk in.
+          {settings.address}. {t('cta.body', 'Nobody expects you to have it figured out before you walk in.')}
         </p>
       </div>
       <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--solid cta__btn">{t('cta.button', 'Get directions ↗')}</a>

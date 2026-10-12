@@ -6,6 +6,7 @@ import { and, eq, or } from 'drizzle-orm';
 import { parseAnnouncements, parsePrayerRequests, weeksCarried, formatServiceDate } from '../../lib/bulletin';
 import { celebrationsFor } from '../../lib/celebrations';
 import { singingForBulletin } from '../../lib/singing-sheet';
+import { openSignupsForBulletin } from '../../lib/signups-db';
 
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
@@ -117,6 +118,8 @@ const cel = celebrationsFor(celebrants, b.serviceDate);
 // Shown read-only, exactly as the website will print it — the sheet is the
 // place to change it, not this page.
 const singing = await singingForBulletin(Astro.locals.runtime.env, b.serviceDate);
+// Open sign-up sheets, exactly as the website will list them.
+const signups = await openSignupsForBulletin(db, Astro.url.origin);
 const fmtSunday = (iso: string) =>
   new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US',
     { month: 'long', day: 'numeric', timeZone: 'UTC' });
@@ -223,9 +226,9 @@ const prayerRows = [...prayers, ...Array(3).fill({ text: '', since: '' })];
     <div class="card" style="margin-bottom:20px;">
       <h2>Singing</h2>
       <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
-        Pulled from the singing schedule automatically — the same sheet that
-        sends the Monday reminder, so the two can never disagree. To change it,
-        edit the sheet; it updates here and on the website on its own.
+        Pulled from the <a href="/singing">singing schedule</a> automatically —
+        the same schedule that sends the Monday reminder, so the two can never
+        disagree. Change it there; it updates here and on the website on its own.
       </p>
       {singing && (singing.slots.length > 0 || singing.next) ? (
         <>
@@ -237,7 +240,7 @@ const prayerRows = [...prayers, ...Array(3).fill({ text: '', since: '' })];
             </ul>
           ) : (
             <p class="muted" style="font-size:15px;">
-              Nothing on the sheet for this Sunday.
+              Nothing on the schedule for this Sunday.
             </p>
           )}
           {singing.next && singing.next.slots.length > 0 && (
@@ -251,6 +254,26 @@ const prayerRows = [...prayers, ...Array(3).fill({ text: '', since: '' })];
         <p class="muted" style="font-size:15px;">
           Nothing on the singing schedule for this Sunday or the next one, so
           this section will not appear on the website at all.
+        </p>
+      )}
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>Sign-ups</h2>
+      <p class="muted" style="margin:-6px 0 14px; font-size:15px;">
+        Every <a href="/signups">sign-up sheet</a> that is open goes in on its
+        own, with its link. A sheet leaves when it is closed, or once its dates
+        have passed.
+      </p>
+      {signups.length > 0 ? (
+        <ul class="cel__l">
+          {signups.map((s) => (
+            <li><strong>{s.title}</strong>{s.when && <> · {s.when}</>}</li>
+          ))}
+        </ul>
+      ) : (
+        <p class="muted" style="font-size:15px;">
+          No sheets are open, so this section will not appear on the website.
         </p>
       )}
     </div>

@@ -1,0 +1,113 @@
+# Plan Your Visit (yourchurch.org/visit), section by section.
+#
+# Edited in the staff app at /website/copy. Service times, the address, the
+# children's and youth groups and the pastor all come from their own screens,
+# so they are correct here automatically; these are only the words around them.
+#
+# AN EMPTY ANSWER IS NOT SHOWN. The questions below with "" are ones only the
+# church can answer — fill one in and it appears on the page.
+
+hero:
+  eyebrow: "Plan Your Visit"
+  headline: "We'd love to meet you."
+  lede: "Everything you need to know before your first Sunday at Fairhaven Community — when to come, where to find us, what to expect, and what there is for your kids."
+  cardButton: "Let us know you're coming"
+  directionsButton: "Get directions ↗"
+
+when:
+  eyebrow: "When"
+  lead: "Service times"
+  tip: "New to us? Sunday morning at 10:00 is a good place to start."
+  # The headings the times are grouped under.
+  sundayMorning: "Sunday Morning"
+  sundayEvening: "Sunday Afternoon & Evening"
+  wednesday: "Wednesday Night"
+
+where:
+  eyebrow: "Where"
+  directions: "On the southeast side of Fairhaven, five minutes off I-465 at the Southeastern Avenue exit."
+  # Where to park and which door to use. Shown under the directions once filled in.
+  parking: ""
+  mapButton: "Open in Maps ↗"
+  callPrefix: "Call"
+
+faq:
+  eyebrow: "What To Expect"
+  lead: "The questions people ask before their first Sunday."
+  wearQ: "What should I wear?"
+  wearA: "Whatever you're comfortable in. There's no dress code — whether you're in jeans or your Sunday best, you'll be welcomed the same."
+  serviceQ: "What is a service like?"
+  serviceA: "Heartfelt, Spirit-led worship and preaching rooted in God’s Word, centered on real-life transformation. Each Sunday service usually includes a special song from someone in the church."
+  # Fill these two in and they appear on the page.
+  lengthQ: "How long is a service?"
+  lengthA: ""
+  parkingQ: "Where do I park, and which door do I use?"
+  parkingA: ""
+  doQ: "Will I be asked to do anything?"
+  doA: "No. Nobody expects you to have it figured out before you walk in."
+  watchQ: "Can I watch a service first?"
+  watchA: "Yes. Every service streams live on our YouTube channel, and past services are in the sermon archive."
+  watchLive: "Watch live"
+  watchArchive: "Sermon archive"
+
+# The groups themselves (ages, times, rooms) come from their ministry pages.
+kids:
+  eyebrow: "Kids & Youth"
+  lead: "There is something for every age."
+  # An optional paragraph under the heading, e.g. about the nursery.
+  body: ""
+  more: "More about"
+
+pastor:
+  eyebrow: "Meet the Pastor"
+  link: "Meet the whole team →"
+
+form:
+  eyebrow: "Let Us Know"
+  lead: "Tell us you're coming, and we'll look out for you."
+  body: "It goes straight to the pastor. Ask anything here — or if you'd rather talk, call or message us."
+  facebook: "Message us on Facebook ↗"
+
+# The form itself. Its answers arrive in the staff app under Care.
+card:
+  firstLabel: "First name"
+  lastLabel: "Last name"
+  phoneLabel: "Phone"
+  emailLabel: "Email"
+  dateLabel: "When are you thinking of coming?"
+  dateHint: "Leave it blank if you are not sure yet."
+  partyLabel: "Who's coming with you?"
+  partyPlaceholder: "e.g. two adults and two kids"
+  wantsLabel: "I'd like"
+  # Clear one of these ("") to take it off the form.
+  wantVisit: "A visit from the pastor"
+  wantCall: "A call or a text"
+  wantKids: "To hear about Fairhaven Kids and Fairhaven Youth"
+  wantFaith: "To talk about following Jesus"
+  messageLabel: "Any questions before you come?"
+  heardLabel: "How did you hear about us?"
+  optionalWord: "optional"
+  heard1: "A friend or family member"
+  heard2: "Drove past"
+  heard3: "Facebook or Instagram"
+  heard4: "Searching online"
+  heard5: "Something else"
+  # The tick-box. Its wording IS the texting consent, so keep the STOP line.
+  smsLabel: "Fairhaven Community may text me at this number. Message frequency varies; message and data rates may apply. Reply STOP to opt out at any time."
+  button: "Let us know you're coming"
+  privacy: "This goes to the pastors and no one else."
+
+problems:
+  name: "Please tell us your first name."
+  email: "That email address doesn't look quite right — could you check it?"
+  phone: "That phone number doesn't look quite right — could you check it?"
+  contact: "You asked for a visit or a call — please leave a phone number or an email so we can reach you."
+  date: "Please pick a day in the next few months, or leave it blank if you are not sure yet."
+
+# The page after the form is sent (/visit/thanks).
+thanks:
+  eyebrow: "See You Soon"
+  headline: "Thank you — we'll look out for you."
+  body: "Your note has gone straight to the pastor. If you asked a question or left a way to reach you, we'll be in touch."
+  homeButton: "Back to home"
+  sermonsButton: "Watch a recent service"

@@ -3,6 +3,7 @@ import AppLayout from '../../../layouts/AppLayout.astro';
 import { readForm } from '../../../lib/form';
 import { siteEditingConfigured, GitConflict } from '../../../lib/site-content';
 import { readSermon, saveSermon, saveDraft, listSeries, publishDraft, discardDraft, deleteSermon, fromSlug } from '../../../lib/site-sermons';
+import { readScripture, formatPassage, BOOKS } from '../../../lib/scripture';
 
 /**
  * One sermon: its details, and the review step for a cleaned transcript.
@@ -162,6 +163,22 @@ const leftoverDraft = Boolean(sermon?.draft && sermon.body.trim());
           <span>Scripture</span>
           <input name="scripture" value={field('scripture')} placeholder="Ephesians 1:16–19" />
           {guessed('scripture') && <small class="muted">Suggested from the transcript — worth checking against what he read.</small>}
+          {/* How the website will read it — the same reader the site uses to
+              file the sermon on /sermons/scripture and to find it by passage.
+              Something it cannot read still shows on the sermon page as
+              typed; it just is not filed under a book, and this says so. */}
+          {(() => {
+            const typed = field('scripture');
+            if (!typed) return null;
+            const r = readScripture(typed);
+            const books = [...new Set(r.passages.map((p) => BOOKS[p.book]!.name))];
+            return (
+              <small class={r.unread.length ? 'scr scr--warn' : 'scr'}>
+                {r.passages.length > 0 && <>Filed under {books.join(' and ')} as {r.passages.map(formatPassage).join('; ')}.</>}
+                {r.unread.length > 0 && <> Could not read “{r.unread.join('”, “')}” as a passage, so {r.passages.length ? 'that part is' : 'it is'} not filed under a book.</>}
+              </small>
+            );
+          })()}
         </label>
         <label class="field" style="max-width:340px;">
           <span>Series</span>
@@ -242,3 +259,8 @@ const leftoverDraft = Boolean(sermon?.draft && sermon.body.trim());
     </form>
   )}
 </AppLayout>
+
+<style>
+  .scr { display: block; margin-top: 6px; font-size: 13px; color: #16532c; }
+  .scr--warn { color: var(--red-deep); }
+</style>

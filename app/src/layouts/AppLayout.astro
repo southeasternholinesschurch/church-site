@@ -37,9 +37,14 @@ const path = Astro.url.pathname;
 const NAV: [string, string][] = [
   ['/', 'Dashboard'],
   ['/people', 'People'],
+  // Admins only — the filter below hides it from everyone the gate refuses.
+  ['/care', 'Care'],
   ['/attendance', 'Attendance'],
   ['/messaging', 'Messaging'],
   ['/bulletin', 'Bulletin'],
+  // A few times a year, but it feeds the bulletin and the Monday reminder, and
+  // the only other way in was a link at the foot of /digest.
+  ['/singing', 'Singing'],
   ['/signups', 'Sign-ups'],
   ['/website', 'Website'],
   ['/kids', 'Fairhaven Kids'],
@@ -135,7 +140,7 @@ const home = user ? homeFor(user.role) : '/';
     <style>
       /* The church building, behind the dashboard only.
        *
-       * the pastor supplied it already faded, so it needs no scrim of its own — a
+       * The pastor supplied it already faded, so it needs no scrim of its own — a
        * second wash on top would grey it into mud. It is pinned to the BOTTOM
        * of the viewport rather than tiled or covered: the building and the sign
        * sit along the lower third of the frame, and anchoring there keeps them

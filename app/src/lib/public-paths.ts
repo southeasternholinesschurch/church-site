@@ -52,10 +52,45 @@ export const PUBLIC_PREFIXES = [
    * be used to probe which tokens were ever real.
    */
   '/signup/',
+  /*
+   * The guest card on the public website posts here — the pew card at
+   * /welcome and "let us know you're coming" on Plan Your Visit. A visitor has
+   * no session and never will.
+   *
+   * EXACT, and it only ever WRITES: it stores a card and answers with a
+   * redirect back to the website. It reads nothing back out, so there is
+   * nothing here a stranger could use to see who else has visited. Spam is
+   * handled inside it (a honeypot, links refused, a per-connection hourly cap).
+   */
+  '/api/guest-card',
 ];
 
 /** The whole decision. One function, one list, and a test that holds the pair
  *  `/signup/abc` and `/signups` apart. */
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/**
+ * Where the public website lives, for the guest card to send people back to.
+ *
+ * A fixed list rather than whatever the form says: a redirect target taken from
+ * the request is an open redirect, which is a phishing tool with the church's
+ * name on it. localhost is there so the site and the app can be run side by
+ * side in development.
+ */
+export const SITE_ORIGINS = [
+  'https://yourchurch.org',
+  'https://www.yourchurch.org',
+  'http://localhost:4321',
+];
+
+/** The site to send a visitor back to: the one they came from, if it is ours. */
+export function siteOriginFor(origin: string | null, referer: string | null): string {
+  const from = origin && origin !== 'null' ? origin : referer ? safeOrigin(referer) : null;
+  return from && SITE_ORIGINS.includes(from) ? from : SITE_ORIGINS[0]!;
+}
+
+function safeOrigin(url: string): string | null {
+  try { return new URL(url).origin; } catch { return null; }
 }

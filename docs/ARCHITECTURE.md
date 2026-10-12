@@ -23,7 +23,7 @@ and the app at `app.yourchurch.org`.
 
 ---
 
-## Current state (2026-09-17)
+## Current state (2026-10-10)
 
 Both halves are live and in use.
 
@@ -46,6 +46,26 @@ replies), the Monday singing reminder on a cron, Fairhaven Kids check-in, the we
 and the member directory with photo upload and member self-edit. Since 2026-09-17 it
 also carries **sign-up sheets** — see that section below.
 
+**Since 2026-10-10 it also carries pastoral care, the singing schedule and the Monday
+digest**, and the public site has **Plan Your Visit**, the **pew guest card** and a
+**Scripture index** of the sermons. Each has its own section below:
+
+- **Care** (`/care`, a new tab, admins only) — the follow-up list (regulars who have
+  stopped coming, guest cards, reminders) and the care log.
+- **Guest cards** — `yourchurch.org/welcome` for the pew NFC tags and the
+  link-tree, and "let us know you're coming" on `/visit`. They land on the Care list.
+- **The singing schedule** (`/singing`, its own Singing tab) — moved off the Google
+  Sheet, with a printout. The schedule was copied in from the sheet by 2026-10-12.
+- **The Monday digest** — one text to the pastors on Monday morning, and `/digest`.
+- **Sermons by Scripture** (`/sermons/scripture`) and passage-aware sermon search.
+- **Local search** — structured data on the site; the Google Business Profile half is
+  yours, see "Local search" below.
+
+**Two database migrations come with them — `0028_care.sql` and `0029_singing.sql`.
+Apply them to the remote database BEFORE this code is merged**, as every migration
+here: `cd app && npx wrangler d1 migrations apply changeme-app --remote`. Both only add
+tables, so applying them early changes nothing for the code already live.
+
 **Fairhaven Kids keeps its own list of children.** Since 2026-10-10 an Fairhaven Kids child is a row
 in `kids`, not `people`, so no church page can show one by accident. A church child
 who also comes to Fairhaven Kids is entered on both sides (a child's People page has a
@@ -53,9 +73,9 @@ who also comes to Fairhaven Kids is entered on both sides (a child's People page
 and how the live data was moved (people 242 → 146), is in
 [`docs/kids-separation-plan.md`](kids-separation-plan.md).
 
-**The nav bar is nine tabs and was ten more.** Four screens were folded into the
-page that already asked their question, which is worth knowing before hunting for a
-URL that has gone: Scheduled and Replies are now part of `/messaging`, Trends is a
+**The nav bar is ten tabs and was fourteen.** Care was added on 2026-10-10 and only
+admins see it. Four screens were folded into the page that already asked their
+question, which is worth knowing before hunting for a URL that has gone: Scheduled and Replies are now part of `/messaging`, Trends is a
 fold on `/attendance`, and Groups is a fold on `/people` with a picker beside the
 search box. `/messaging/inbox`, `/messaging/numbers` and `/attendance/trends` still
 render — they are off the bar, not deleted, and remain perfectly good bookmarks.
@@ -157,7 +177,7 @@ Worker — none are in the repo. `npx wrangler secret list` shows what is set.
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | Sending and validating texts. An API key + secret pair was tried first and was rejected with 20003; the account SID and auth token work. |
 | `TWILIO_MESSAGING_SERVICE_SID` | The Messaging Service messages are sent through. The delivery callback belongs on THIS, not on the number. |
 | `TWILIO_FROM_NUMBER` | +1 317 218 9622 |
-| `REMINDER_SHEET_CSV_URL` | The published singing-schedule CSV that drives the Monday reminder |
+| `REMINDER_SHEET_CSV_URL` | The published singing-schedule CSV — read by the bulletin and the Monday reminder only until the schedule is copied into the app at `/singing`. After that it is never read and can be deleted, along with the published sheet. |
 | `SMS_CRON_SECRET` | Shared secret the `sms-cron` Worker presents to `/api/sms/run-due`, which is public to the middleware and guarded by this alone |
 | `DEPLOY_HOOK_URL` | Fires a site rebuild from the app's "Publish the website now" button. Server-side only — the random ID in the URL *is* the credential. |
 
@@ -641,7 +661,7 @@ Parmalee's old 30005 was a disconnected or reassigned mobile, not a landline.
 reports `mobile`. It rules out the landline category; only a delivery report proves
 reachability.
 
-## The bulletin pulls three things in automatically
+## The bulletin pulls four things in automatically
 
 Nothing below is typed by hand, and each is keyed off the bulletin's **own service
 date** rather than today — so a bulletin written on Thursday says the same thing when
@@ -650,10 +670,16 @@ it is printed on Sunday, and last month's still shows last month.
 - **Birthdays and anniversaries** for that month, from the directory. Adults must be
   directory-listed; children are included by age. See `isCelebrant()`.
 - **Who is singing**, morning and evening, plus a quieter line for next Sunday. Read
-  from the same published sheet that drives the Monday reminder, so the two can never
+  from the same source as the Monday reminder — the singing schedule at `/singing`,
+  or the published sheet before anything was saved there — so the two can never
   disagree. `parseRosterDetailed()` keeps the sheet's columns apart; `parseRoster()`
   flattens them and remains the reminder's input, untouched.
 - **This Week and Coming Up**, from the church calendar.
+- **Every sign-up sheet that is open right now**, soonest first, with its date, a
+  clipped intro and a link — `openSignupsForBulletin()` in `lib/signups-db.ts`. This
+  one is keyed off *now*, not the service date: "open" means open by status and not
+  shut by its dates, the same rule as the public page. Drafts never appear. The website
+  prints them under "Sign Up"; the staff bulletin page previews the list.
 
 A cell holding a note rather than names ("Revival", "Bring-your-Favorite-Chorus") is
 printed as written, not split into people who do not exist. An unreachable sheet yields
@@ -675,8 +701,9 @@ The public page, the taken/available display, the corrections and the reminders 
 written once. There is no third feature here to maintain.
 
 **Built at `/signups`, reached at `/signup/{token}`.** Deliberately not in the website's
-menu: the link goes in the bulletin, in a text, or on the link-tree the pew NFC tags
-point at. The token is 128 bits, the same as a directory invite.
+menu: every open sheet goes into the bulletin on its own (see the bulletin section
+above), and the link can also go in a text or on the link-tree the pew NFC tags point
+at. The token is 128 bits, the same as a directory invite.
 
 - `/signups` — the list, and where one is created. Copy the link from here.
 - `/signups/{id}` — one page, four sections in the order you think in: what it is for,
@@ -697,6 +724,25 @@ at the same moment, so it needs an id that survives an edit to the row above it.
 Close, and a link in an old bulletin should not go on collecting meals for a family who
 stopped needing them a month ago. A draft renders the same page as a token that never
 existed, so the page cannot be used to test tokens.
+
+**On a pitch-in, the dish is required** — "What are you bringing?", checked in the
+browser and on the server, and shown to everyone, so that nobody brings three things
+of ham. A member can change their dish but not blank it, and can still take their name
+off with the box empty. A **"Coming so far"** card at the top of the public sheet lists
+every dish by part, because each part is folded and nobody opens the mains to sign up
+for a side. Meal trains and lists do not ask.
+
+**The printout** — "Print a sign-up sheet" on `/signups/{id}`, at
+`/signups/{id}/print` — is for the foyer table: everyone signed up so far, then a blank
+line for every place still open (four under a part with no limit, never more than
+twelve). A closed sheet prints as a final list with no blank lines. **Phone numbers are
+never printed.** The page is packed on the server by `lib/signup-print.ts`, like a
+newspaper: the left column fills to the foot, then the right, then the next page; a
+part that carries on repeats its heading marked "continued", and a heading never sits
+alone at the foot. It is laid out on the server and not with CSS `columns` because
+**Safari drops CSS columns when it prints** — the screen showed two columns and the
+paper had one. Pages are sized for Safari, which prints CSS pixels about 7% larger than
+Chrome. Check a change by printing through WebKit to PDF, not by looking at the screen.
 
 **Setting the days is a set, not a fill.** Narrowing a meal train's range takes the
 dropped days back off — except a day somebody has already claimed, which is never
@@ -729,6 +775,118 @@ careful with:
   actually reads — recording the consent and leaving the flag set is an opt-out that
   reads as handled in the log and texts the person anyway the next morning), and it
   **cancels what is already queued**, which the table updates do nothing about.
+
+## Care — the follow-up list, the care log and guest cards
+
+`/care`, a tab of its own, and **admins only** — gated by path in
+`lib/permissions.ts`, the same way as `/website`. The People page is open to the
+volunteers who take attendance, so pastoral detail had nowhere better to go than the
+People notes box, where every one of them could read it. It goes here instead. Make
+the assistant pastor an admin on `/staff` if he should see it.
+
+**Two things, deliberately apart.** The *follow-up list* (`care_items`) is things that
+need doing for somebody by a date. The *care log* (`care_notes`) is what was done — a
+visit, a hospital visit, a call, a text, a card, a note — dated when it happened and
+signed. Logging a contact against a follow-up closes it and can set the next check-in
+(a week, two, four, or a date), which is how a monthly shut-in visit keeps coming back
+round. Snooze ("away until the 20th") and close-with-a-reason write their reason into
+the log too, so a person's history is one place.
+
+Three things land on the list:
+
+- **Regulars who have stopped coming.** Worked out from attendance every time Care,
+  the dashboard or the digest is opened — at least 3 of the 8 weeks before, then none
+  of the last 4. **Counted in weeks over every service**, not services of one kind,
+  so somebody who moved to the evening service is not "missing"; and **only weeks a
+  register was taken in count**, so a Sunday nobody ticked is not an absence for the
+  whole church. Someone who comes back is taken off the list on their own ("Back Sun,
+  Oct 12"). Keyed on the last date seen, so closing one is not undone next week, and
+  a second absence months later is a new item. `lib/care.ts`, tested in
+  `test/care.test.ts`. The Trends fold keeps its own per-service table.
+- **Guest cards** — see below.
+- **Reminders** a pastor sets on somebody's care page ("visit after the surgery").
+
+"Who is taking it" assigns a follow-up to an admin, for when there are two pastors.
+A person's care page (`/care/person/{id}`, linked from their People page for admins)
+has their open items, the log, their last attendance, and the forms.
+
+### Guest cards
+
+`yourchurch.org/welcome` is the card for the pew NFC tags and the
+link-tree — **point them at it**. First name is all it requires; it asks whether this
+is a first visit and whether they would like a visit, a call, kids and youth
+information, or to talk about following Jesus. `/visit` has the same card as "let us
+know you're coming", with a date and who is coming. Both are static pages that post
+straight to the app's `/api/guest-card` (public, write-only, in `PUBLIC_PREFIXES` with
+a test), which keeps the card, puts it on the Care list and redirects back to a
+thank-you page. A card sent back says why and keeps what was typed.
+
+**Spam is answered with the thank-you page** and stored nowhere: a honeypot field,
+links refused, and five cards per connection per hour (counted on a daily-peppered
+hash of the address, never the address). Alerts to the pastors stop past ten cards
+an hour across everyone, so a script cannot run up the Twilio bill; the cards are
+still kept.
+
+**A fourth table holding a phone number** — `lib/consent.ts` covers `guest_cards` in
+the same change, and its tests say so. The card's tick-box is the consent wording;
+"Add to People" carries the consent across only if they ticked it **and** the number
+has not said STOP anywhere since, checked at that moment. A person made from a card is
+`unknown` adult/child and never in the directory, like anybody added at the door.
+
+### Texts to the pastors
+
+A fold at the bottom of Care: the Monday digest (on/off and a time) and an alert when
+a guest card arrives, to up to three people chosen from the People list. Recipients
+are people rather than staff accounts because a text needs a number and a consent
+decision, which live on `people`; consent is checked at send time like every other
+audience. Both are queued through the five-minute cron.
+
+## The singing schedule
+
+`/singing`, the Singing tab next to Bulletin — planned a quarter at a time, typed the way
+the Google Sheet was: names separated by commas, or a note ("Fall Revival") where
+there are no singers. Under every cell, as it is typed, each name says whether it will
+get the Monday reminder — on People and textable, on People but not textable (and why),
+or not found. The sheet could only say so on Monday, in the dashboard, after the
+reminder had gone without them. "Who has sung in the last year" sits below, oldest
+last, for planning fairly.
+
+**Moving off the sheet is one button.** Until anything is saved here, the bulletin and
+the reminder read the published sheet exactly as before, and `/singing` shows it
+read-only with **Copy the schedule in from the sheet** (fills empty Sundays only, safe
+twice). From the first saved Sunday they read this table and never the sheet — the two
+are never merged, so no Sunday can have two answers. Saving only touches the Sundays
+the form sent.
+
+A cell is read by one function, `slotFromCell` in `lib/roster.ts`, wherever it came
+from, and the name matching the reminder uses is now pure and shared with the editor;
+`test/singing.test.ts` puts one schedule through both sources and expects the same
+answer.
+
+**The printout** — `/singing/print`, or Print on the page — is the quarter on one
+Letter page in Instrument Serif and Texta, a note alone spanning its Sunday, and an
+editable line at the foot ("The line printed at the bottom"). A crowded quarter steps
+its type down a size, or two, so it always fits one sheet; verified by printing a
+fourteen-Sunday quarter with three long names in every cell.
+
+## The Monday digest
+
+Switched on in Care → *Texts to the pastors*. On Mondays at the chosen time, one text:
+
+```
+SHC week of Oct 5. Sun AM 74 (avg 70), Sun PM 41, Wed 22. Follow up: 2 guests,
+3 not been in, 1 reminder. 1 planning to visit. 2 birthdays, 1 anniversary this
+week. Singing Sun: Tom Camp / Ada Aldridge, Erin Thorne. 2 sign-up slots open.
+https://app.yourchurch.org/digest
+```
+
+Anything with nothing to say is left out, so a quiet week is a short text; an ordinary
+week stays inside two segments in GSM-7 (`test/digest.test.ts`). `/digest` (admin-only)
+has the names behind every number and a preview of the text as it would go out today.
+The same shape as the birthday texts: due in a window after the time, one row per
+person per Monday guarded by the unique `source_key`, and built only while somebody is
+still owed one — and caught, so a digest that cannot be put together never stops the
+other texts in the same run.
 
 ## Importing member data (the printed directory, Breeze, anything else)
 
@@ -1160,6 +1318,61 @@ direct copy of that file with `speaker` substituted for `series` throughout.
 
 ---
 
+## Sermons by Scripture
+
+`/sermons/scripture` lists every message with a passage under the book it was
+preached from, in Bible order, with Old and New Testament jump lists. It is built from
+each sermon's `scripture` field — the passage the transcript routine suggests and the
+sermon editor approves — so nothing is guessed from a transcript. A sermon without a
+passage is simply not listed until one is added.
+
+The archive search reads a query as a passage too: "John 12:24" finds the sermon on
+John 12:20-25, "1 cor 12" finds "I Corinthians 12:1-10". Word search runs alongside.
+The sermon editor in the app says how the site will read a passage as it is typed, and
+says so when it cannot ("John 99" is not filed anywhere).
+
+`lib/scripture.ts` exists twice — `site/` and `app/` — because each half imports only
+from itself. **They must stay byte-identical**; `app/test/scripture.test.ts` fails if
+they differ. Edit one and copy it over the other.
+
+## Plan Your Visit
+
+`/visit` — service times, where to find us, what to expect, Fairhaven Kids and Fairhaven Youth, the
+pastor, and the "let us know you're coming" card. Everything factual comes from
+Settings, the ministries and the staff page, so it cannot drift. **Questions only the
+church can answer are blank and therefore hidden** — how long a service runs, where to
+park and which door — until filled in at `/website/copy` → Plan Your Visit. The home
+page's "Plan Your Visit" button, the footer and the I'm New page link to it.
+
+## Local search — the half that is not code
+
+The site now tells search engines what it is: schema.org `Church` and `WebSite` data on
+the home page and `/visit`, built from Settings (name, address, phone, email, a photo of
+the building, Facebook, Instagram and YouTube), a home page title that says "church"
+and "Fairhaven", and the sitemap. That is the part a website can do. **Most of local
+search is a Google Business Profile**, and only someone at the church can claim one:
+
+1. **Claim or create the profile** at business.google.com for "Fairhaven Community
+   Church", 3957 Southeastern Ave. Google verifies by postcard, phone or video.
+2. **Category:** "Holiness church" is a Google category — use it as the primary, with
+   "Church" as a secondary.
+3. **Name, address and phone exactly as the website has them** — "Southeastern
+   Holiness Church", "3957 Southeastern Ave, Fairhaven, IN 46203", (317) 353-8702.
+   Matching details everywhere is most of what local ranking rewards.
+4. **Website:** `https://yourchurch.org/visit`, so a searcher lands on the
+   page written for them.
+5. **Hours:** Google lists opening hours, not services, so enter the service blocks
+   — Sunday from 10:00 AM to the end of the morning service and from 4:30 PM to the
+   end of evening worship, Wednesday from 7:00 PM to the end of Prayer & Praise. One
+   long Sunday span would tell people the doors are open all afternoon.
+6. **Photos:** the building, the sanctuary, a service. The ones on the site will do.
+7. **Ask a few families for a review.** Reviews are the strongest local signal there
+   is, and a church with none looks closed.
+8. Then the same details on **Apple Business Connect** (Apple Maps) and **Bing Places**
+   (it can import from Google), and check **Facebook** says the same.
+9. In **Google Search Console** (search.google.com/search-console), add the site and
+   submit `https://yourchurch.org/sitemap-index.xml`.
+
 ## PWA status — installable, deliberately not offline
 
 Manifest and icons are in place (`site/public/manifest.webmanifest`,
@@ -1177,7 +1390,7 @@ declined. Adding one later is a self-contained job that touches nothing else.
 
 ## What is deliberately NOT built
 
-Only two things, and both are decisions rather than gaps:
+Only two things from the brief, and both are decisions rather than gaps:
 
 - **PWA offline caching** — declined, see above.
 - **A men's ministry page** — pulled entirely 2026-08-29. The brief listed Fairhaven Men
@@ -1187,6 +1400,18 @@ Only two things, and both are decisions rather than gaps:
 Everything else in the brief is built. If some other part of this document says a
 feature is "not built yet", that sentence is older than the feature — check the running
 system before believing it.
+
+**Decided 2026-10-10**, from a round of ideas beyond the brief — recorded so nobody
+builds them by accident:
+
+- **Not wanted:** safety-check records, a consent and changes log, households,
+  room booking, benevolence requests, service planning, milestones, and rotas
+  other than the singing (greeters, sound, nursery and Fairhaven Kids may come later).
+- **Paused: prayer requests.** Not to be pushed out to everybody. Revisit with a
+  way to keep them to the pastors, or to whoever the person asks for.
+- **Planned, not built: the sermons as a podcast**, cut to just the sermon. What it
+  would take and what has to be decided first:
+  [`handoff/PLAN-podcast.md`](../handoff/PLAN-podcast.md).
 
 ---
 
@@ -1205,6 +1430,16 @@ system before believing it.
   guessing, so a gap is silent unless you read the dashboard. Shirley Parmalee is now
   present, with her number corrected.
 - [x] ~~Two junk records (#23 "Sim Not sure", #26 "Sm Sure not")~~ — archived 2026-09-04.
+- [ ] **Point the pew NFC tags and the link-tree's "I'm visiting" link at
+  `https://yourchurch.org/welcome`.** The guest cards land in Care.
+- [ ] **Choose who gets the pastors' texts** (Care → Texts to the pastors) and switch
+  on the Monday digest and the guest alerts. Both are off until then.
+- [x] ~~Copy the singing schedule in from the Google Sheet~~ — done by 2026-10-12. The
+  bulletin and the reminder now read `/singing`; the published sheet and
+  `REMINDER_SHEET_CSV_URL` are no longer read and can be retired.
+- [ ] **Fill in the blank answers on Plan Your Visit** — service length, parking and
+  which door — at `/website/copy`. They are hidden until written.
+- [ ] **Claim the Google Business Profile** — see "Local search" above.
 - [ ] **The birthday texts are built but switched OFF.** Put the wording in and turn
   them on at `/messaging`. Straight quotes, not curly: a smart apostrophe makes the
   message three segments and triples the cost of every birthday text ever sent.

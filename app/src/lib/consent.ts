@@ -11,16 +11,18 @@ const nowIso = () => new Date().toISOString();
 /**
  * Texting consent, across every table that holds a phone number.
  *
- * There are THREE such tables and there will not be a fourth without this file
+ * There are FOUR such tables and there will not be a fifth without this file
  * changing: `people` (the congregation), `kid_guardians` (bus-ministry parents,
  * who are deliberately not people — see §5.3 of the Fairhaven Kids brief and the
- * comment on kid_guardians in the schema), and `signups` (whoever typed a
- * number into a sign-up sheet to be reminded the day before their day).
+ * comment on kid_guardians in the schema), `signups` (whoever typed a number
+ * into a sign-up sheet to be reminded the day before their day), and
+ * `guest_cards` (a visitor's card from the public site, whose tick-box is the
+ * consent).
  *
- * This file said TWO until the sign-up sheets were built, and that sentence was
- * the only thing standing between a working opt-out and a broken one. If a
- * fourth table is ever given a phone column, it is added here in the same
- * commit — not afterwards.
+ * This file said TWO until the sign-up sheets were built, and THREE until the
+ * guest cards were — and each time that sentence was the only thing standing
+ * between a working opt-out and a broken one. If a fifth table is ever given a
+ * phone column, it is added here in the same commit — not afterwards.
  *
  * That split is the whole reason this module exists. Keeping bus families out
  * of the congregation's people list keeps the member list, the audience counts
@@ -45,22 +47,26 @@ export interface ConsentTargets {
   guardians: number;
   /** How many sign-up sheet rows carry it. */
   signups: number;
+  /** How many guest cards carry it. */
+  guests: number;
 }
 
 /** Who this number reaches, before anything is changed. */
 export async function findConsentTargets(
   db: Db, phoneE164: string,
 ): Promise<ConsentTargets> {
-  if (!phoneE164) return { people: 0, guardians: 0, signups: 0 };
-  const [p, g, s] = await Promise.all([
+  if (!phoneE164) return { people: 0, guardians: 0, signups: 0, guests: 0 };
+  const [p, g, s, c] = await Promise.all([
     db.select({ id: schema.people.id }).from(schema.people)
       .where(eq(schema.people.phoneE164, phoneE164)),
     db.select({ id: schema.kidGuardians.id }).from(schema.kidGuardians)
       .where(eq(schema.kidGuardians.phoneE164, phoneE164)),
     db.select({ id: schema.signups.id }).from(schema.signups)
       .where(eq(schema.signups.phoneE164, phoneE164)),
+    db.select({ id: schema.guestCards.id }).from(schema.guestCards)
+      .where(eq(schema.guestCards.phoneE164, phoneE164)),
   ]);
-  return { people: p.length, guardians: g.length, signups: s.length };
+  return { people: p.length, guardians: g.length, signups: s.length, guests: c.length };
 }
 
 export type ConsentState = 'opted_in' | 'opted_out' | 'unknown';
@@ -69,13 +75,13 @@ export type ConsentState = 'opted_in' | 'opted_out' | 'unknown';
  * What every table says about these numbers. ONE definition of the rule.
  *
  * AN OPT-OUT ANYWHERE WINS. One handset, one decision — a number that appears
- * as a member, as a guardian and on a sign-up sheet has one answer, and if any
- * of the three says the person asked not to be texted, nothing else on it
- * matters.
+ * as a member, as a guardian, on a sign-up sheet and on a guest card has one
+ * answer, and if any of them says the person asked not to be texted, nothing
+ * else on it matters.
  *
  * Batched rather than one call per recipient, because the caller that needs it
  * most is the reminder expansion, which runs every five minutes over a whole
- * meal train. Three queries, however many numbers.
+ * meal train. Four queries, however many numbers.
  *
  * A number with no row anywhere comes back 'unknown' — absent from the map,
  * which `get` reports as undefined; callers must treat that as "not opted in",
@@ -97,17 +103,19 @@ export async function consentByNumbers(
     if (!prior) out.set(phone, 'unknown');
   };
 
-  const [p, g, s] = await Promise.all([
+  const [p, g, s, c] = await Promise.all([
     db.select({ phone: schema.people.phoneE164, consent: schema.people.smsConsent })
       .from(schema.people).where(inArray(schema.people.phoneE164, wanted)),
     db.select({ phone: schema.kidGuardians.phoneE164, consent: schema.kidGuardians.smsConsent })
       .from(schema.kidGuardians).where(inArray(schema.kidGuardians.phoneE164, wanted)),
     db.select({ phone: schema.signups.phoneE164, consent: schema.signups.smsConsent })
       .from(schema.signups).where(inArray(schema.signups.phoneE164, wanted)),
+    db.select({ phone: schema.guestCards.phoneE164, consent: schema.guestCards.smsConsent })
+      .from(schema.guestCards).where(inArray(schema.guestCards.phoneE164, wanted)),
   ]);
   // `note` refuses to be overwritten once it has seen an opt-out, so the order
-  // of these three cannot change the answer.
-  for (const r of [...p, ...g, ...s]) note(r.phone, r.consent);
+  // of these four cannot change the answer.
+  for (const r of [...p, ...g, ...s, ...c]) note(r.phone, r.consent);
   return out;
 }
 
@@ -146,6 +154,15 @@ export async function applyOptOut(
   await db.update(schema.signups)
     .set({ smsConsent: 'opted_out', smsConsentSource: source, smsConsentAt: at, remind: false })
     .where(eq(schema.signups.phoneE164, phoneE164));
+  /*
+   * Guest cards. Nothing texts a card directly — but turning a card into a
+   * person carries its consent across, so a STOP has to land here too, or the
+   * next "Add to People" would quietly opt the number back in. No updated_at,
+   * for the same reason as sign-ups: a card is a moment.
+   */
+  await db.update(schema.guestCards)
+    .set({ smsConsent: 'opted_out', smsConsentSource: source, smsConsentAt: at })
+    .where(eq(schema.guestCards.phoneE164, phoneE164));
 
   /*
    * AND ANYTHING ALREADY QUEUED FOR THIS NUMBER IS CANCELLED.
@@ -193,6 +210,9 @@ export async function applyOptIn(
   await db.update(schema.signups)
     .set({ smsConsent: 'opted_in', smsConsentSource: source, smsConsentAt: at })
     .where(eq(schema.signups.phoneE164, phoneE164));
+  await db.update(schema.guestCards)
+    .set({ smsConsent: 'opted_in', smsConsentSource: source, smsConsentAt: at })
+    .where(eq(schema.guestCards.phoneE164, phoneE164));
 }
 
 /**
@@ -209,13 +229,15 @@ export async function applyOptIn(
  * kept out of `people`. Their START is recorded against the guardian row,
  * which is where their consent belongs.
  *
- * A SIGN-UP SHEET ROW IS NOT A REASON TO WITHHOLD ONE, and `signups` is
- * deliberately absent from the test below. A guardian is a standing record of a
- * human being, with a name, a relationship and children attached; a sign-up is
+ * A SIGN-UP SHEET ROW IS NOT A REASON TO WITHHOLD ONE, and neither is a GUEST
+ * CARD: `signups` and `guests` are deliberately absent from the test below. A
+ * guardian is a standing record of a human being, with a name, a relationship
+ * and children attached; a sign-up is
  * somebody who typed a name into a box once to bring a casserole on Tuesday.
  * Someone who then texts START is still a stranger to the church's records, and
  * the reasoning at the top of this comment applies to them in full: create
- * them, flagged, rather than drop an opt-in on the floor.
+ * them, flagged, rather than drop an opt-in on the floor. A guest card is the
+ * same: somebody who filled in a card once, not a record the church keeps.
  *
  * Pure, and separated from the database work, because this is the decision
  * worth testing.

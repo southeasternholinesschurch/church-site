@@ -4,6 +4,7 @@ import { getDb, schema } from '../../../db';
 import { parseAnnouncements, parsePrayerRequests, nextSunday } from '../../../lib/bulletin';
 import { celebrationsFor } from '../../../lib/celebrations';
 import { singingForBulletin } from '../../../lib/singing-sheet';
+import { openSignupsForBulletin } from '../../../lib/signups-db';
 
 export const prerender = false;
 
@@ -16,7 +17,7 @@ export const prerender = false;
  * many times the site rebuilds, so a half-written order of service cannot
  * appear in a pew because someone happened to hit publish on the website.
  */
-export const GET: APIRoute = async ({ locals }) => {
+export const GET: APIRoute = async ({ locals, url }) => {
   const env = locals.runtime.env;
   const db = getDb(env);
   const sunday = nextSunday();
@@ -71,6 +72,14 @@ export const GET: APIRoute = async ({ locals }) => {
    */
   const singing = await singingForBulletin(env, b.serviceDate);
 
+  /*
+   * Every sign-up sheet that is open RIGHT NOW, whatever week the bulletin is
+   * for (the pastor, 2026-10-10). Opening a sheet is the whole step: nobody has to
+   * remember to add it as an announcement. Linked from this request's origin,
+   * which is the app's, where /signup/ lives.
+   */
+  const signups = await openSignupsForBulletin(db, url.origin);
+
   return json({
     bulletin: {
       serviceDate: b.serviceDate,
@@ -85,6 +94,7 @@ export const GET: APIRoute = async ({ locals }) => {
       isCurrent: b.serviceDate === sunday,
       celebrations,
       singing,
+      signups,
     },
   });
 };

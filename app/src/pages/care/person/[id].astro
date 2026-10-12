@@ -1,0 +1,209 @@
+---
+import AppLayout from '../../../layouts/AppLayout.astro';
+import CareItem from '../../../components/CareItem.astro';
+import { readForm } from '../../../lib/form';
+import { careAction, CARE_DONE } from '../../../lib/care-actions';
+import { CARE_KINDS, NEXT_STEPS, churchDate, careKindLabel, dayOf, shortDate } from '../../../lib/care';
+import {
+  openQueue, notesFor, itemsFor, careStaff, attendanceGlance,
+} from '../../../lib/care-db';
+import { getDb, schema } from '../../../db';
+import { eq } from 'drizzle-orm';
+import { formatDate } from '../../../lib/services';
+
+/**
+ * One person's care: what is open for them, the way to log a visit or set a
+ * reminder, and everything written about them, newest first.
+ *
+ * The People page links here — for admins only, the same as the tab — so the
+ * details on People stay something a volunteer may read, and the pastoral
+ * history stays here.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const today = churchDate();
+
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id) || id <= 0) return Astro.redirect('/care', 302);
+const [person] = await db.select().from(schema.people).where(eq(schema.people.id, id)).limit(1);
+if (!person) return new Response('Not found', { status: 404 });
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const result = await careAction(env, form, user);
+  if (result && 'redirect' in result) return Astro.redirect(result.redirect, 303);
+  if (result && 'done' in result) return Astro.redirect(`/care/person/${id}?done=${result.done}`, 303);
+  if (result && 'error' in result) error = result.error;
+}
+
+const queue = await openQueue(env, today);
+const open = [...queue.now, ...queue.later].filter((i) => i.personId === id);
+const staff = await careStaff(env);
+const notes = await notesFor(env, { personId: id });
+const closed = (await itemsFor(env, { personId: id })).filter((i) => i.status === 'done');
+const glance = await attendanceGlance(env, id, today);
+const done = Astro.url.searchParams.get('done');
+/** What a contact logged here would answer — the open items already due. */
+const dueOpen = open.filter((i) => i.dueOn <= today);
+
+const name = `${person.firstName} ${person.lastName}`.trim();
+const address = [person.addressStreet, person.addressCity, person.addressState, person.addressZip]
+  .filter(Boolean).join(', ');
+const telHref = person.phone ? `tel:${person.phone.replace(/[^\d+]/g, '')}` : null;
+---
+<AppLayout title={`Care · ${name}`} user={user}>
+  <p style="margin:0 0 6px;"><a href="/care">← Care</a></p>
+  <h1>{name}</h1>
+
+  <p class="who">
+    {telHref && <a href={telHref}>{person.phone}</a>}
+    {person.email && <a href={`mailto:${person.email}`}>{person.email}</a>}
+    {address && <span>{address}</span>}
+    <a href={`/people/${id}`}>People record →</a>
+  </p>
+  <p class="muted glance">
+    {glance.lastSeen
+      ? <>Last at church {formatDate(glance.lastSeen)} · {glance.weeks} of the last 12 weeks</>
+      : <>No attendance recorded</>}
+    {person.archived && <> · <strong>archived</strong></>}
+  </p>
+
+  {done && CARE_DONE[done] && <p class="notice notice--ok">{CARE_DONE[done]}</p>}
+  {error && <p class="notice">{error}</p>}
+
+  {open.length > 0 && (
+    <section>
+      <h2 class="sect">Open for {person.firstName}</h2>
+      {open.map((item) => <CareItem item={item} today={today} staff={staff} showName={false} compact />)}
+    </section>
+  )}
+
+  <div class="grid">
+    <form method="POST" class="card">
+      <h2>Log a contact</h2>
+      <input type="hidden" name="action" value="log" />
+      <input type="hidden" name="personId" value={id} />
+      <div class="row">
+        <label class="field"><span>What</span>
+          <select name="kind">
+            {CARE_KINDS.map((k) => <option value={k.id} selected={k.id === 'visit'}>{k.label}</option>)}
+          </select>
+        </label>
+        <label class="field"><span>When</span>
+          <input type="date" name="onDate" value={today} max={today} />
+        </label>
+      </div>
+      <label class="field"><span>Note</span>
+        <textarea name="body" rows="4" placeholder="How are they? Anything to pray about, or to remember next time?"></textarea>
+      </label>
+      {dueOpen.length > 0 && (
+        <label class="answers">
+          <input type="checkbox" name="closeOpen" checked />
+          <span>This answers {dueOpen.length === 1 ? `“${dueOpen[0]!.reason}”` : `the ${dueOpen.length} open follow-ups`} — close {dueOpen.length === 1 ? 'it' : 'them'}</span>
+        </label>
+      )}
+      <fieldset class="next">
+        <legend class="label">Then</legend>
+        {NEXT_STEPS.map((s) => (
+          <label class="radio">
+            <input type="radio" name="next" value={s.id} checked={s.id === 'done'} />
+            <span>{s.label}</span>
+            {s.id === 'date' && <input type="date" name="nextOn" min={today} aria-label="Check again on" />}
+          </label>
+        ))}
+      </fieldset>
+      <button class="btn" type="submit">Save to the care log</button>
+    </form>
+
+    <form method="POST" class="card">
+      <h2>Set a reminder</h2>
+      <p class="muted" style="margin-top:-4px;">
+        For something you already know is coming — a surgery, an anniversary of a
+        loss, a new baby. It appears on the Care list on that day.
+      </p>
+      <input type="hidden" name="action" value="remind" />
+      <input type="hidden" name="personId" value={id} />
+      <label class="field"><span>About</span>
+        <input name="reason" maxlength="200" placeholder="Visit after the surgery" />
+      </label>
+      <fieldset class="next">
+        <legend class="label">When</legend>
+        {NEXT_STEPS.filter((s) => s.id !== 'done').map((s, i) => (
+          <label class="radio">
+            <input type="radio" name="next" value={s.id} checked={i === 0} />
+            <span>{s.id === 'fortnight' ? 'In two weeks' : s.id === 'week' ? 'In a week' : s.label}</span>
+            {s.id === 'date' && <input type="date" name="nextOn" min={today} aria-label="Remind me on" />}
+          </label>
+        ))}
+      </fieldset>
+      <button class="btn btn--ghost" type="submit">Set reminder</button>
+    </form>
+  </div>
+
+  <section class="card" style="margin-top:22px;">
+    <h2>Care log</h2>
+    {notes.length === 0 ? (
+      <p class="muted" style="margin:0;">Nothing written yet.</p>
+    ) : (
+      <ol class="tl">
+        {notes.map((n) => (
+          <li>
+            <p class="tl__h">
+              <strong>{careKindLabel(n.kind)}</strong>
+              <span class="muted"> · {formatDate(n.onDate)}{n.authorName && ` · ${n.authorName}`}</span>
+            </p>
+            {n.body && <p class="tl__b">{n.body}</p>}
+            <form method="POST" class="tl__del" onsubmit="return confirm('Delete this note? It cannot be brought back.')">
+              <input type="hidden" name="action" value="delete-note" />
+              <input type="hidden" name="noteId" value={n.id} />
+              <button type="submit" class="linkbtn">Delete</button>
+            </form>
+          </li>
+        ))}
+      </ol>
+    )}
+  </section>
+
+  {closed.length > 0 && (
+    <details class="card" style="margin-top:22px;">
+      <summary class="fold">Closed follow-ups <span class="muted fold__n">{closed.length}</span></summary>
+      <ul class="closed">
+        {closed.map((c) => (
+          <li>
+            <span>{c.reason}</span>
+            <span class="muted"> — {c.resolution ?? 'closed'}{c.resolvedAt && `, ${shortDate(dayOf(c.resolvedAt))}`}{c.resolvedBy && ` · ${c.resolvedBy}`}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )}
+</AppLayout>
+
+<style>
+  .who { display: flex; gap: 6px 18px; flex-wrap: wrap; margin: -4px 0 6px; }
+  .glance { margin: 0 0 20px; font-size: 15px; }
+  .sect { margin: 6px 0 14px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .next { border: 0; padding: 0; margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .next legend { color: var(--ink-soft); margin-bottom: 8px; }
+  .radio { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+  .radio input[type=radio] { width: 18px; height: 18px; }
+  .radio input[type=date] { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--hair); border-radius: 6px; }
+  .answers { display: flex; gap: 10px; align-items: flex-start; margin: -4px 0 16px; font-size: 15px; }
+  .answers input { width: 18px; height: 18px; margin-top: 3px; flex: none; }
+  .tl { list-style: none; padding: 0; margin: 0; }
+  .tl li { position: relative; padding: 12px 0 12px 18px; border-left: 2px solid var(--cream-deep); }
+  .tl li::before { content: ""; position: absolute; left: -6px; top: 18px; width: 10px; height: 10px;
+                   border-radius: 999px; background: var(--red); }
+  .tl__h { margin: 0; }
+  .tl__b { margin: 4px 0 0; white-space: pre-line; }
+  .tl__del { margin: 4px 0 0; }
+  .linkbtn { font: inherit; font-size: 13px; background: none; border: 0; padding: 4px 0;
+             color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
+  .closed { margin: 14px 0 0; padding-left: 20px; }
+  .closed li { margin-bottom: 6px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; } }
+</style>

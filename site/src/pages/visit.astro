@@ -1,0 +1,307 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import GuestCardForm from '../components/GuestCardForm.astro';
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import { clockText } from '../lib/format';
+import { copyFor } from '../lib/copy';
+import { STAFF_PHOTOS } from '../lib/staff-assets';
+import { churchJsonLd } from '../lib/structured-data';
+import heroImg from '../assets/photos/sanctuary.jpg';
+import buildingImg from '../assets/photos/exterior.jpg';
+import { getImage } from 'astro:assets';
+
+/**
+ * Plan Your Visit — everything somebody wants to know before their first
+ * Sunday, and a way to tell the church they are coming.
+ *
+ * Built from what the site already knows, so it cannot drift: the times are
+ * Service times, the address is Settings, the children's and youth groups are
+ * the ministries' own entries, and the pastor is the first entry on the staff
+ * page. The words around them are editable at /website/copy.
+ *
+ * THE QUESTIONS NOBODY HAS ANSWERED YET ARE NOT ON THE PAGE. How long a
+ * service runs and where to park are facts only the church knows; they sit in
+ * the copy file as empty answers, and an empty answer is not shown. Filling one
+ * in at /website/copy is what puts it on the page — nothing here is guessed.
+ *
+ * "Let us know you're coming" sends a card to the pastors' follow-up list in
+ * the staff app, the same as the pew card at /welcome.
+ */
+const [settingsEntry] = await getCollection('settings');
+const settings = settingsEntry.data;
+const t = await copyFor('visit');
+
+const groups = [
+  { label: t('when.sundayMorning', 'Sunday Morning'), times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time < '12:00') },
+  { label: t('when.sundayEvening', 'Sunday Afternoon & Evening'), times: settings.serviceTimes.filter((s) => s.day === 'Sunday' && s.time >= '12:00') },
+  { label: t('when.wednesday', 'Wednesday Night'), times: settings.serviceTimes.filter((s) => s.day === 'Wednesday') },
+].filter((g) => g.times.length);
+
+/* Children and youth, from the ministries' own entries — the same words their
+ * pages carry, so a change of time is made once. */
+const ministries = (await getCollection('ministries'))
+  .filter((m) => ['kids', 'youth'].includes(m.data.accent))
+  .sort((a, b) => a.data.order - b.data.order);
+
+/* The pastor: the first person on the staff page. */
+const staff = (await getCollection('staff')).sort((a, b) => a.data.order - b.data.order);
+const pastor = staff[0];
+const pastorPhoto = pastor?.data.photo ? STAFF_PHOTOS[pastor.data.photo] : undefined;
+/* The first paragraph of their bio, as plain text. */
+const pastorIntro = (pastor?.body ?? '').trim().split(/\n\s*\n/)[0]?.replace(/\s+/g, ' ').trim() ?? '';
+
+/* What a first-timer asks, in the order they ask it. An empty answer hides the
+ * question — see the note at the top. */
+const faq = [
+  { q: t('faq.wearQ', 'What should I wear?'),
+    a: t('faq.wearA', "Whatever you're comfortable in. There's no dress code — whether you're in jeans or your Sunday best, you'll be welcomed the same.") },
+  { q: t('faq.serviceQ', 'What is a service like?'),
+    a: t('faq.serviceA', 'Heartfelt, Spirit-led worship and preaching rooted in God’s Word, centered on real-life transformation. Each Sunday service usually includes a special song from someone in the church.') },
+  { q: t('faq.lengthQ', 'How long is a service?'), a: t('faq.lengthA', '') },
+  { q: t('faq.parkingQ', 'Where do I park, and which door do I use?'), a: t('faq.parkingA', '') },
+  { q: t('faq.doQ', 'Will I be asked to do anything?'),
+    a: t('faq.doA', 'No. Nobody expects you to have it figured out before you walk in.') },
+  { q: t('faq.watchQ', 'Can I watch a service first?'),
+    a: t('faq.watchA', 'Yes. Every service streams live on our YouTube channel, and past services are in the sermon archive.'),
+    links: [
+      { href: '/livestream', label: t('faq.watchLive', 'Watch live') },
+      { href: '/sermons', label: t('faq.watchArchive', 'Sermon archive') },
+    ] },
+].filter((f) => f.q && f.a);
+
+const telHref = settings.phone ? `tel:${settings.phone.replace(/[^\d+]/g, '')}` : null;
+const buildingJpg = await getImage({ src: buildingImg, width: 1200, format: 'jpg' });
+---
+<BaseLayout
+  title="Plan Your Visit"
+  description={`Planning your first visit to ${settings.churchName}? Service times, directions, what to expect, and what we have for kids and youth — Sundays at 10:00 AM and 5:30 PM, Wednesdays at 7:00 PM on Southeastern Avenue in Fairhaven.`}
+  jsonLd={churchJsonLd(settings, Astro.site, buildingJpg.src)}
+>
+  <!-- ============ HERO ============ -->
+  <section class="vh" data-par-frame>
+    <div class="vh__img duo par" data-par="80" style="--drift-scale: 1.28;">
+      <Image src={heroImg} alt="The congregation during a Sunday service"
+             widths={[900, 1400, 2000, 2400]} sizes="140vw" fetchpriority="high" loading="eager" />
+    </div>
+    <div class="vh__grade" aria-hidden="true"></div>
+    <div class="vh__body par-fg" data-par="-26">
+      <p class="label load d1 vh__eyebrow">{t('hero.eyebrow', 'Plan Your Visit')}</p>
+      <h1 class="serif load d2">{t('hero.headline', "We'd love to meet you.")}</h1>
+      <p class="vh__lede load d3">
+        {t('hero.lede', 'Everything you need to know before your first Sunday at Fairhaven Community — when to come, where to find us, what to expect, and what there is for your kids.')}
+      </p>
+      <div class="vh__acts load d4">
+        <a href="#card" class="btn btn--solid">{t('hero.cardButton', "Let us know you're coming")}</a>
+        <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--ghost">{t('hero.directionsButton', 'Get directions ↗')}</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHEN ============ -->
+  <section class="wrap when-wrap">
+    <div class="when reveal">
+      <div>
+        <h2 class="label sect__h">{t('when.eyebrow', 'When')}</h2>
+        <p class="serif sect__lead">{t('when.lead', 'Service times')}</p>
+        {t('when.tip', 'New to us? Sunday morning at 10:00 is a good place to start.') && (
+          <p class="sect__p">{t('when.tip', 'New to us? Sunday morning at 10:00 is a good place to start.')}</p>
+        )}
+      </div>
+      <div class="times">
+        {groups.map((g) => (
+          <div class="tgroup">
+            <p class="tgroup__day">{g.label}</p>
+            <ul class="tgroup__list">
+              {g.times.map((s) => (
+                <li><span class="tgroup__name">{s.label}</span><span class="tgroup__time">{clockText(s.time)}</span></li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHERE ============ -->
+  <section class="wrap where-wrap">
+    <div class="where reveal">
+      <div class="where__img duo">
+        <Image src={buildingImg} alt="The front of the church building, with its white cross"
+               widths={[600, 900, 1300]} sizes="(max-width: 860px) 100vw, 50vw" />
+      </div>
+      <div class="where__body">
+        <h2 class="label sect__h">{t('where.eyebrow', 'Where')}</h2>
+        <p class="serif sect__lead">{settings.address}</p>
+        <p class="sect__p">{t('where.directions', 'On the southeast side of Fairhaven, five minutes off I-465 at the Southeastern Avenue exit.')}</p>
+        {t('where.parking', '') && <p class="sect__p">{t('where.parking', '')}</p>}
+        <div class="where__acts">
+          <a href={settings.mapsUrl} target="_blank" rel="noreferrer" class="btn btn--ink">{t('where.mapButton', 'Open in Maps ↗')}</a>
+          {telHref && <a href={telHref} class="btn btn--line">{t('where.callPrefix', 'Call')} {settings.phone}</a>}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHAT TO EXPECT ============ -->
+  <section class="wrap faq-wrap">
+    <h2 class="label sect__h reveal">{t('faq.eyebrow', 'What To Expect')}</h2>
+    <p class="serif sect__lead reveal">{t('faq.lead', 'The questions people ask before their first Sunday.')}</p>
+    <dl class="faq">
+      {faq.map((f) => (
+        <div class="faq__item reveal">
+          <dt class="serif faq__q">{f.q}</dt>
+          <dd class="faq__a">
+            <p>{f.a}</p>
+            {f.links && (
+              <p class="faq__links">{f.links.map((l) => <a href={l.href}>{l.label} →</a>)}</p>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  </section>
+
+  <!-- ============ KIDS & YOUTH ============ -->
+  {ministries.length > 0 && (
+    <section class="wrap kids-wrap">
+      <div class="kids reveal">
+        <div>
+          <h2 class="label sect__h">{t('kids.eyebrow', 'Kids & Youth')}</h2>
+          <p class="serif sect__lead">{t('kids.lead', 'There is something for every age.')}</p>
+          {t('kids.body', '') && <p class="sect__p">{t('kids.body', '')}</p>}
+        </div>
+        <div class="kids__list">
+          {ministries.map((m) => (
+            <a href={`/ministries/${m.slug}`} class="kid" data-ministry={m.data.accent}>
+              <span class="kid__name serif">{m.data.name}</span>
+              {m.data.ageRange && <span class="kid__age">{m.data.ageRange}</span>}
+              {m.data.meets && <span class="kid__meets">{m.data.meets}</span>}
+              {m.data.where && <span class="kid__where">{m.data.where}</span>}
+              <span class="kid__more">{t('kids.more', 'More about')} {m.data.name} →</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <!-- ============ MEET THE PASTOR ============ -->
+  {pastor && (
+    <section class="wrap pastor-wrap">
+      <div class="pastor reveal">
+        {pastorPhoto && (
+          <div class="pastor__photo" style={`--focus: ${pastor.data.focus}%`}>
+            <Image src={pastorPhoto} alt={pastor.data.photoAlt ?? pastor.data.name} widths={[240, 480]} sizes="240px" />
+          </div>
+        )}
+        <div>
+          <h2 class="label sect__h">{t('pastor.eyebrow', 'Meet the Pastor')}</h2>
+          <p class="serif sect__lead">{pastor.data.name}</p>
+          {pastorIntro && <p class="sect__p">{pastorIntro}</p>}
+          <a href="/about/staff" class="pastor__link">{t('pastor.link', 'Meet the whole team →')}</a>
+        </div>
+      </div>
+    </section>
+  )}
+
+  <!-- ============ LET US KNOW ============ -->
+  <section class="wrap tell-wrap" id="coming">
+    <div class="tell">
+      <div class="tell__side reveal">
+        <h2 class="label sect__h">{t('form.eyebrow', 'Let Us Know')}</h2>
+        <p class="serif sect__lead">{t('form.lead', "Tell us you're coming, and we'll look out for you.")}</p>
+        <p class="sect__p">
+          {t('form.body', "It goes straight to the pastor. Ask anything here — or if you'd rather talk, call or message us.")}
+        </p>
+        <div class="tell__alt">
+          {telHref && <a href={telHref}>{settings.phone}</a>}
+          {settings.socials.facebook && <a href={settings.socials.facebook} target="_blank" rel="noreferrer">{t('form.facebook', 'Message us on Facebook ↗')}</a>}
+        </div>
+      </div>
+      <div class="reveal">
+        <GuestCardForm mode="planning" t={t} smsNumber={settings.smsNumber} />
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* NOTE: .vh__img declares no transform — a scoped one would outrank .par */
+  .vh { position: relative; overflow: clip; background: var(--ink); color: var(--cream);
+        min-height: 70vh; display: flex; flex-direction: column; }
+  .vh__img { position: absolute; inset: 0; z-index: 0; }
+  .vh__img :global(img) { width: 100%; height: 100%; object-fit: cover; }
+  .vh__grade { position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg, rgba(26,21,18,.6) 0%, rgba(26,21,18,.3) 30%,
+                                        rgba(26,21,18,.72) 64%, rgba(26,21,18,.96) 100%); }
+  .vh__body { position: relative; z-index: 3; margin-top: auto; padding: 140px var(--pad) clamp(46px,6vw,74px); }
+  .vh__eyebrow { color: var(--red-tint); margin: 0 0 18px; }
+  .vh h1 { margin: 0; font-size: clamp(42px,6vw,86px); line-height: 1.02; letter-spacing: -.02em; }
+  .vh__lede { margin: 22px 0 0; max-width: 56ch; font-size: 18px; line-height: 1.7; color: rgba(244,239,231,.84); }
+  .vh__acts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+
+  .sect__h { color: var(--red); margin: 0 0 14px; }
+  .sect__lead { margin: 0; font-size: clamp(26px,3.4vw,40px); line-height: 1.12; letter-spacing: -.01em; }
+  .sect__p { margin: 16px 0 0; font-size: 17px; line-height: 1.78; color: var(--ink-soft); max-width: 52ch; }
+
+  .when-wrap { padding-block: clamp(56px,7vw,92px); }
+  .when { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 60px; align-items: start; }
+  .times { display: grid; gap: 26px; border-top: 2px solid var(--ink); padding-top: 22px; }
+  .tgroup__day { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .16em;
+                 text-transform: uppercase; color: var(--ink-soft); }
+  .tgroup__list { list-style: none; margin: 0; padding: 0; }
+  .tgroup__list li { display: flex; align-items: baseline; justify-content: space-between;
+                     gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--hair); }
+  .tgroup__name { font-family: var(--font-display); font-size: 21px; line-height: 1.2; }
+  .tgroup__time { font-size: 16px; color: var(--ink-soft); white-space: nowrap; }
+
+  .where-wrap { padding-block: 0 clamp(56px,7vw,92px); }
+  .where { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: clamp(30px,5vw,64px); align-items: center; }
+  .where__img { border-radius: var(--radius-lg); overflow: hidden; aspect-ratio: 3 / 2; }
+  .where__img :global(img) { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .where__acts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+
+  .faq-wrap { padding-block: 0 clamp(56px,7vw,92px); }
+  .faq { margin: 30px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0 60px;
+         border-top: 2px solid var(--ink); }
+  .faq__item { padding: 24px 0; border-bottom: 1px solid var(--hair); }
+  .faq__q { margin: 0 0 8px; font-size: 24px; line-height: 1.2; }
+  .faq__a { margin: 0; }
+  .faq__a p { margin: 0; font-size: 17px; line-height: 1.75; color: var(--ink-soft); }
+  .faq__links { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px !important; }
+  .faq__links a { color: var(--red); font-weight: 700; font-size: 15px; }
+
+  .kids-wrap { padding-block: 0 clamp(56px,7vw,92px); }
+  .kids { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 60px; align-items: start; }
+  .kids__list { display: grid; gap: 16px; }
+  .kid { display: grid; gap: 4px; padding: 22px 24px; border-radius: var(--radius-lg);
+         background: var(--cream-deep); color: var(--ink);
+         border-left: 4px solid var(--ministry-accent, var(--red)); }
+  .kid:hover { background: #e3d9cb; }
+  .kid__name { font-size: 28px; line-height: 1.1; }
+  .kid__age { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-soft); }
+  .kid__meets, .kid__where { font-size: 16px; line-height: 1.6; color: var(--ink-soft); }
+  .kid__more { margin-top: 6px; font-size: 14px; font-weight: 700; color: var(--red); }
+
+  .pastor-wrap { padding-block: 0 clamp(56px,7vw,92px); }
+  .pastor { display: grid; grid-template-columns: auto minmax(0,1fr); gap: clamp(26px,4vw,50px); align-items: center;
+            background: var(--cream-deep); border-radius: var(--radius-lg); padding: clamp(26px,3.6vw,46px); }
+  .pastor__photo { width: 200px; height: 200px; border-radius: 999px; overflow: hidden; }
+  .pastor__photo :global(img) { width: 100%; height: 100%; object-fit: cover; object-position: 50% var(--focus, 22%); }
+  .pastor__link { display: inline-block; margin-top: 18px; font-size: 15px; font-weight: 700; color: var(--red); }
+
+  .tell-wrap { padding-block: 0 clamp(70px,8vw,110px); scroll-margin-top: 80px; }
+  .tell { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.4fr); gap: clamp(30px,5vw,64px); align-items: start; }
+  .tell__alt { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; font-size: 17px; }
+  .tell__alt a { color: var(--red); font-weight: 700; }
+
+  @media (max-width: 860px) {
+    .vh__body { padding: 112px var(--pad) 46px; }
+    .when, .where, .kids, .tell { grid-template-columns: 1fr; gap: 28px; }
+    .faq { grid-template-columns: 1fr; }
+    .pastor { grid-template-columns: 1fr; }
+    .pastor__photo { width: 140px; height: 140px; }
+    .vh__acts .btn { width: 100%; text-align: center; }
+  }
+</style>

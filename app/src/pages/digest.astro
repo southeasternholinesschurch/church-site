@@ -1,0 +1,180 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { buildDigest } from '../lib/digest-db';
+import { digestText } from '../lib/digest';
+import { getCareSettings, reachableRecipients } from '../lib/care-db';
+import { churchDate, shortDate } from '../lib/care';
+import { countSegments } from '../lib/sms';
+
+/**
+ * The Monday digest — the page the Monday text links to.
+ *
+ * The text gives the numbers; this gives the names behind them, so a pastor can
+ * go from "3 not been in" to the three people in one tap. Admin-only, like
+ * Care, because it is a summary of Care.
+ *
+ * Built fresh on every visit, so it is always this week's — open it on a
+ * Thursday and it reports the week just gone and the Sunday coming.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const today = churchDate();
+const d = await buildDigest(env, today);
+const settings = await getCareSettings(env);
+const reachable = await reachableRecipients(env, settings.recipientIds);
+const text = digestText(d, `${Astro.url.origin}/digest`);
+const seg = countSegments(text);
+
+const fmt = (iso: string) => shortDate(iso);
+const trend = (total: number, average: number | null) =>
+  average === null ? '' : total > average ? '▲' : total < average ? '▼' : '=';
+---
+<AppLayout title="Monday digest" user={user}>
+  <div class="head">
+    <h1>Monday digest</h1>
+    <a href="/care#texts">Who gets the text →</a>
+  </div>
+  <p class="muted lede">
+    The week of {fmt(d.week.start)} – {fmt(d.week.end)}, and the Sunday coming,
+    {fmt(d.sunday)}.
+    {settings.digestOn
+      ? <> Texted on Mondays at {settings.digestTime} to {`${reachable.length} ${reachable.length === 1 ? 'person' : 'people'}`}.</>
+      : <> The Monday text is switched off — <a href="/care#texts">turn it on in Care</a>.</>}
+  </p>
+
+  <section class="sms card">
+    <p class="label muted" style="margin:0 0 10px;">The text, as it would go out today</p>
+    <p class="bubble">{text}</p>
+    <p class="muted" style="font-size:13px; margin:8px 0 0;">
+      {seg.segments} {seg.segments === 1 ? 'segment' : 'segments'} · {seg.encoding}
+    </p>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Last week</h2>
+      {d.services.length === 0 ? (
+        <p class="muted">No attendance was taken.</p>
+      ) : (
+        <table class="t-stack">
+          <thead><tr><th>Service</th><th>Here</th><th>8-week average</th></tr></thead>
+          <tbody>
+            {d.services.map((s) => (
+              <tr>
+                <td>{s.label} <span class="muted">· {fmt(s.date)}</span></td>
+                <td data-label="Here"><strong>{s.total}</strong> <span class="trend">{trend(s.total, s.average)}</span></td>
+                <td data-label="8-week average">{s.average ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p style="margin:14px 0 0;"><a href="/attendance">Attendance →</a></p>
+    </section>
+
+    <section class="card">
+      <h2>To follow up</h2>
+      {d.queue.length === 0 ? (
+        <p class="muted">Nobody is waiting.</p>
+      ) : (
+        <ul class="list">
+          {d.queue.slice(0, 10).map((i) => (
+            <li>
+              <a href={i.personId ? `/care/person/${i.personId}` : `/care/guest/${i.guestId}`}>{i.name}</a>
+              <span class="muted"> — {i.reason}</span>
+              {i.assignedName && <span class="chip" style="margin-left:6px;">{i.assignedName}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {d.queue.length > 10 && <p class="muted">and {d.queue.length - 10} more.</p>}
+      <p style="margin:14px 0 0;"><a href="/care">Care →</a></p>
+    </section>
+
+    <section class="card">
+      <h2>Guests</h2>
+      {d.guests.length === 0 && d.expectedList.length === 0 && <p class="muted">No guest cards last week, and nobody has said they are coming.</p>}
+      {d.guests.length > 0 && (
+        <>
+          <p class="label muted sub">Cards last week</p>
+          <ul class="list">
+            {d.guests.map((g) => (
+              <li><a href={`/care/guest/${g.id}`}>{g.name}</a> <span class="muted">— {fmt(g.when)}{g.what && ` · ${g.what}`}</span></li>
+            ))}
+          </ul>
+        </>
+      )}
+      {d.expectedList.length > 0 && (
+        <>
+          <p class="label muted sub">Planning to visit this week</p>
+          <ul class="list">
+            {d.expectedList.map((g) => (
+              <li><a href={`/care/guest/${g.id}`}>{g.name}</a> <span class="muted">— {g.date ? fmt(g.date) : 'this week'}{g.party && ` · ${g.party}`}</span></li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+
+    <section class="card">
+      <h2>This week</h2>
+      {d.celebrations.length === 0 ? (
+        <p class="muted">No birthdays or anniversaries on file this week.</p>
+      ) : (
+        <ul class="list">
+          {d.celebrations.map((c) => (
+            <li>
+              <span class="when">{fmt(c.date)}</span>
+              <a href={`/people/${c.personId}`}>{c.name}</a>
+              <span class="muted"> · {c.kind}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+
+    <section class="card">
+      <h2>Singing {fmt(d.sunday)}</h2>
+      {d.singing ? (
+        <ul class="list">
+          <li><span class="when">Morning</span> {d.singing.morning ?? '—'}</li>
+          <li><span class="when">Evening</span> {d.singing.evening ?? '—'}</li>
+        </ul>
+      ) : (
+        <p class="muted">Nothing on the singing schedule for this Sunday.</p>
+      )}
+      <p style="margin:14px 0 0;"><a href="/singing">Singing schedule →</a></p>
+    </section>
+
+    <section class="card">
+      <h2>Sign-ups this week</h2>
+      {d.sheets.length === 0 ? (
+        <p class="muted">No sign-up sheet has an open place this week.</p>
+      ) : (
+        <ul class="list">
+          {d.sheets.map((s) => (
+            <li><a href={`/signups/${s.id}`}>{s.title}</a> <span class="muted">— {s.open} {s.open === 1 ? 'place' : 'places'} open{s.date && `, from ${fmt(s.date)}`}</span></li>
+          ))}
+        </ul>
+      )}
+    </section>
+  </div>
+</AppLayout>
+
+<style>
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .head h1 { margin: 0; }
+  .lede { margin: 8px 0 20px; max-width: 70ch; }
+  .sms { margin-bottom: 22px; }
+  .bubble { margin: 0; max-width: 46ch; padding: 12px 16px; border-radius: 18px 18px 18px 4px;
+            background: #e9e9eb; color: #111; font-size: 15px; line-height: 1.45; word-break: break-word; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .grid h2 { margin-bottom: 12px; }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { padding: 7px 0; border-bottom: 1px solid var(--hair); }
+  .list li:last-child { border-bottom: 0; }
+  .when { display: inline-block; min-width: 92px; font-size: 13px; font-weight: 700; color: var(--ink-soft); }
+  .sub { margin: 4px 0 6px; }
+  .trend { font-size: 12px; color: var(--ink-soft); }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+</style>

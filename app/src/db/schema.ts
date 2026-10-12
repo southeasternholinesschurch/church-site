@@ -1007,3 +1007,121 @@ export const kidComing = sqliteTable('kid_coming', {
 }, (t) => ({
   pk: primaryKey({ columns: [t.kidId, t.week] }),
 }));
+
+
+/* ============================================================ pastoral care == */
+
+/**
+ * A card a visitor filled in on the public site — the pew card at /welcome, or
+ * "let us know you're coming" on Plan Your Visit.
+ *
+ * Kept as they wrote it. The WORKFLOW around a card (has anybody called them?)
+ * is a care_items row, not a column here, so the follow-up list is one list
+ * whatever put somebody on it. See migrations/0028_care.sql.
+ */
+export const guestCards = sqliteTable('guest_cards', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  firstName: text('first_name').notNull(),
+  lastName: text('last_name'),
+  phone: text('phone'),
+  phoneE164: text('phone_e164'),
+  email: text('email'),
+  kind: text('kind', { enum: ['here', 'planning'] }).notNull().default('here'),
+  /** YYYY-MM-DD in church time — the day they came, or plan to. */
+  visitDate: text('visit_date'),
+  firstTime: integer('first_time', { mode: 'boolean' }).notNull().default(false),
+  /** JSON array of request ids — see GUEST_WANTS in lib/care.ts. */
+  wants: text('wants').notNull().default('[]'),
+  message: text('message'),
+  party: text('party'),
+  heardFrom: text('heard_from'),
+  /**
+   * A FOURTH TABLE HOLDING A PHONE NUMBER AND A CONSENT DECISION. lib/consent.ts
+   * covers it, in the same change that created it. Only ever 'opted_in' (the
+   * box was ticked), 'opted_out' (a STOP reached it) or null.
+   */
+  smsConsent: text('sms_consent', { enum: ['unknown', 'opted_in', 'opted_out'] }),
+  smsConsentSource: text('sms_consent_source'),
+  smsConsentAt: text('sms_consent_at'),
+  /** Set when the card is turned into a person on the People list. */
+  personId: integer('person_id').references(() => people.id),
+  /** For counting cards per connection per hour. Never the address itself. */
+  ipHash: text('ip_hash'),
+  createdAt: text('created_at').notNull(),
+}, (t) => ({
+  createdIdx: index('guest_cards_created_idx').on(t.createdAt),
+  phoneIdx: index('guest_cards_phone_idx').on(t.phoneE164),
+  ipIdx: index('guest_cards_ip_idx').on(t.ipHash, t.createdAt),
+}));
+
+/**
+ * The follow-up list. One row is one thing that needs doing for somebody, by a
+ * date — opened, and later closed. What was actually DONE is a care_notes row.
+ */
+export const careItems = sqliteTable('care_items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  personId: integer('person_id').references(() => people.id, { onDelete: 'cascade' }),
+  guestId: integer('guest_id').references(() => guestCards.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: ['missing', 'guest', 'reminder'] }).notNull(),
+  reason: text('reason').notNull(),
+  /** YYYY-MM-DD, church time. Future = "coming up", which is all a snooze is. */
+  dueOn: text('due_on').notNull(),
+  /** Unique: the guard against listing the same thing twice. */
+  sourceKey: text('source_key').unique(),
+  assignedStaffId: integer('assigned_staff_id').references(() => staff.id, { onDelete: 'set null' }),
+  status: text('status', { enum: ['open', 'done'] }).notNull().default('open'),
+  resolution: text('resolution'),
+  resolvedAt: text('resolved_at'),
+  resolvedBy: text('resolved_by'),
+  createdBy: text('created_by'),
+  createdAt: text('created_at').notNull(),
+}, (t) => ({
+  openIdx: index('care_items_open_idx').on(t.status, t.dueOn),
+  personIdx: index('care_items_person_idx').on(t.personId),
+  guestIdx: index('care_items_guest_idx').on(t.guestId),
+}));
+
+/**
+ * The care log. A visit, a call, a card — dated by when it HAPPENED, signed by
+ * who did it, and kept. Append-only in spirit, like kid_notes: a second note
+ * never overwrites the first.
+ */
+export const careNotes = sqliteTable('care_notes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  personId: integer('person_id').references(() => people.id, { onDelete: 'cascade' }),
+  guestId: integer('guest_id').references(() => guestCards.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  body: text('body'),
+  onDate: text('on_date').notNull(),
+  staffId: integer('staff_id').references(() => staff.id, { onDelete: 'set null' }),
+  authorName: text('author_name'),
+  createdAt: text('created_at').notNull(),
+}, (t) => ({
+  personIdx: index('care_notes_person_idx').on(t.personId, t.onDate),
+  guestIdx: index('care_notes_guest_idx').on(t.guestId),
+  createdIdx: index('care_notes_created_idx').on(t.createdAt),
+}));
+
+export type GuestCard = typeof guestCards.$inferSelect;
+export type CareItem = typeof careItems.$inferSelect;
+export type CareNote = typeof careNotes.$inferSelect;
+
+
+/* ======================================================= singing schedule == */
+
+/**
+ * Who sings on which Sunday, one row per Sunday — the Google Sheet it replaces,
+ * column for column. Each cell is the text as typed (names, or a note such as
+ * "Fall Revival") and is read by roster.ts, the same parser the sheet went
+ * through. See migrations/0029_singing.sql.
+ */
+export const singingSchedule = sqliteTable('singing_schedule', {
+  /** YYYY-MM-DD, always a Sunday. */
+  sunday: text('sunday').primaryKey(),
+  morning: text('morning'),
+  evening: text('evening'),
+  updatedAt: text('updated_at').notNull(),
+  updatedBy: text('updated_by'),
+});
+
+export type SingingRow = typeof singingSchedule.$inferSelect;

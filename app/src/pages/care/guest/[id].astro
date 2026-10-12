@@ -1,0 +1,204 @@
+---
+import AppLayout from '../../../layouts/AppLayout.astro';
+import CareItem from '../../../components/CareItem.astro';
+import { readForm } from '../../../lib/form';
+import { careAction, CARE_DONE } from '../../../lib/care-actions';
+import {
+  CARE_KINDS, NEXT_STEPS, churchDate, careKindLabel, guestName, parseWants, wantsText, shortDate,
+} from '../../../lib/care';
+import { guestById, openQueue, notesFor, careStaff } from '../../../lib/care-db';
+import { formatDate, CHURCH_TZ } from '../../../lib/services';
+
+/**
+ * One guest card, as they filled it in, with what has been done about it.
+ *
+ * "Add to People" is the step from guest to member of the congregation's
+ * list. It is a button rather than something that happens on its own because
+ * plenty of guests are passing through, and the People list is the
+ * congregation, not everyone who ever visited.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const today = churchDate();
+
+const id = Number(Astro.params.id);
+if (!Number.isInteger(id) || id <= 0) return Astro.redirect('/care', 302);
+const card = await guestById(env, id);
+if (!card) return Astro.redirect('/care?done=gone', 302);
+// Once they are on People, their care lives on their own page.
+if (card.personId && Astro.request.method !== 'POST') {
+  return Astro.redirect(`/care/person/${card.personId}`, 302);
+}
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const result = await careAction(env, form, user);
+  if (result && 'redirect' in result) return Astro.redirect(result.redirect, 303);
+  if (result && 'done' in result) return Astro.redirect(`/care/guest/${id}?done=${result.done}`, 303);
+  if (result && 'error' in result) error = result.error;
+}
+
+const queue = await openQueue(env, today);
+const open = [...queue.now, ...queue.later].filter((i) => i.guestId === id);
+const staff = await careStaff(env);
+const notes = await notesFor(env, { guestId: id });
+const dueOpen = open.filter((i) => i.dueOn <= today);
+const wants = parseWants(card.wants);
+const done = Astro.url.searchParams.get('done');
+const name = guestName(card);
+const telHref = card.phone ? `tel:${card.phone.replace(/[^\d+]/g, '')}` : null;
+const received = new Date(card.createdAt).toLocaleString('en-US', {
+  dateStyle: 'medium', timeStyle: 'short', timeZone: CHURCH_TZ,
+});
+---
+<AppLayout title={`Guest · ${name}`} user={user}>
+  <p style="margin:0 0 6px;"><a href="/care">← Care</a></p>
+  <h1>{name}</h1>
+  <p class="muted" style="margin:-4px 0 20px;">
+    {card.kind === 'planning' ? 'Planning a visit' : 'Guest card'} · received {received}
+  </p>
+
+  {done && CARE_DONE[done] && <p class="notice notice--ok">{CARE_DONE[done]}</p>}
+  {error && <p class="notice">{error}</p>}
+
+  <div class="card">
+    <dl class="dl">
+      {card.kind === 'planning'
+        ? <><dt>Coming</dt><dd>{card.visitDate ? formatDate(card.visitDate) : 'Not sure yet'}</dd></>
+        : <><dt>Visited</dt><dd>{card.visitDate ? formatDate(card.visitDate) : '—'}{card.firstTime && ' · first time'}</dd></>}
+      {card.party && <><dt>Coming with</dt><dd>{card.party}</dd></>}
+      <dt>Would like</dt><dd>{wants.length ? wantsText(wants) : 'Nothing in particular — just saying hello'}</dd>
+      <dt>Phone</dt><dd>{telHref ? <a href={telHref}>{card.phone}</a> : '—'}
+        {card.smsConsent === 'opted_in' && <span class="chip" style="margin-left:8px;">OK to text</span>}
+        {card.smsConsent === 'opted_out' && <span class="chip chip--warn" style="margin-left:8px;">Asked not to be texted</span>}
+      </dd>
+      <dt>Email</dt><dd>{card.email ? <a href={`mailto:${card.email}`}>{card.email}</a> : '—'}</dd>
+      {card.heardFrom && <><dt>Heard about us</dt><dd>{card.heardFrom}</dd></>}
+    </dl>
+    {card.message && <blockquote class="msg">{card.message}</blockquote>}
+  </div>
+
+  {open.length > 0 && (
+    <section style="margin-top:22px;">
+      <h2>Open</h2>
+      {open.map((item) => <CareItem item={item} today={today} staff={staff} showName={false} compact />)}
+    </section>
+  )}
+
+  <div class="grid">
+    <form method="POST" class="card">
+      <h2>Log a contact</h2>
+      <input type="hidden" name="action" value="log" />
+      <input type="hidden" name="guestId" value={id} />
+      <div class="row">
+        <label class="field"><span>What</span>
+          <select name="kind">
+            {CARE_KINDS.map((k) => <option value={k.id} selected={k.id === 'call'}>{k.label}</option>)}
+          </select>
+        </label>
+        <label class="field"><span>When</span>
+          <input type="date" name="onDate" value={today} max={today} />
+        </label>
+      </div>
+      <label class="field"><span>Note</span>
+        <textarea name="body" rows="3"></textarea>
+      </label>
+      {dueOpen.length > 0 && (
+        <label class="answers">
+          <input type="checkbox" name="closeOpen" checked />
+          <span>This answers the card — take it off the list</span>
+        </label>
+      )}
+      <fieldset class="next">
+        <legend class="label">Then</legend>
+        {NEXT_STEPS.map((s) => (
+          <label class="radio">
+            <input type="radio" name="next" value={s.id} checked={s.id === 'done'} />
+            <span>{s.label}</span>
+            {s.id === 'date' && <input type="date" name="nextOn" min={today} aria-label="Check again on" />}
+          </label>
+        ))}
+      </fieldset>
+      <button class="btn" type="submit">Save to the care log</button>
+    </form>
+
+    <div class="card">
+      <h2>Add to People</h2>
+      <p class="muted">
+        When {card.firstName} is becoming part of the church. This adds them to
+        the People list with the details on this card — and their notes come with
+        them. They are <strong>not</strong> put in the directory, and adult or child
+        is left for you to set.
+        {card.smsConsent === 'opted_in'
+          ? ' They ticked the box to be texted, so they will be opted in.'
+          : ' They did not ask to be texted, so they will not be.'}
+      </p>
+      <form method="POST" style="margin:0;">
+        <input type="hidden" name="action" value="to-person" />
+        <input type="hidden" name="guestId" value={id} />
+        <button class="btn" type="submit">Add {card.firstName} to People</button>
+      </form>
+    </div>
+  </div>
+
+  <section class="card" style="margin-top:22px;">
+    <h2>Care log</h2>
+    {notes.length === 0 ? (
+      <p class="muted" style="margin:0;">Nothing written yet.</p>
+    ) : (
+      <ul class="log">
+        {notes.map((n) => (
+          <li>
+            <p style="margin:0;"><strong>{careKindLabel(n.kind)}</strong>
+              <span class="muted"> · {shortDate(n.onDate)}{n.authorName && ` · ${n.authorName}`}</span></p>
+            {n.body && <p class="log__b">{n.body}</p>}
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+
+  <details class="card danger" style="margin-top:22px;">
+    <summary class="fold">Delete this card</summary>
+    <p class="muted" style="margin:14px 0 16px; max-width:62ch;">
+      For spam, or a card sent twice. The card, its follow-up and any notes on it
+      are removed for good. A real visitor who is not staying is better left here
+      and closed — the card is the only record they came.
+    </p>
+    <form method="POST" style="margin:0;">
+      <input type="hidden" name="action" value="delete-guest" />
+      <input type="hidden" name="guestId" value={id} />
+      <button class="btn btn--danger" type="submit">Delete {name}'s card</button>
+    </form>
+  </details>
+</AppLayout>
+
+<style>
+  .dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 22px; margin: 0; }
+  .dl dt { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+           color: var(--ink-soft); padding-top: 3px; }
+  .dl dd { margin: 0; }
+  .msg { margin: 16px 0 0; padding: 10px 14px; border-left: 3px solid var(--red);
+         background: var(--cream); border-radius: 0 6px 6px 0; white-space: pre-line; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px;
+          align-items: start; margin-top: 22px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .next { border: 0; padding: 0; margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .next legend { color: var(--ink-soft); margin-bottom: 8px; }
+  .radio { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+  .radio input[type=radio] { width: 18px; height: 18px; }
+  .radio input[type=date] { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--hair); border-radius: 6px; }
+  .answers { display: flex; gap: 10px; align-items: flex-start; margin: -4px 0 16px; font-size: 15px; }
+  .answers input { width: 18px; height: 18px; margin-top: 3px; flex: none; }
+  .log { list-style: none; padding: 0; margin: 0; }
+  .log li { padding: 10px 0; border-bottom: 1px solid var(--hair); }
+  .log li:last-child { border-bottom: 0; }
+  .log__b { margin: 4px 0 0; white-space: pre-line; }
+  .danger { border-color: var(--red); }
+  @media (max-width: 800px) {
+    .grid, .row { grid-template-columns: 1fr; }
+    .dl { grid-template-columns: 1fr; gap: 2px; }
+    .dl dd { margin-bottom: 10px; }
+  }
+</style>

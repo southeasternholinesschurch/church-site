@@ -58,6 +58,9 @@ out.push('DELETE FROM kid_notes; DELETE FROM kid_route_captains;');
 out.push('DELETE FROM kid_class_teachers; DELETE FROM kid_guardians; DELETE FROM kids;');
 out.push('DELETE FROM kid_classes; DELETE FROM kid_routes;');
 out.push('DELETE FROM signups; DELETE FROM signup_slots; DELETE FROM signup_sheets;');
+// Care before people: notes and follow-ups point at people and at guest cards.
+out.push('DELETE FROM care_notes; DELETE FROM care_items; DELETE FROM guest_cards;');
+out.push('DELETE FROM singing_schedule;');
 out.push('DELETE FROM people; DELETE FROM bulletins; DELETE FROM app_settings;');
 // Anyone a visitor added through the Access screen. The demo has no sign-in,
 // so these rows do nothing — but leaving them means the screen fills up with
@@ -121,17 +124,42 @@ for (const p of people.filter((x) => x.kind === 'adult')) {
   for (let g = 1; g <= 4; g++) if (chance(0.18)) out.push(`INSERT INTO people_groups (person_id, group_id) VALUES (${p.id}, ${g});`);
 }
 
-// a term of services, with attendance that looks like a real church's
+/*
+ * A term of services, with attendance that looks like a real church's.
+ *
+ * DATED FROM THE RESEED, like the sign-up sheets below: twelve weeks ending on
+ * the most recent Sunday. Written-down dates made the demo a museum — the Monday
+ * digest's "last week" had no services in it, and the follow-up list, which
+ * reads the last twelve weeks of registers, had nothing to read.
+ */
 const KINDS = [['sunday-morning', 0.62], ['sunday-evening', 0.34], ['wednesday', 0.3]];
+const today0 = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00Z`);
+const lastSunday = new Date(today0.getTime() - today0.getUTCDay() * 86400000);
+/*
+ * Three regulars who have STOPPED COMING — at nearly every service for two
+ * months, then nothing for the last four weeks — so the Care list has the
+ * thing it exists to find. And one who moved to the EVENING service, who must
+ * not be on it: the list counts weeks, not one kind of service.
+ */
+const adultIds = people.filter((x) => x.kind === 'adult').map((x) => x.id);
+const stopped = new Set([adultIds[5], adultIds[12], adultIds[27]]);
+const movedToEvening = adultIds[9];
 let sid = 0;
-for (let w = 10; w >= 1; w--) {
+for (let w = 11; w >= 0; w--) {
   for (const [kind, rate] of KINDS) {
-    const d = new Date(Date.UTC(2026, 8, 5) - w * 7 * 86400000 + (kind === 'wednesday' ? 3 * 86400000 : 0));
+    const d = new Date(lastSunday.getTime() - w * 7 * 86400000 + (kind === 'wednesday' ? 3 * 86400000 : 0));
+    // No Wednesday "this week" that has not happened yet.
+    if (d > today0) continue;
     const iso = d.toISOString().slice(0, 10);
     // Column is `date`, not `service_date` — checked against the live schema
     // rather than guessed, which is how the first attempt failed.
     out.push(`INSERT INTO services (id, date, kind, created_at) VALUES (${++sid}, '${iso}', ${q(kind)}, datetime('now'));`);
-    for (const p of people) if (chance(rate)) out.push(`INSERT INTO attendance (service_id, person_id, created_at) VALUES (${sid}, ${p.id}, datetime('now'));`);
+    for (const p of people) {
+      let here = chance(rate);
+      if (stopped.has(p.id)) here = w >= 4 && kind === 'sunday-morning' ? chance(0.92) : false;
+      if (p.id === movedToEvening) here = w >= 4 ? kind === 'sunday-morning' : kind === 'sunday-evening';
+      if (here) out.push(`INSERT INTO attendance (service_id, person_id, created_at) VALUES (${sid}, ${p.id}, datetime('now'));`);
+    }
     const visitors = Math.floor(rnd() * 4);
     for (let v = 0; v < visitors; v++) out.push(`INSERT INTO visitors (service_id, name, adult_child, first_time, created_at) VALUES (${sid}, ${q(pick(MEN) + ' ' + pick(SURNAMES))}, 'adult', ${chance(0.5) ? 1 : 0}, datetime('now'));`);
   }
@@ -525,5 +553,119 @@ const done = sheet({
   slot(done, i, dayName(day), day, 1, [member(adultsPool[(i * 7) % adultsPool.length])]);
 });
 
+/* ------------------------------------------------------------------ care --
+ *
+ * The follow-up list and the care log, seeded in the states worth showing: a
+ * guest card from last Sunday waiting for a call, a family planning a visit, a
+ * card answered weeks ago, a reminder due today, and a log with a few weeks of
+ * real-looking pastoral work in it. The regulars who have stopped coming are
+ * NOT seeded here — they are made by the attendance above, and the app finds
+ * them itself when Care is opened, which is the behaviour being demonstrated.
+ */
+out.push(`INSERT INTO staff (id, email, name, role, active, created_at)
+  VALUES (6, 'assistant@example.org', 'Assistant Pastor', 'admin', 1, datetime('now'));`);
+const careNote = (personId, guestId, kind, daysAgo, body, staffId = 5, author = 'Pastor') =>
+  out.push(`INSERT INTO care_notes (person_id, guest_id, kind, body, on_date, staff_id, author_name, created_at)
+    VALUES (${personId ?? 'NULL'}, ${guestId ?? 'NULL'}, ${q(kind)}, ${q(body)}, '${inDays(-daysAgo)}',
+            ${staffId ?? 'NULL'}, ${q(author)}, datetime('now', '-${daysAgo} days'));`);
+const careItem = (o) => out.push(`INSERT INTO care_items (person_id, guest_id, kind, reason, due_on,
+    source_key, assigned_staff_id, status, resolution, resolved_at, resolved_by, created_by, created_at)
+  VALUES (${o.personId ?? 'NULL'}, ${o.guestId ?? 'NULL'}, ${q(o.kind)}, ${q(o.reason)}, '${o.dueOn}',
+          ${q(o.key ?? null)}, ${o.assigned ?? 'NULL'}, ${q(o.status ?? 'open')}, ${q(o.resolution ?? null)},
+          ${o.status === 'done' ? "datetime('now','-20 days')" : 'NULL'}, ${q(o.status === 'done' ? 'Pastor' : null)},
+          ${q(o.by ?? 'Pastor')}, datetime('now', '-${o.ago ?? 0} days'));`);
+
+/* "Sun, Oct 12" — the same wording lib/care.ts writes on a real item. */
+const short = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US',
+  { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+const sundayBefore = inDays(-((new Date().getUTCDay()) || 7));
+const nextSun = inDays(7 - new Date().getUTCDay());
+
+// 1. Last Sunday's pew card — first time, asked for a visit, ticked "OK to text".
+out.push(`INSERT INTO guest_cards (id, first_name, last_name, phone, phone_e164, email, kind, visit_date,
+  first_time, wants, message, party, heard_from, sms_consent, sms_consent_source, sms_consent_at, created_at)
+  VALUES (1, 'Rachel', 'Moreno', '(317) 555-0177', '+13175550177', NULL, 'here', '${sundayBefore}', 1,
+  '["visit","call"]', 'We just moved into the neighborhood and are looking for a church home for our family.',
+  NULL, 'Drove past', 'opted_in', 'guest-card', datetime('now','-1 days'), datetime('now','-1 days'));`);
+careItem({ guestId: 1, kind: 'guest', key: 'guest:1', dueOn: sundayBefore, ago: 1, by: 'guest card',
+  reason: `Visited ${short(sundayBefore)} · first time · wants a visit and a call` });
+
+// 2. A family planning their first Sunday, from Plan Your Visit.
+out.push(`INSERT INTO guest_cards (id, first_name, last_name, phone, phone_e164, email, kind, visit_date,
+  first_time, wants, message, party, heard_from, sms_consent, created_at)
+  VALUES (2, 'Tom', 'Bramwell', NULL, NULL, 'tom.bramwell@example.org', 'planning', '${nextSun}', 0,
+  '["kids"]', 'Is there anything for children during the morning service?',
+  'Two of us, and two boys (6 and 9)', 'A friend', NULL, datetime('now'));`);
+careItem({ guestId: 2, kind: 'guest', key: 'guest:2', dueOn: inDays(0), by: 'guest card',
+  reason: `Planning to visit ${short(nextSun)} · wants kids & youth info` });
+
+// 3. A card answered weeks ago: the follow-up is closed, the call is in the log.
+out.push(`INSERT INTO guest_cards (id, first_name, last_name, phone, phone_e164, kind, visit_date,
+  first_time, wants, message, sms_consent, created_at)
+  VALUES (3, 'Lucy', 'Ashby', '(317) 555-0178', '+13175550178', 'here', '${inDays(-23)}', 1,
+  '["call"]', NULL, NULL, datetime('now','-23 days'));`);
+careItem({ guestId: 3, kind: 'guest', key: 'guest:3', dueOn: inDays(-23), ago: 23, by: 'guest card',
+  status: 'done', resolution: 'Phone call', reason: `Visited ${short(inDays(-23))} · first time · wants a call` });
+careNote(null, 3, 'call', 21, 'Lovely conversation. She grew up in a holiness church in Kentucky and is coming back next week with her sister.');
+
+// A reminder due today, set by the assistant pastor and assigned to him.
+const surgery = adultsPool[7];
+careItem({ personId: surgery.id, kind: 'reminder', dueOn: inDays(0), ago: 10, assigned: 6,
+  by: 'Assistant Pastor', reason: 'Visit after the knee surgery' });
+careNote(surgery.id, null, 'hospital', 3, 'Visited at Community East before the operation. In good spirits; prayed with the family. Home by Thursday if all goes well.', 6, 'Assistant Pastor');
+
+// A shut-in, visited monthly, with the next visit already on the list.
+const shutIn = adultsPool[20];
+careNote(shutIn.id, null, 'visit', 14, 'Monthly visit. Brought the bulletin and the last two sermons on a memory stick. Asked us to pray for her grandson starting college.');
+careNote(shutIn.id, null, 'card', 44, 'Birthday card from the church.');
+careItem({ personId: shutIn.id, kind: 'reminder', dueOn: inDays(14), ago: 14, assigned: 5,
+  reason: 'Check in again' });
+
+careNote(adultsPool[2].id, null, 'card', 6, 'Sympathy card after the loss of her mother.');
+careNote(adultsPool[15].id, null, 'call', 9, 'New job has him on Sunday shifts for a couple of months. Will come on Wednesdays when he can.');
+// One of the regulars who has stopped coming already has an attempt on record,
+// so their line on the Care list shows "Last: Phone call".
+const stoppedOne = people.find((x) => x.id === adultIds[12]);
+careNote(stoppedOne.id, null, 'call', 2, 'Left a message.');
+
+// The pastors' texts: the digest on, guest alerts on, sent to the first adult
+// who can actually be texted.
+const pastor = people.find((x) => x.kind === 'adult' && x.phone);
+out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES
+  ('care_digest_on','1',datetime('now'),'demo@example.org'),
+  ('care_digest_time','08:00',datetime('now'),'demo@example.org'),
+  ('care_alert_on','1',datetime('now'),'demo@example.org'),
+  ('care_recipients','[${pastor.id}]',datetime('now'),'demo@example.org');`);
+
+/* ------------------------------------------------------------- singing --
+ *
+ * This quarter's schedule, typed the way a real one is: one singer, a couple,
+ * a group, the odd guest who is not in the database, and Sundays that carry a
+ * note instead of names. The guests are what makes the editor's "not on People"
+ * marker worth showing.
+ */
+{
+  const now = new Date();
+  const qStart = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1, 12));
+  const qEnd = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3 + 3, 0, 12));
+  const first = new Date(qStart.getTime() + ((7 - qStart.getUTCDay()) % 7) * 86400000);
+  const singers = adultsPool.filter((x) => x.phone);
+  const name = (x) => `${x.first} ${x.last}`;
+  const cell = () => {
+    const n = chance(0.6) ? 1 : chance(0.6) ? 2 : 3;
+    return Array.from({ length: n }, () => name(pick(singers))).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+  };
+  let i = 0;
+  for (let d = first; d <= qEnd; d = new Date(d.getTime() + 7 * 86400000), i++) {
+    const iso = d.toISOString().slice(0, 10);
+    let morning = cell(), evening = cell();
+    if (i === 3) { morning = 'Fall Revival'; evening = ''; }
+    if (i === 6) evening = 'Youth-led Service';
+    if (i === 8) morning = 'The Carver Sisters';
+    if (i === 10) evening = 'Favorite chorus night';
+    out.push(`INSERT INTO singing_schedule (sunday, morning, evening, updated_at, updated_by)
+      VALUES ('${iso}', ${q(morning || null)}, ${q(evening || null)}, datetime('now'), 'demo@example.org');`);
+  }
+}
 
 console.log(out.join('\n'));

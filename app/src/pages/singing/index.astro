@@ -1,0 +1,293 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import {
+  quarterOf, quarterFromKey, shiftQuarter, sundaysBetween, monthName, cellNames, singerTally,
+} from '../../lib/singing';
+import {
+  scheduleSource, scheduleRows, allScheduleRows, saveSchedule, importFromSheet, matchablePeople,
+  getPrintNote, setPrintNote, rosterDays,
+} from '../../lib/singing-db';
+import { churchDate, shortDate, addDays } from '../../lib/care';
+
+/**
+ * The singing schedule — one special song each Sunday morning and evening,
+ * planned a quarter at a time.
+ *
+ * Typed the way the Google Sheet was: a row per Sunday, names separated by
+ * commas, or a note ("Fall Revival") where there are no singers. What this adds
+ * over the sheet is the line under each cell saying, as it is typed, whether
+ * each name will get the Monday reminder — the sheet could only say so on
+ * Monday morning, after the reminder had already gone out without them.
+ *
+ * The bulletin, the Monday reminder and the printout all read from here once
+ * anything has been saved. Until then they read the sheet; see singing-db.ts.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const today = churchDate();
+
+const q = quarterFromKey(Astro.url.searchParams.get('q')) ?? quarterOf(today);
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+  const posted = quarterFromKey(String(form.get('q') ?? '')) ?? q;
+
+  if (action === 'import') {
+    const r = await importFromSheet(env, user.email);
+    if ('error' in r) error = r.error;
+    else return Astro.redirect(`/singing?q=${posted.key}&done=imported-${r.added}`, 303);
+  }
+
+  // Refused here as well as hidden in the page: a form left open from before
+  // the sheet was copied in must not be what cuts the schedule over.
+  if (action === 'save' && (await scheduleSource(env)) === 'sheet') {
+    error = 'Copy the schedule in from the Google Sheet first, so no Sundays are left behind.';
+  } else if (action === 'save') {
+    // Only the Sundays of the quarter that was on screen. Field names carry the
+    // date, so a stale tab cannot write a different quarter's Sundays.
+    //
+    // And only Sundays whose cells were actually SENT. A cell posted empty is a
+    // cleared Sunday; a cell not posted at all is no instruction, and must not
+    // be read as one — that is the difference between clearing a week and
+    // deleting the quarter because a form arrived half-filled.
+    const rows = sundaysBetween(posted.start, posted.end)
+      .filter((sunday) => form.has(`m-${sunday}`) && form.has(`e-${sunday}`))
+      .map((sunday) => ({
+        sunday,
+        morning: String(form.get(`m-${sunday}`) ?? ''),
+        evening: String(form.get(`e-${sunday}`) ?? ''),
+      }));
+    await saveSchedule(env, rows, user.email);
+    const note = form.get('printNote');
+    if (typeof note === 'string') await setPrintNote(env, note, user.email);
+    return Astro.redirect(`/singing?q=${posted.key}&done=saved`, 303);
+  }
+}
+
+const source = await scheduleSource(env);
+const sundays = sundaysBetween(q.start, q.end);
+
+/*
+ * WHILE THE SHEET IS STILL THE SCHEDULE, THIS IS READ-ONLY. The sheet's Sundays
+ * are shown so the quarter can be checked, but the only way forward is "copy it
+ * in" — because the first save here is what stops the sheet being read, and a
+ * save of one quarter typed over an empty table would leave every other quarter
+ * behind on a sheet nothing reads any more.
+ */
+const readOnly = source === 'sheet';
+type Cells = { morning: string | null; evening: string | null };
+const byDate = new Map<string, Cells>();
+if (source === 'app') {
+  for (const r of await scheduleRows(env, q.start, q.end)) byDate.set(r.sunday, r);
+} else if (readOnly) {
+  for (const d of (await rosterDays(env)) ?? []) {
+    const text = (label: string) => {
+      const slot = d.slots.find((x) => x.label === label);
+      return slot ? (slot.note ?? slot.names.join(', ')) : null;
+    };
+    byDate.set(d.sunday, { morning: text('Morning'), evening: text('Evening') });
+  }
+}
+const people = await matchablePeople(env);
+const printNote = await getPrintNote(env);
+const tally = source === 'app' ? singerTally(await allScheduleRows(env), addDays(today, -365), today) : [];
+
+const prev = shiftQuarter(q, -1), next = shiftQuarter(q, 1);
+const done = Astro.url.searchParams.get('done');
+const imported = done?.startsWith('imported-') ? Number(done.slice(9)) : null;
+
+const CHIP: Record<string, { mark: string; title: (r?: string) => string }> = {
+  reminded: { mark: '✓', title: () => 'Gets the Monday reminder' },
+  quiet: { mark: '!', title: (r) => `On People, but no reminder: ${r}` },
+  unknown: { mark: '?', title: (r) => `No reminder: ${r}` },
+  note: { mark: '—', title: () => 'A note, not a singer' },
+};
+---
+<AppLayout title="Singing" user={user}>
+  <p style="margin:0 0 6px;"><a href="/bulletin">← Bulletin</a></p>
+  <div class="head">
+    <h1>Singing schedule</h1>
+    <a class="btn" href={`/singing/print?q=${q.key}`}>Print this quarter</a>
+  </div>
+  <p class="muted lede">
+    One special song each Sunday morning and evening. Type names separated by
+    commas, or a note like <em>Fall Revival</em> where there are no singers. The
+    bulletin, the website and the Monday reminder all read from here.
+  </p>
+
+  {done === 'saved' && <p class="notice notice--ok">Saved. The bulletin and the reminder are reading the new schedule.</p>}
+  {imported !== null && (
+    <p class="notice notice--ok">
+      Copied {imported} {imported === 1 ? 'Sunday' : 'Sundays'} in from the Google Sheet. The
+      schedule lives here now — the sheet is no longer read, and can be unpublished.
+    </p>
+  )}
+  {error && <p class="notice">{error}</p>}
+
+  {source !== 'app' && (
+    <div class="card move">
+      <h2>{source === 'sheet' ? 'The schedule is still on the Google Sheet' : 'Nothing scheduled yet'}</h2>
+      {source === 'sheet' ? (
+        <>
+          <p>
+            Right now the bulletin and the Monday reminder read the published sheet,
+            exactly as before, and the quarter below is shown from it. Copy it in
+            once and edit it here from then on — after that the sheet is no longer
+            read, and can be unpublished.
+          </p>
+          <form method="POST" style="margin:0;">
+            <input type="hidden" name="action" value="import" />
+            <input type="hidden" name="q" value={q.key} />
+            <button class="btn" type="submit">Copy the schedule in from the sheet</button>
+          </form>
+          <p class="muted" style="font-size:14px; margin:10px 0 0;">
+            Fills empty Sundays only, so it is safe to press twice.
+          </p>
+        </>
+      ) : (
+        <p class="muted" style="margin:0;">Type the first quarter below and save.</p>
+      )}
+    </div>
+  )}
+
+  <nav class="qnav" aria-label="Quarter">
+    <a href={`/singing?q=${prev.key}`}>← {prev.label}</a>
+    <strong>{q.label}</strong>
+    <a href={`/singing?q=${next.key}`}>{next.label} →</a>
+  </nav>
+
+  <form method="POST" class="card grid-card">
+    <input type="hidden" name="action" value="save" />
+    <input type="hidden" name="q" value={q.key} />
+    <p class="legend muted">
+      <span class="sc sc--reminded">✓</span> gets the Monday reminder
+      <span class="sc sc--quiet">!</span> on People, but cannot be texted
+      <span class="sc sc--unknown">?</span> not found on People — no reminder
+    </p>
+    <table class="sg t-stack">
+      <thead><tr><th>Sunday</th><th>Morning</th><th>Evening</th></tr></thead>
+      <tbody>
+        {sundays.map((sunday, i) => {
+          const r = byDate.get(sunday);
+          const newMonth = i === 0 || monthName(sundays[i - 1]!) !== monthName(sunday);
+          const isPast = sunday < today;
+          return (
+            <>
+              {newMonth && <tr class="sg__month"><td colspan="3">{monthName(sunday)}</td></tr>}
+              <tr class:list={['sg__row', isPast && 'sg__row--past']}>
+                <td class="sg__date">{shortDate(sunday)}</td>
+                {(['m', 'e'] as const).map((col) => {
+                  const value = (col === 'm' ? r?.morning : r?.evening) ?? '';
+                  const names = cellNames(value, people);
+                  return (
+                    <td data-label={col === 'm' ? 'Morning' : 'Evening'}>
+                      <input class="sg__in" name={`${col}-${sunday}`} value={value} list="people"
+                             autocomplete="off" disabled={readOnly}
+                             aria-label={`${col === 'm' ? 'Morning' : 'Evening'}, ${shortDate(sunday)}`} />
+                      {names.length > 0 && (
+                        <span class="sg__chips">
+                          {names.map((n) => (
+                            <span class={`sc sc--${n.state}`} title={CHIP[n.state]!.title(n.reason)}>
+                              {CHIP[n.state]!.mark} {n.text}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            </>
+          );
+        })}
+      </tbody>
+    </table>
+
+    {readOnly ? (
+      <p class="muted" style="margin:16px 0 0; font-size:15px;">
+        Shown from the Google Sheet. Copy the schedule in (above) to edit it here.
+      </p>
+    ) : (
+      <>
+        <details class="pnote">
+          <summary>The line printed at the bottom</summary>
+          <textarea name="printNote" rows="2" maxlength="400">{printNote}</textarea>
+          <p class="muted" style="font-size:13px; margin:6px 0 0;">Leave it empty to print nothing there.</p>
+        </details>
+
+        <div class="acts">
+          <button class="btn" type="submit">Save {q.label}</button>
+          <a class="btn btn--ghost" href={`/singing/print?q=${q.key}`}>Print</a>
+        </div>
+      </>
+    )}
+  </form>
+
+  {/* One-name suggestions as you type. A cell with several names is typed by
+      hand; this covers the usual single singer without any script. */}
+  <datalist id="people">
+    {people.map((p) => <option value={`${p.firstName} ${p.lastName}`} />)}
+  </datalist>
+
+  {tally.length > 0 && (
+    <details class="card" style="margin-top:22px;">
+      <summary class="fold">Who has sung in the last year <span class="muted fold__n">{tally.length} {tally.length === 1 ? 'person' : 'people'}</span></summary>
+      <p class="muted" style="margin:14px 0 10px; font-size:15px;">
+        Most recent first — so the people at the bottom are the ones it has been
+        longest since anybody asked.
+      </p>
+      <table class="t-stack">
+        <thead><tr><th>Name</th><th>Times</th><th>Last</th></tr></thead>
+        <tbody>
+          {tally.map((t) => (
+            <tr><td>{t.name}</td><td data-label="Times">{t.times}</td><td data-label="Last">{shortDate(t.last)}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  )}
+</AppLayout>
+
+<style>
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .head h1 { margin: 0; }
+  .lede { max-width: 64ch; margin: 10px 0 22px; }
+  .move { margin-bottom: 22px; border-color: var(--red); }
+  .move p { max-width: 62ch; }
+  .qnav { display: flex; align-items: baseline; justify-content: space-between; gap: 10px 20px;
+          flex-wrap: wrap; margin: 0 0 14px; }
+  .qnav strong { font-size: 19px; }
+  .qnav a { font-size: 15px; }
+  .grid-card { padding: 18px 20px; }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; margin: 0 0 10px; }
+  .sg td { vertical-align: top; padding: 8px 10px; }
+  .sg tr:hover td { background: none; }
+  .sg__month td { padding: 18px 10px 6px; font-size: 12px; font-weight: 700; letter-spacing: .16em;
+                  text-transform: uppercase; color: var(--red); border-bottom: 1px solid var(--hair); }
+  .sg__date { white-space: nowrap; padding-top: 18px !important; font-weight: 600; width: 1%; }
+  .sg__row--past .sg__date { color: var(--ink-soft); font-weight: 400; }
+  .sg__in { width: 100%; font: inherit; min-height: 42px; padding: 8px 10px;
+            border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; }
+  .sg__in:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  .sg__row--past .sg__in { background: var(--cream); }
+  .sg__in:disabled { background: var(--cream); color: var(--ink); opacity: 1; }
+  .sg__chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .sc { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1.3;
+        padding: 2px 8px; border-radius: 999px; background: var(--cream-deep); color: var(--ink-soft); }
+  .sc--reminded { background: #e8f2eb; color: #16532c; }
+  .sc--quiet { background: #fbeee0; color: #8a5316; }
+  .sc--unknown { background: #f7e9e9; color: var(--red-deep); }
+  .sc--note { font-style: italic; }
+  .pnote { margin-top: 18px; }
+  .pnote summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+  .acts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+  @media (max-width: 700px) {
+    .sg td { padding: 4px 4px; }
+    .sg__date { padding-top: 10px !important; width: auto; }
+    .t-stack.sg td { display: block; }
+    .t-stack.sg td::before { display: block; margin-bottom: 4px; }
+  }
+</style>

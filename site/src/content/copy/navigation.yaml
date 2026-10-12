@@ -1,22 +1,37 @@
-# The words on the navigation page.
+# The menu and the footer — the frame around every page.
 #
-# Edited in the staff app at /website/copy, one file per page. Every key here
-# is read by the page; if one goes missing the page shows the sentence written
-# into it instead, so a mistake never leaves a heading blank.
+# These are the words, not the links: changing "Give" here renames the menu
+# item, it does not move where it points. The address, phone number, service
+# times and social links in the footer all come from Settings and Service
+# times, so they are correct everywhere at once.
 #
-# Names, times, addresses and links are NOT here — they come from Settings, so
-# one edit fixes them everywhere.
+# Anything missing falls back to the words written in the components, so a key
+# removed by accident shows the original word rather than a blank.
+#
+# Bulletin and Directory are in the footer but deliberately not in the top
+# menu — they are for people who already know they exist.
+
+nav:
+  visit: "Plan a Visit"
+  about: "About"
+  ministries: "Ministries"
+  sermons: "Sermons"
+  events: "Events"
+  give: "Give"
+  watchLive: "Watch Live"
+  # Read out by screen readers and shown to anyone tabbing through the page;
+  # invisible otherwise. It should say what it does.
+  skipToContent: "Skip to content"
 
 footer:
   wordmark: "Come home."
   visitHeading: "Visit"
+  # Under the service times in the Visit column.
+  planLink: "Plan your visit →"
   connectHeading: "Connect"
   moreHeading: "More"
   contactLink: "Contact"
   giveLink: "Give"
   bulletinLink: "Bulletin"
   directoryLink: "Directory"
-  city: "Fairhaven"
-nav:
-  watchLive: "Watch Live"
-  skipToContent: "Skip to content"
+  city: "Fairhaven, Indiana"

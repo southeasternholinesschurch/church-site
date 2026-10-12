@@ -1,0 +1,62 @@
+---
+/**
+ * The things that can be done to a follow-up besides logging a contact: bring
+ * it back later, close it, say who is taking it. Shared by the full card on the
+ * Care list and the compact one on a person's page, so they cannot drift.
+ */
+interface Props {
+  item: { id: number; kind: string; assignedStaffId: number | null };
+  staff: { id: number; name: string }[];
+}
+const { item, staff } = Astro.props;
+---
+<div class="ci__more">
+  <form method="POST" class="ci__inline">
+    <input type="hidden" name="action" value="snooze" />
+    <input type="hidden" name="itemId" value={item.id} />
+    <label class="field"><span>Not now — bring it back</span>
+      <select name="next">
+        <option value="week">In a week</option>
+        <option value="fortnight">In two weeks</option>
+        <option value="month">In four weeks</option>
+      </select>
+    </label>
+    <label class="field"><span>Why (optional)</span>
+      <input name="reason" placeholder="Away visiting family" maxlength="500" />
+    </label>
+    <button class="btn btn--ghost" type="submit">Snooze</button>
+  </form>
+
+  <form method="POST" class="ci__inline">
+    <input type="hidden" name="action" value="close" />
+    <input type="hidden" name="itemId" value={item.id} />
+    <label class="field"><span>Nothing to do — close it</span>
+      <input name="reason" placeholder={item.kind === 'missing' ? 'Moved away / spoke at church' : 'Spoke after the service'} maxlength="500" />
+    </label>
+    <button class="btn btn--ghost" type="submit">Close</button>
+  </form>
+
+  {staff.length > 1 && (
+    <form method="POST" class="ci__inline">
+      <input type="hidden" name="action" value="assign" />
+      <input type="hidden" name="itemId" value={item.id} />
+      <label class="field"><span>Who is taking it</span>
+        <select name="staffId">
+          <option value="">Nobody yet</option>
+          {staff.map((s) => <option value={s.id} selected={s.id === item.assignedStaffId}>{s.name}</option>)}
+        </select>
+      </label>
+      <button class="btn btn--ghost" type="submit">Assign</button>
+    </form>
+  )}
+</div>
+
+<style>
+  .ci__more { display: grid; gap: 4px; margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--hair); }
+  .ci__inline { display: flex; gap: 0 12px; align-items: flex-end; flex-wrap: wrap; }
+  .ci__inline .field { flex: 1 1 200px; margin-bottom: 10px; }
+  .ci__inline .btn { margin-bottom: 10px; }
+  @media (max-width: 560px) {
+    .ci__inline .btn { width: 100%; }
+  }
+</style>

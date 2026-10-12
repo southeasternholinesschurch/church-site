@@ -5,10 +5,11 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import SermonCard from '../../components/SermonCard.astro';
 import { getCollection } from 'astro:content';
 import { slugify } from '../../lib/slugify';
-import { isVisibleSermon, SERMON_WINDOW_MONTHS } from '../../lib/content';
+import { isVisibleSermon } from '../../lib/content';
 import { SERVICE_TYPE_LABELS, type ServiceType } from '../../lib/sermons';
+import { parseScripture, span } from '../../lib/scripture';
 
-const YOUTUBE_ARCHIVE = 'https://www.youtube.com/@yourchurchchurch/streams';
+const YOUTUBE_ARCHIVE = 'https://www.youtube.com/@yourchurch/streams';
 
 /**
  * The archive is paginated server-side (the brief expects ~600 messages,
@@ -53,6 +54,9 @@ const index = all.map((s) => ({
   se: s.data.series ? (seriesName.get(s.data.series.slug) ?? '') : '',
   y: String(s.data.date.getUTCFullYear()),
   sc: s.data.scripture ?? '',
+  // The passages as [book, from, to] — what a search for "John 3" is matched
+  // against, so it finds "John 3:1-21" without the words having to line up.
+  ps: parseScripture(s.data.scripture).map((p) => [p.book, ...span(p)]),
   k: (s.data.series ? seriesName.get(s.data.series.slug) : undefined)
      || (s.data.title?.trim() ? s.data.service : SERVICE_TYPE_LABELS[s.data.serviceType]),
   u: `/sermons/${s.slug}`, id: s.data.youtubeId,
@@ -68,11 +72,11 @@ const index = all.map((s) => ({
   ].join(' ').toLowerCase(),
 }));
 
-const featured = page.currentPage === 1 ? page.data[0] : null;
-const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
-
 /** Page text, editable at /website/copy. Falls back to the words below. */
 const t = await copyFor('sermons');
+
+const featured = page.currentPage === 1 ? page.data[0] : null;
+const rest = page.currentPage === 1 ? page.data.slice(1) : page.data;
 ---
 <BaseLayout
   title="Sermons"
@@ -83,22 +87,21 @@ const t = await copyFor('sermons');
       <p class="label load d1 phead__eyebrow">{t('header.eyebrow', 'The Archive')}</p>
       <h1 class="serif load d2">{t('header.headline', 'Sermons')}</h1>
       <p class="phead__lede load d3">
-        The last {SERMON_WINDOW_MONTHS} months of services, searchable. Everything
-        older lives on our YouTube channel.
+        {t('header.lede', "Every service we've published here, searchable — and where a message has been written out, the whole of it. Anything older is on our YouTube channel.")}
       </p>
     </div>
   </section>
 
   {all.length === 0 ? (
-    <!-- the pastor: this is what visitors see until the archive lands. The import
+    <!-- For the pastor: this is what visitors see until the archive lands. The import
          plan (and why it needs the YouTube API key confirmed first) is in
          docs/README.md → "Sermons". Keep the copy below visitor-facing. -->
     <section class="wrap empty">
       <p class="empty__p">
         {t('empty.body', 'The sermon archive is still being brought across from YouTube — every message will be searchable here once it lands. In the meantime, every service is on our channel.')}
       </p>
-      <a href="https://www.youtube.com/@yourchurchchurch" target="_blank" rel="noreferrer" class="btn btn--ink">
-        Watch on YouTube
+      <a href="https://www.youtube.com/@yourchurch" target="_blank" rel="noreferrer" class="btn btn--ink">
+        {t('empty.button', 'Watch on YouTube')}
       </a>
     </section>
   ) : (
@@ -109,7 +112,7 @@ const t = await copyFor('sermons');
           <div class="fld fld--search">
             <label class="label fld__l" for="q">{t('filters.searchLabel', 'Search')}</label>
             <div class="fld__c">
-              <input id="q" name="q" type="search" placeholder={t('filters.searchPlaceholder', '"Service, date, speaker, or scripture…"')} autocomplete="off" />
+              <input id="q" name="q" type="search" placeholder={t('filters.searchPlaceholder', 'Service, date, speaker, or a passage like John 3…')} autocomplete="off" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" width="17" height="17" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path>
               </svg>
@@ -134,6 +137,10 @@ const t = await copyFor('sermons');
             </div>
           </div>
         </form>
+
+        <p class="byscripture reveal">
+          <a href="/sermons/scripture">{t('filters.byScripture', 'Browse by book of the Bible →')}</a>
+        </p>
 
         {seriesList.length > 0 && (
           <nav class="chips reveal" aria-label="Filter by series">
@@ -181,15 +188,16 @@ const t = await copyFor('sermons');
             </nav>
           )}
 
-          <!-- The site carries a rolling window; YouTube has everything. Say so
-               plainly rather than letting someone conclude it isn't there. -->
+          <!-- The archive starts where the import reached back to and grows
+               forward; nothing published here is ever removed. YouTube has the
+               years before that. Say so plainly rather than letting someone
+               conclude a service isn't there. -->
           <aside class="archive reveal">
             <div>
               <p class="label archive__k">{t('archive.eyebrow', 'Looking further back?')}</p>
               <h2 class="serif archive__h">{t('archive.title', "Don't see the service you're after?")}</h2>
               <p class="archive__p">
-                This page keeps the last {SERMON_WINDOW_MONTHS} months. Every service we've
-                ever streamed is on our YouTube channel.
+                {t('archive.body', "Everything published here stays here. Services from before this archive began are on our YouTube channel, where every service we've ever streamed lives.")}
               </p>
             </div>
             <a href={YOUTUBE_ARCHIVE} target="_blank" rel="noreferrer" class="btn btn--solid archive__btn">
@@ -202,57 +210,87 @@ const t = await copyFor('sermons');
   )}
 </BaseLayout>
 
-<script is:inline define:vars={{ index }}>
+{/* The archive's own data, for the search below. JSON rather than
+    define:vars so the script that reads it can be a bundled module — which is
+    what lets it share the passage reader with the build instead of carrying a
+    second copy of sixty-six books. */}
+<script type="application/json" id="sermon-index" is:inline set:html={JSON.stringify(index)} />
+
+<script>
   /* Filtering runs over the whole archive, not the current page. With JS off
      the form simply isn't wired and the paginated archive below still works,
-     as do the series links. */
-  (function () {
-    const form = document.querySelector('[data-filter]');
-    if (!form || !index.length) return;
-    const archive = document.querySelector('[data-archive]');
-    const results = document.querySelector('[data-results]');
-    const grid = document.querySelector('[data-results-grid]');
-    const count = document.querySelector('[data-results-count]');
-    const none = document.querySelector('[data-results-empty]');
+     as do the series links.
 
-    function card(s) {
-      return `<article class="card"><a href="${s.u}" class="card__link">
-        <div class="duo card__thumb"><img src="https://i.ytimg.com/vi/${s.id}/hqdefault.jpg" alt="" loading="lazy" width="480" height="360">
-        <div class="card__veil"></div></div>
-        <div class="card__body"><span class="label card__kicker">${s.k}</span>
-        <h3 class="serif card__title">${s.t}</h3>
-        <p class="card__meta">${s.sp ? s.sp + ' · ' : ''}${s.d}</p>
-        ${s.sc ? `<p class="card__scripture">${s.sc}</p>` : ''}</div></a></article>`;
-    }
+     A query that reads as a Bible passage ("John 3", "1 Cor 12:4", "Psalm 23")
+     also matches every sermon whose passage OVERLAPS it — so "John 3:16" finds
+     a message on John 3:1-21, which no amount of matching words would. The
+     ordinary word match still runs alongside, so nothing that used to be found
+     stops being found. */
+  import { readScripture, span } from '../../lib/scripture';
 
-    function apply() {
-      const q = form.q.value.trim().toLowerCase();
-      const sv = form.service.value;
-      const y = form.year.value;
-      const filtering = q || sv || y;
+  type Entry = { t: string; sv: string; st: string; sp: string; se: string; y: string; sc: string;
+                 ps: [number, number, number][]; k: string; u: string; id: string; d: string; ds: string };
 
-      if (!filtering) {
+  const data = document.getElementById('sermon-index');
+  const index: Entry[] = data ? JSON.parse(data.textContent || '[]') : [];
+  const form = document.querySelector<HTMLFormElement>('[data-filter]');
+
+  if (form && index.length) {
+    const archive = document.querySelector<HTMLElement>('[data-archive]')!;
+    const results = document.querySelector<HTMLElement>('[data-results]')!;
+    const grid = document.querySelector<HTMLElement>('[data-results-grid]')!;
+    const count = document.querySelector<HTMLElement>('[data-results-count]')!;
+    const none = document.querySelector<HTMLElement>('[data-results-empty]')!;
+    // Typed as "something with a value" rather than as DOM elements: the site's
+    // types include the Workers runtime, whose `Element` is HTMLRewriter's and
+    // not the DOM's, and HTMLSelectElement will not typecheck against it.
+    type Field = { value: string };
+    const field = (name: string) => form.elements.namedItem(name) as unknown as Field;
+    const q = field('q'), service = field('service'), year = field('year');
+
+    // Text from the index is the church's own, but it is still put into HTML,
+    // so it is escaped on the way in.
+    const esc = (v: string) => v.replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+
+    const card = (s: Entry) => `<article class="card"><a href="${esc(s.u)}" class="card__link">
+        <div class="duo card__thumb"><img src="https://i.ytimg.com/vi/${esc(s.id)}/hqdefault.jpg" alt="" loading="lazy" width="480" height="360">
+        <div class="card__veil"></div>
+        <span class="card__play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M8 5l11 7-11 7z"></path></svg></span></div>
+        <div class="card__body"><span class="label card__kicker">${esc(s.k)}</span>
+        <h3 class="serif card__title">${esc(s.t)}</h3>
+        <p class="card__meta">${s.sp ? esc(s.sp) + ' · ' : ''}${esc(s.d)}</p>
+        ${s.sc ? `<p class="card__scripture">${esc(s.sc)}</p>` : ''}</div></a></article>`;
+
+    const apply = () => {
+      const text = q.value.trim().toLowerCase();
+      const sv = service.value;
+      const y = year.value;
+      if (!text && !sv && !y) {
         results.hidden = true;
         archive.hidden = false;
         return;
       }
+      const asked = text ? readScripture(q.value).passages.map((p) => [p.book, ...span(p)]) : [];
       const hits = index.filter((s) => {
         if (sv && s.st !== sv) return false;
         if (y && s.y !== y) return false;
-        if (!q) return true;
-        return (s.t + ' ' + s.sv + ' ' + s.sp + ' ' + s.se + ' ' + s.sc + ' ' + s.ds).toLowerCase().includes(q);
+        if (!text) return true;
+        const words = (s.t + ' ' + s.sv + ' ' + s.sp + ' ' + s.se + ' ' + s.sc + ' ' + s.ds).toLowerCase().includes(text);
+        const passage = asked.some(([b, a1, a2]) => s.ps.some(([sb, b1, b2]) => sb === b && a1 <= b2 && b1 <= a2));
+        return words || passage;
       });
       archive.hidden = true;
       results.hidden = false;
       count.textContent = `${hits.length} service${hits.length === 1 ? '' : 's'}`;
       none.hidden = hits.length > 0;
       grid.innerHTML = hits.map(card).join('');
-    }
+    };
 
-    let t;
-    form.addEventListener('input', () => { clearTimeout(t); t = setTimeout(apply, 140); });
+    let timer: ReturnType<typeof setTimeout>;
+    form.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(apply, 140); });
     form.addEventListener('change', apply);
-  })();
+  }
 </script>
 
 <style>
@@ -280,6 +318,32 @@ const t = await copyFor('sermons');
   .fld__c input:focus-visible, .fld__c select:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
   .fld__c input::placeholder { color: rgba(74,64,56,.7); }
 
+  /*
+   * The search results' cards.
+   *
+   * They are built in the browser from the index, so SermonCard's styles —
+   * scoped to the cards Astro renders — never reach them, and the results came
+   * out as square, all-red tiles. These are SermonCard's rules again, reached
+   * through the results grid. If the card's look changes, change both.
+   */
+  [data-results-grid] :global(.card__link) { display: block; color: inherit; }
+  [data-results-grid] :global(.card__thumb) { aspect-ratio: 16/9; border-radius: var(--radius); }
+  [data-results-grid] :global(.card__thumb img) { width: 100%; height: 100%; object-fit: cover; }
+  [data-results-grid] :global(.card__veil) { position: absolute; inset: 0; z-index: 2;
+    background: linear-gradient(180deg, transparent 45%, rgba(26,21,18,.55) 100%); }
+  [data-results-grid] :global(.card__play) { position: absolute; z-index: 3; left: 50%; top: 50%;
+    transform: translate(-50%,-50%); width: 52px; height: 52px; border-radius: 999px;
+    border: 1px solid rgba(244,239,231,.7); display: flex; align-items: center; justify-content: center;
+    color: var(--cream); }
+  [data-results-grid] :global(.card__body) { padding-top: 14px; }
+  [data-results-grid] :global(.card__kicker) { color: var(--red); display: block; line-height: 18px; }
+  [data-results-grid] :global(.card__title) { margin: 8px 0 6px; font-size: 25px; line-height: 1.22; color: var(--ink); }
+  [data-results-grid] :global(.card__meta) { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  [data-results-grid] :global(.card__scripture) { margin: 5px 0 0; font-size: 14px; color: var(--red); }
+  @media (max-width: 860px) { [data-results-grid] :global(.card__title) { font-size: 22px; } }
+
+  .byscripture { margin: 18px 0 0; font-size: 15px; font-weight: 700; }
+  .byscripture a { color: var(--red); }
   .chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
   .chip { font-size: 13px; font-weight: 700; letter-spacing: .04em; padding: 9px 16px;
           border-radius: 999px; border: 1px solid var(--hair); color: var(--ink-soft); }

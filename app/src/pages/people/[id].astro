@@ -8,6 +8,7 @@ import { createInvite, revokeAccess, getInviteTemplate, renderInvite } from '../
 import { sendOne, smsConfigured, countSegments, toE164 } from '../../lib/sms';
 import { CHURCH_TZ } from '../../lib/services';
 import { archivePeople, restorePeople } from '../../lib/archive';
+import { canAccess } from '../../lib/permissions';
 
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
@@ -293,8 +294,19 @@ const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
 <AppLayout title={title} user={user}>
   <p style="margin:0 0 6px;"><a href="/people">← All people</a></p>
   <h1>{title}</h1>
+  {/* Pastoral notes live on the care page, which only admins can open — so
+      the link is shown only to them, worked out by the same rule as the gate. */}
+  {!isNew && v && canAccess(user.role, '/care') && (
+    <p style="margin:-6px 0 18px;"><a href={`/care/person/${v.id}`}>Care log and follow-ups →</a></p>
+  )}
 
   {saved === '1' && <p class="notice notice--ok">Saved.</p>}
+  {saved === 'from-guest' && (
+    <p class="notice notice--ok">
+      Added from their guest card. Set adult or child below — it is left unconfirmed
+      until you do — and their care notes have come with them.
+    </p>
+  )}
   {saved === 'restored' && <p class="notice notice--ok">Restored — they are back on the check-in list.</p>}
   {saved === 'archived' && <p class="notice notice--ok">Archived. They are off the check-in list and out of the directory — their attendance history is unchanged, and the banner above brings them back.</p>}
   {saved === 'invited' && <p class="notice notice--ok">Invite texted. The link keeps working for 30 days, however many times they open it.</p>}
@@ -444,6 +456,7 @@ const title = isNew ? 'Add a person' : `${v!.firstName} ${v!.lastName}`;
           {v.smsConsentSource === 'sms-stop' && <>They replied STOP</>}
           {v.smsConsentSource === 'breeze-import' && <>Carried over from Breeze — nobody recorded asking</>}
           {v.smsConsentSource === 'staff-set' && <>Set by hand in this dashboard</>}
+          {v.smsConsentSource === 'guest-card' && <>They ticked the box on their guest card</>}
           {!v.smsConsentSource && <>No record of where this came from</>}
           {v.smsConsentAt
             ? <> · {new Date(v.smsConsentAt).toLocaleString('en-US', {

@@ -1,33 +1,52 @@
-# The words on the im-new page.
+# The "I'm New" page, section by section.
 #
-# Edited in the staff app at /website/copy, one file per page. Every key here
-# is read by the page; if one goes missing the page shows the sentence written
-# into it instead, so a mistake never leaves a heading blank.
+# Edited in the staff app at /website/copy. Keys are in the order the sections
+# appear on the page, so this file reads top to bottom the way the page does.
 #
-# Names, times, addresses and links are NOT here — they come from Settings, so
-# one edit fixes them everywhere.
+# Anything missing here falls back to the words written in im-new.astro, so a
+# key removed by accident shows the original sentence rather than a blank.
 
 hero:
   back: "← About"
   eyebrow: "I'm New"
   headline: "We're so glad you're here."
-  lede: "Whether you're exploring faith, looking for a church home, or just visiting the area — there's a place for you at Fairhaven Community Church. We're a friendly, Bible-centered church on the southeast side of Fairhaven, five minutes off I-465 at the Meadowbrook Road exit."
+  lede: "Whether you're exploring faith, looking for a church home, or just visiting the area — there's a place for you at Fairhaven Community. We're a friendly, Bible-centered church on the southeast side of Fairhaven, five minutes off I-465 at the Southeastern Avenue exit."
+
 expect:
   eyebrow: "What To Expect"
   lead: "There's no dress code. Come as you are."
   body1: "From the moment you pull into the parking lot you'll find smiling faces and a warm atmosphere. Our worship is heartfelt and Spirit-led, with preaching rooted in God's Word and centered on real-life transformation."
   body2: "Whether you're in jeans or your Sunday best, you'll be welcomed the same."
+
+# The times themselves come from Service times. These are only the headings the
+# services are grouped under, and a group with no services in it is not shown.
 times:
   eyebrow: "Service Times"
+  sundayMorning: "Sunday Morning"
+  sundayEvening: "Sunday Evening"
+  wednesday: "Wednesday Night"
+
 plan:
   eyebrow: "Plan Your Visit"
   lead: "We'd love to know you're coming."
   body: "Message us on Facebook or give us a call, so we can look out for you, answer any questions, and help you feel at home from the start."
+  # Opens Plan Your Visit, which has a form for saying you are coming.
+  visitButton: "Plan your visit"
+  # The phone number itself comes from Settings and is printed after this word.
   callPrefix: "Call"
   facebookButton: "Message us on Facebook ↗"
+
+# The sentence in the sidebar is split around the Facebook link, so it reads as
+# one sentence on the page: body, then the linked word, then the tail.
 connect:
   eyebrow: "Get Connected"
+  body: "The best way to get plugged in is to show up and say hello. You can also follow us on"
+  facebookWord: "Facebook"
+  bodyTail: "to stay in the loop, or talk to a greeter or pastor after any service — we're here to serve."
   link: "See what's on for your family →"
+
+# The address at the start of the closing line comes from Settings.
 cta:
   title: "Come this Sunday."
+  body: "Nobody expects you to have it figured out before you walk in."
   button: "Get directions ↗"

@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema, nowIso } from '../../../db';
-import { parseRoster, dueSunday, reminderKey, SINGING_REMINDER } from '../../../lib/roster';
+import { flattenRoster, dueSunday, reminderKey, SINGING_REMINDER } from '../../../lib/roster';
+import { rosterDays, scheduleSource } from '../../../lib/singing-db';
 import { matchNames, alreadySent } from '../../../lib/roster-db';
 import { sendOne, smsConfigured, countSegments } from '../../../lib/sms';
 import { secretsMatch } from '../../../lib/constant-time';
@@ -14,13 +15,13 @@ export const prerender = false;
  * Three jobs, in order:
  *   1. expand any message_schedules that are due into per-recipient queue rows
  *   2. send what is queued, up to the per-run ceiling
- *   3. the Monday singing reminder, from the roster sheet (hourly only)
+ *   3. the Monday singing reminder, from the singing schedule (hourly only)
  *
  * Frequent rather than exact on purpose: a cron that fires once at the moment
  * something is due misses it entirely if that one run fails. Running every five
  * minutes and deciding for itself what is due means a missed run costs five
- * minutes. The roster job is gated to ?roster=1 so the sheet is still fetched
- * only once an hour rather than 288 times a day.
+ * minutes. The roster job is gated to ?roster=1 so a schedule still on the
+ * Google Sheet is fetched only once an hour rather than 288 times a day.
  *
  * Idempotent by construction throughout. Every queued text carries a unique
  * source_key, and the unique index on that column is what actually prevents a
@@ -50,11 +51,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Runs on every tick. Expansion re-reads the audience each time, which is
   // what lets a birthday added to the directory this morning go out this
   // morning rather than next year.
-  const schedules = dry ? null : await expandDue(env);
+  const schedules = dry ? null : await expandDue(env, new Date(), url.origin);
   const drained = dry ? null : await drainQueue(env);
 
-  // The roster sheet is fetched only when asked, so raising the cron frequency
-  // did not multiply requests to Google by 12.
+  // The singing schedule is read only when asked, so raising the cron frequency
+  // did not multiply requests to Google by 12 while it is still on the sheet.
   if (url.searchParams.get('roster') !== '1') {
     return json({ ran: true, schedules, drained });
   }
@@ -62,19 +63,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const due = dueSunday();
   if (!due) return json({ ran: true, schedules, drained, sent: 0, note: 'not a send window' });
 
-  const sheet = env.REMINDER_SHEET_CSV_URL;
-  if (!sheet) return json({ ran: true, sent: 0, note: 'no reminder sheet configured' });
+  /*
+   * The schedule, from wherever it lives: the app's own table once anything has
+   * been saved on /singing, the published Google Sheet until then. Read the
+   * same way for the bulletin, so the two can still never disagree.
+   */
+  const source = await scheduleSource(env);
+  if (source === 'none') return json({ ran: true, sent: 0, note: 'no singing schedule configured' });
+  const days = await rosterDays(env);
+  if (!days) return json({ ran: true, sent: 0, error: `the singing schedule (${source}) could not be read` }, 200);
 
-  let csv: string;
-  try {
-    const res = await fetch(sheet, { headers: { 'cache-control': 'no-cache' } });
-    if (!res.ok) return json({ ran: true, sent: 0, error: `sheet returned ${res.status}` }, 200);
-    csv = await res.text();
-  } catch (err) {
-    return json({ ran: true, sent: 0, error: `sheet unreachable: ${String(err)}` }, 200);
-  }
-
-  const roster = parseRoster(csv);
+  const roster = flattenRoster(days);
   const row = roster.find((r) => r.sunday === due.sunday);
   if (!row) return json({ ran: true, sent: 0, sunday: due.sunday, note: 'no roster row for that Sunday' });
 
