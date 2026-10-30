@@ -148,6 +148,13 @@ sermon editor for the website's Sermons by Scripture. Migrations `0028` and
 `0029` are applied to the production database (checked 2026-10-12), and the
 singing schedule has been copied in from the sheet.
 
+Added later in 2026-10: the **lobby screen** for the foyer TV (`/lobby`, public,
+built from the published bulletin) and its **Lobby** tab; **service orders**,
+printed three slips to a sheet; one **Serving** tab for service orders, sign-ups
+and singing; and **Website → Troubleshooting** for texts that did not arrive.
+Migrations `0030`–`0032` are applied to the production database (checked
+2026-10-26).
+
 `docs/README.md` in the repo root is the operational document — how it deploys,
 what is set in the Cloudflare dashboard rather than in the repo, and the traps
 each half hit. Read that before changing anything here.

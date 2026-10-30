@@ -6,16 +6,22 @@ import { matchNames, alreadySent } from '../../../lib/roster-db';
 import { sendOne, smsConfigured, countSegments } from '../../../lib/sms';
 import { secretsMatch } from '../../../lib/constant-time';
 import { expandDue, drainQueue } from '../../../lib/schedule-runner';
+import { beat, checkStuckTexts } from '../../../lib/text-status-db';
 
 export const prerender = false;
 
 /**
  * Everything the cron Worker wakes us up to do.
  *
- * Three jobs, in order:
+ * Four jobs, in order:
  *   1. expand any message_schedules that are due into per-recipient queue rows
  *   2. send what is queued, up to the per-run ceiling
- *   3. the Monday singing reminder, from the singing schedule (hourly only)
+ *   3. ask Twilio about texts whose delivery report never came, with whatever
+ *      outbound calls are left (lib/text-status-db.ts)
+ *   4. the Monday singing reminder, from the singing schedule (hourly only)
+ *
+ * Each run also stamps a heartbeat, so the troubleshooting page can say when
+ * the cron last ran and notice if it stops.
  *
  * Frequent rather than exact on purpose: a cron that fires once at the moment
  * something is due misses it entirely if that one run fails. Running every five
@@ -51,13 +57,36 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Runs on every tick. Expansion re-reads the audience each time, which is
   // what lets a birthday added to the directory this morning go out this
   // morning rather than next year.
-  const schedules = dry ? null : await expandDue(env, new Date(), url.origin);
+  /*
+   * One log line per step. If Cloudflare stops this request for using too
+   * much processing time (error 1102 — what stopped every run on 2026-10-24),
+   * nothing after that point runs and nothing can be caught; the last line in
+   * the log is how to tell which step it was. `wrangler tail changeme-app`.
+   */
+  const step = (name: string, info?: unknown) =>
+    console.log(`run-due: ${name}${info === undefined ? '' : ` ${JSON.stringify(info).slice(0, 200)}`}`);
+  step('start');
+  const schedules = dry ? null : await expandDue(env, new Date(), url.origin, step);
+  step('expanded', schedules?.detail);
   const drained = dry ? null : await drainQueue(env);
+  step('drained', drained && { sent: drained.sent, failed: drained.failed });
+
+  /*
+   * The Twilio checker takes what is left, and steps aside entirely on a run
+   * that has just sent texts. Two limits: a Worker request may make 50
+   * outbound calls, and on the free plan it has about 10ms of processor time,
+   * which a run that sent a batch has already spent (2026-10-24, error 1102).
+   * Five a run still settles a 79-person broadcast within the hour.
+   */
+  const busy = drained ? drained.sent + drained.failed : 0;
+  const stuck = dry || busy > 0 ? null : await checkStuckTexts(env, getDb(env), 5);
+  step('checked', stuck);
+  if (!dry) await beat(getDb(env), nowIso());
 
   // The singing schedule is read only when asked, so raising the cron frequency
   // did not multiply requests to Google by 12 while it is still on the sheet.
   if (url.searchParams.get('roster') !== '1') {
-    return json({ ran: true, schedules, drained });
+    return json({ ran: true, schedules, drained, stuck });
   }
 
   const due = dueSunday();

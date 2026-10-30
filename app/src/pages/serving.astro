@@ -1,0 +1,211 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import ServingNav from '../components/ServingNav.astro';
+import { getDb, schema } from '../db';
+import { asc, gte } from 'drizzle-orm';
+import { nextSunday } from '../lib/bulletin';
+import { churchToday } from '../lib/services';
+import { addDays, shortDate } from '../lib/care';
+import { rosterDays } from '../lib/singing-db';
+import { signupGlance } from '../lib/signups-db';
+import { isEvening, longDate, singersText } from '../lib/service-order';
+
+/**
+ * Serving — one tab for the three ways people are lined up for what they are
+ * doing, each of which ends on paper (the pastor, 2026-10-26).
+ *
+ * Service orders say who leads each part of a service. Sign-up sheets let
+ * people put their own names down. The singing schedule says who sings each
+ * Sunday. They had three tabs; now they share this one, and ServingNav moves
+ * between them. The old addresses all still work, so nothing bookmarked or
+ * printed breaks.
+ *
+ * This page is the door, and it is more than three links: each card says
+ * where that job stands this week, so most visits are answered here and the
+ * rest are one tap from it. Ordered by how often each is used: a service order
+ * every week, a sign-up sheet several times a year, the singing a quarter at
+ * a time.
+ *
+ * Every lookup is caught. A card that cannot say where things stand still
+ * offers its way in; it never takes the page down.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+const today = churchToday();
+const sunday = nextSunday();
+
+let orders: (typeof schema.serviceOrders.$inferSelect)[] | null = null;
+try {
+  orders = await db.select().from(schema.serviceOrders)
+    .where(gte(schema.serviceOrders.serviceDate, today))
+    .orderBy(asc(schema.serviceOrders.serviceDate), asc(schema.serviceOrders.id)).limit(4);
+} catch { orders = null; }
+// The one-tap start is for the order that is made most: Sunday morning's.
+const morningMade = orders?.some((o) => o.serviceDate === sunday && !isEvening(o.name)) ?? true;
+
+const signups = await signupGlance(db);
+
+const days = await rosterDays(env);
+const thisSunday = days?.find((d) => d.sunday === sunday);
+const sung = (label: string) => singersText(thisSunday?.slots.find((s) => s.label === label));
+const lastPlanned = days?.filter((d) => d.sunday >= today && d.slots.length > 0).at(-1)?.sunday ?? null;
+// Four weeks is time enough to ask people to sing before the gap arrives.
+const runningOut = days !== null && (!lastPlanned || lastPlanned < addDays(today, 28));
+---
+<AppLayout title="Serving" user={user}>
+  <ServingNav active="overview" />
+  <h1>Serving</h1>
+  <p class="muted lede">
+    Who is doing what, and the papers that tell them: the running order of a
+    service, sheets people sign up on, and who sings each Sunday.
+  </p>
+
+  <div class="doors">
+    <section class="card door">
+      <h2 class="door__h">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 6.5h11M9 12h11M9 17.5h11" />
+          <path d="M4 6.5h.01M4 12h.01M4 17.5h.01" stroke-width="2.4" />
+        </svg>
+        Service orders
+      </h2>
+      <p class="door__what">The running order and who leads each part, printed three to a sheet.</p>
+
+      <div class="door__now">
+        {orders === null ? (
+          <p class="muted">Could not look these up just now.</p>
+        ) : orders.length === 0 ? (
+          <p class="muted">Nothing made for {longDate(sunday)} yet.</p>
+        ) : (
+          <ul class="door__list">
+            {orders.map((o) => (
+              <li>
+                <a href={`/service-orders/${o.id}`}>{o.name}</a>
+                <span class="muted">{shortDate(o.serviceDate)}</span>
+                <a class="door__aside" href={`/service-orders/${o.id}/print`}>Print</a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div class="door__acts">
+        {!morningMade ? (
+          <form method="POST" action="/service-orders">
+            <input type="hidden" name="name" value="Sunday Morning Worship" />
+            <input type="hidden" name="date" value={sunday} />
+            <button class="btn" type="submit" name="action" value="traditional">Start Sunday morning’s</button>
+          </form>
+        ) : (
+          <a class="btn" href="/service-orders">Start a service order</a>
+        )}
+        <a href="/service-orders">All service orders →</a>
+      </div>
+    </section>
+
+    <section class="card door">
+      <h2 class="door__h">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15.5 4.5h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h2" />
+          <rect x="8.5" y="2.5" width="7" height="4" rx="1.2" />
+          <path d="M8.75 11.5h6.5M8.75 15.5h4" />
+        </svg>
+        Sign-up sheets
+      </h2>
+      <p class="door__what">A link people sign themselves up on: meals, nursery, helpers. Prints for the foyer too.</p>
+
+      <div class="door__now">
+        {signups === null ? (
+          <p class="muted">Could not look these up just now.</p>
+        ) : signups.open.length === 0 ? (
+          <p class="muted">None open right now.</p>
+        ) : (
+          <ul class="door__list">
+            {signups.open.slice(0, 4).map((s) => (
+              <li>
+                <a href={`/signups/${s.id}`}>{s.title}</a>
+                <span class="muted">{s.summary}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {signups && signups.open.length > 4 && <p class="muted">and {signups.open.length - 4} more open.</p>}
+        {signups && signups.drafts > 0 && (
+          <p class="door__warn">{signups.drafts} {signups.drafts === 1 ? 'draft is' : 'drafts are'} not open yet.</p>
+        )}
+      </div>
+
+      <div class="door__acts">
+        <a class="btn" href="/signups">Start a sheet</a>
+        <a href="/signups">All sheets →</a>
+      </div>
+    </section>
+
+    <section class="card door">
+      <h2 class="door__h">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 18V5.5l11-2V16" />
+          <circle cx="6.5" cy="18" r="2.5" />
+          <circle cx="17.5" cy="16" r="2.5" />
+        </svg>
+        Singing
+      </h2>
+      <p class="door__what">The special song each Sunday, planned a quarter at a time. Feeds the bulletin and the Monday reminder.</p>
+
+      <div class="door__now">
+        {days === null ? (
+          <p class="muted">Could not read the schedule just now.</p>
+        ) : (
+          <>
+            <p class="door__label">{longDate(sunday)}</p>
+            <ul class="door__list">
+              <li><span class="muted">Morning</span> {sung('Morning') || <span class="muted">nobody yet</span>}</li>
+              <li><span class="muted">Evening</span> {sung('Evening') || <span class="muted">nobody yet</span>}</li>
+            </ul>
+            {runningOut ? (
+              <p class="door__warn">
+                {lastPlanned ? `Planned only through ${shortDate(lastPlanned)}.` : 'Nothing planned ahead.'} Time to ask for the next stretch.
+              </p>
+            ) : (
+              <p class="muted">Planned through {shortDate(lastPlanned!)}.</p>
+            )}
+          </>
+        )}
+      </div>
+
+      <div class="door__acts">
+        <a class="btn" href="/singing">Edit the schedule</a>
+        <a href="/singing/print">Print this quarter →</a>
+      </div>
+    </section>
+  </div>
+</AppLayout>
+
+<style>
+  .lede { max-width: 62ch; margin: -6px 0 22px; }
+  .doors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+  .door { display: flex; flex-direction: column; margin: 0; }
+  .door__h { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; }
+  .door__h svg { width: 26px; height: 26px; flex: none; color: var(--red); }
+  .door__what { margin: 0 0 16px; font-size: 15px; line-height: 1.45; color: var(--ink-soft); }
+  .door__now { border-top: 1px solid var(--hair); padding-top: 12px; margin-bottom: 18px; font-size: 15px; }
+  .door__now p { margin: 6px 0 0; }
+  .door__now p:first-child { margin-top: 0; }
+  .door__label { font-weight: 700; }
+  .door__list { list-style: none; margin: 0; padding: 0; }
+  .door__list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 6px 0; }
+  .door__list li + li { border-top: 1px dashed var(--hair); }
+  .door__list a { font-weight: 600; }
+  .door__aside { margin-left: auto; font-weight: 400 !important; font-size: 14px; }
+  .door__warn { color: #8a5316; }
+  .door__acts { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .door__acts form { margin: 0; }
+  .door__acts > a:not(.btn) { font-weight: 600; font-size: 15px; }
+  @media (max-width: 900px) {
+    .doors { grid-template-columns: 1fr; }
+  }
+</style>

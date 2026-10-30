@@ -42,10 +42,12 @@ const NAV: [string, string][] = [
   ['/attendance', 'Attendance'],
   ['/messaging', 'Messaging'],
   ['/bulletin', 'Bulletin'],
-  // A few times a year, but it feeds the bulletin and the Monday reminder, and
-  // the only other way in was a link at the foot of /digest.
-  ['/singing', 'Singing'],
-  ['/signups', 'Sign-ups'],
+  // Service orders, sign-up sheets and the singing schedule, as one job: who
+  // is doing what, put on paper (2026-10-26). See pages/serving.astro.
+  ['/serving', 'Serving'],
+  // The foyer TV: hero frames, its words, pace and notices. The screen itself
+  // is the public /lobby; this tab is staff-only (only /lobby EXACTLY is public).
+  ['/lobby/manage', 'Lobby'],
   ['/website', 'Website'],
   ['/kids', 'Fairhaven Kids'],
   ['/staff', 'Access'],
@@ -61,6 +63,17 @@ const NAV: [string, string][] = [
  * deriving the list means that stops happening without anybody maintaining it.
  */
 const nav = user ? NAV.filter(([href]) => canAccess(user.role, href)) : [];
+
+/* A tab that stands for pages living at addresses of their own. Those kept
+ * their addresses when they were gathered under Serving, so the tab has to be
+ * told it is the current one on each of them. Matched on whole segments, so
+ * the public /signup/… (one sheet, no nav) is not mistaken for /signups. */
+const SECTIONS: Record<string, string[]> = {
+  '/serving': ['/serving', '/service-orders', '/signups', '/singing'],
+};
+const isHere = (href: string) =>
+  href === '/' ? path === '/'
+    : (SECTIONS[href] ?? [href]).some((p) => path === p || path.startsWith(`${p}/`));
 
 /* The brand link is not part of NAV, so it is not filtered by the line above —
  * and pointing everyone at "/" sends a volunteer to a page the gate then
@@ -113,7 +126,7 @@ const home = user ? homeFor(user.role) : '/';
           <a href={home} class="bar__brand">SHC Staff</a>
           <nav class="bar__nav">
             {nav.map(([href, label]) => (
-              <a href={href} aria-current={path === href || (href !== '/' && path.startsWith(href)) ? 'page' : undefined}>{label}</a>
+              <a href={href} aria-current={isHere(href) ? 'page' : undefined}>{label}</a>
             ))}
           </nav>
         </div>

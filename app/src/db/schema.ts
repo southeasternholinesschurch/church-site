@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
 // scheduled_messages references message_schedules, which is declared after it —
 // the explicit column type is what lets that forward reference typecheck.
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
@@ -857,7 +857,7 @@ export const signupSheets = sqliteTable('signup_sheets', {
   title: text('title').notNull(),
   /** The editable paragraph under the heading on the public page. */
   intro: text('intro'),
-  kind: text('kind', { enum: ['meal-train', 'list', 'dish'] }).notNull(),
+  kind: text('kind', { enum: ['meal-train', 'list', 'dish', 'tasks'] }).notNull(),
   /**
    * Draft sheets are not public AT ALL — they render the same page as a token
    * that never existed. A half-built meal train must not be collectable from a
@@ -1125,3 +1125,70 @@ export const singingSchedule = sqliteTable('singing_schedule', {
 });
 
 export type SingingRow = typeof singingSchedule.$inferSelect;
+
+/**
+ * Hero frames for the lobby screen — see migrations/0030_lobby_heroes.sql and
+ * lib/lobby-heroes.ts. Every column here is public: it is shown on the foyer
+ * TV and served to it without a session.
+ */
+export const lobbyHeroes = sqliteTable('lobby_heroes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** R2 key under `lobby-hero/`. A new upload mints a new key, so a replaced
+   *  graphic can never be served from a stale cache. */
+  imageKey: text('image_key').notNull(),
+  kicker: text('kicker').notNull().default(''),
+  title: text('title').notNull(),
+  subtitle: text('subtitle').notNull().default(''),
+  corner: text('corner', { enum: ['bottom-right', 'bottom-left'] }).notNull().default('bottom-right'),
+  tone: text('tone', { enum: ['dark', 'light'] }).notNull().default('dark'),
+  accent: text('accent', { enum: ['red', 'gold', 'plain'] }).notNull().default('red'),
+  titleStyle: text('title_style', { enum: ['serif', 'bold'] }).notNull().default('serif'),
+  shade: integer('shade').notNull().default(70),
+  startsOn: text('starts_on'),
+  endsOn: text('ends_on'),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  updatedBy: text('updated_by'),
+});
+
+/**
+ * Photographs uploaded on the Lobby tab — see migrations/0031_lobby_photos.sql
+ * and lib/lobby-photos.ts. Public, like lobby_heroes.
+ */
+export const lobbyPhotos = sqliteTable('lobby_photos', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** R2 key under `lobby-photo/`. */
+  imageKey: text('image_key').notNull(),
+  alt: text('alt').notNull(),
+  face: real('face').notNull().default(0.45),
+  /** Comma list: 'give', 'guest'. */
+  uses: text('uses').notNull().default(''),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  updatedBy: text('updated_by'),
+});
+
+/**
+ * Service orders — see migrations/0032_service_orders.sql and
+ * lib/service-order.ts. Staff-only.
+ */
+export const serviceOrders = sqliteTable('service_orders', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** "Sunday Morning Worship". */
+  name: text('name').notNull(),
+  /** YYYY-MM-DD, church time. */
+  serviceDate: text('service_date').notNull(),
+  /** An optional line printed under the name: a theme, a guest, "Homecoming". */
+  line: text('line').notNull().default(''),
+  kind: text('kind', { enum: ['traditional', 'custom'] }).notNull().default('custom'),
+  /** JSON list of {title, who, notes}; parse with parseItems. */
+  items: text('items').notNull().default('[]'),
+  createdBy: text('created_by'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  updatedBy: text('updated_by'),
+}, (t) => ({
+  dateIdx: index('service_orders_date_idx').on(t.serviceDate),
+}));

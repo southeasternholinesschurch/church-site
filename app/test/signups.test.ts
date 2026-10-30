@@ -28,7 +28,7 @@
 import { headerFor, linesFor, packPrint, PAGE_HEIGHT, RUNNING_HEAD, type PrintItem, type PrintPage } from '../src/lib/signup-print.ts';
 import {
   addDaysIso, availability, bulletinSignups, clipIntro, closedReason, printParts, PRINT_OPEN_LINES, PRINT_MAX_BLANKS, dayLabel, daysInRange, daysToAdd,
-  DEFAULT_REMINDER_BODY, firstNameOf, invalidRangeReason, invalidReminderReason,
+  DEFAULT_REMINDER_BODY, defaultReminderFor, firstNameOf, stillNeeded, invalidRangeReason, invalidReminderReason,
   isIsoDate, isSignupKind, MAX_GENERATED_DAYS, nextSeat, planDays, reminderBodyFor,
   reminderDue, reminderKey, reminderMissed, renderReminder, sheetSummary,
   shortWhen, slotStatus,
@@ -405,6 +405,15 @@ eq('the default wording is one GSM-7 segment',
        { first: 'Bartholomew', when: 'Wed 12 Nov' })).segments },
    { encoding: 'GSM-7', segments: 1 });
 
+for (const k of ['meal-train', 'list', 'dish', 'tasks']) {
+  const c = countSegments(renderReminder(defaultReminderFor(k), { first: 'Bartholomew', when: 'Wed 12 Nov' }));
+  eq(`the ${k} default is one GSM-7 segment`, [c.encoding, c.segments], ['GSM-7', 1]);
+}
+eq('a work night is not thanked for a meal', defaultReminderFor('tasks').includes('meal'), false);
+eq('a stored wording still wins over the default',
+   reminderBodyFor('Hi {first}, see you {when}.', 'tasks'), 'Hi {first}, see you {when}.');
+eq('an unknown kind falls back to the old wording', defaultReminderFor('nope'), DEFAULT_REMINDER_BODY);
+
 eq('placeholders are filled',
    renderReminder('Hello {first}, that is {when}.', { first: 'Ada', when: 'Tue 14 Oct' }),
    'Hello Ada, that is Tue 14 Oct.');
@@ -467,7 +476,7 @@ eq('an empty sheet says so', sheetSummary('dish', [], 0), 'Nothing to sign up fo
 
 /* ==== the kinds ========================================================== */
 
-for (const k of ['meal-train', 'list', 'dish']) eq(`${k} is a kind`, isSignupKind(k), true);
+for (const k of ['meal-train', 'list', 'dish', 'tasks']) eq(`${k} is a kind`, isSignupKind(k), true);
 // Whatever arrives in a form field is a string until this says otherwise.
 for (const k of ['', 'mealtrain', 'MEAL-TRAIN', 'drop table']) {
   eq(`${JSON.stringify(k)} is not a kind`, isSignupKind(k), false);
@@ -582,6 +591,14 @@ eq('an empty intro is null', clipIntro('   '), null);
 eq('a short note is one line', linesFor('Ham', 180, 8.2), 1);
 eq('a long note wraps', linesFor('Chicken and dumplings with a pan of cornbread, about 6pm', 180, 8.2) > 1, true);
 eq('an empty cell is one line', linesFor('', 180, 8.2), 1);
+
+/* ==== jobs say how many hands they still need ============================ */
+
+eq('an untouched job says how many it needs', stillNeeded(4, 0), '4 people needed');
+eq('one person, said properly', stillNeeded(1, 0), '1 person needed');
+eq('part-filled says how many more', stillNeeded(4, 3), '1 more needed');
+eq('a full job leaves it to the usual wording', stillNeeded(4, 4), null);
+eq('no limit leaves it to the usual wording', stillNeeded(null, 2), null);
 
 console.log(fail ? `\n${fail} FAILED` : '\nall passed');
 if (fail) process.exit(1);

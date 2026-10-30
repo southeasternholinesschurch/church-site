@@ -866,50 +866,56 @@ const sends = [...recent.reduce((m, r) => {
     sendBtn.disabled = true;
     statusEl.textContent = 'Sending…';
     /*
-     * Keep calling until nobody is left.
+     * The first call puts EVERYONE in the app's send queue and sends the first
+     * 40; each later call sends 40 more. If this page stops calling (the phone
+     * locks, the tab closes, the signal drops), nobody is lost: the five-minute
+     * job sends whatever is still queued. See lib/broadcast.ts.
      *
-     * The endpoint sends a window at a time because a Worker may make only 50
-     * outbound requests per incoming request on this plan, and each text is
-     * one. Sending the whole group in a single call is what silently dropped
-     * everyone past the 51st person on three broadcasts.
-     *
-     * The loop is here rather than in the endpoint because no amount of
-     * cleverness inside one request raises that cap — it has to be more
-     * requests.
+     * The id makes a retried first call harmless: the queue refuses a second
+     * row for the same broadcast and phone.
      */
-    type SendReply = { error?: string; sent?: number; failed?: number;
-                       failures?: { name: string; reason: string }[];
-                       handsets?: number; nextOffset?: number | null };
+    type SendReply = { error?: string; sent?: number; failed?: number; remaining?: number;
+                       failures?: { name: string; reason: string }[]; handsets?: number };
 
-    let offset: number | null = 0;
-    let sent = 0, failed = 0, total = 0;
+    const broadcastId = crypto.randomUUID();
+    let reply: SendReply = {};
     const failures: { name: string; reason: string }[] = [];
+    let first = true;
 
-    while (offset !== null) {
-      const res = await fetch('/api/sms/send', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body: text, groupId, personIds, offset }),
-      });
-      const data = await res.json().catch(() => ({})) as SendReply;
-      if (!res.ok) {
-        // Say how far it got. "Send failed" after 40 have already gone is worse
-        // than useless — it invites a re-send that texts those people twice.
-        statusEl.textContent = sent
-          ? `${data.error ?? 'Send failed'} — ${sent} already sent before it stopped.`
-          : (data.error ?? 'Send failed.');
+    for (;;) {
+      let res: Response;
+      try {
+        res = await fetch('/api/sms/send', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(first ? { body: text, groupId, personIds, broadcastId }
+                                     : { broadcastId, continue: true }),
+        });
+      } catch {
+        // Lost the connection. If the queue was already filled, the rest go
+        // out on their own; say so rather than inviting a second send.
+        statusEl.textContent = first
+          ? 'Could not reach the app. Nothing was sent; try again.'
+          : `The connection dropped after ${reply.sent ?? 0} of ${reply.handsets ?? '?'}. The rest are queued and will go out within five minutes; do not send it again.`;
         sendBtn.disabled = false;
         return;
       }
-      sent += data.sent ?? 0;
-      failed += data.failed ?? 0;
-      total = data.handsets ?? total;
+      const data = await res.json().catch(() => ({})) as SendReply;
+      if (!res.ok) {
+        statusEl.textContent = first
+          ? (data.error ?? 'Send failed.')
+          : `${data.error ?? 'It stopped'} after ${reply.sent ?? 0} of ${reply.handsets ?? '?'}. The rest are queued and will go out within five minutes; do not send it again.`;
+        sendBtn.disabled = false;
+        return;
+      }
+      first = false;
+      reply = data;
       if (data.failures) failures.push(...data.failures);
-      offset = data.nextOffset ?? null;
-      if (offset !== null) statusEl.textContent = `Sending… ${sent} of ${total}`;
+      if (!data.remaining) break;
+      statusEl.textContent = `Sending… ${data.sent ?? 0} of ${data.handsets ?? 0}`;
     }
 
-    statusEl.textContent = `Sent to ${sent}${failed ? `, ${failed} failed` : ''}.`;
-    if (failed && failures.length) {
+    statusEl.textContent = `Sent to ${reply.sent ?? 0}${reply.failed ? `, ${reply.failed} failed` : ''}.`;
+    if (failures.length) {
       alert('Some messages failed:\n\n' + failures.map((f) => `${f.name}: ${f.reason}`).join('\n'));
     }
     setTimeout(() => location.reload(), 1200);

@@ -1,0 +1,20 @@
+{
+  "name": "Fairhaven Kids",
+  "short_name": "Fairhaven Kids",
+  "description": "Fairhaven Community children's ministry — registers, Fairhaven Bucks and check-in.",
+  "id": "/kids",
+  "start_url": "/kids",
+  "scope": "/kids",
+  "display": "standalone",
+  "background_color": "#0d1b45",
+  "theme_color": "#081334",
+  "icons": [
+    { "src": "/kids-icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/kids-icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/kids-icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Registers", "url": "/kids/register" },
+    { "name": "Children", "url": "/kids/children" }
+  ]
+}

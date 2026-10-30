@@ -19,8 +19,25 @@ import { randomToken } from './auth';
  * them gets fixed.
  */
 
-/** Days a member stays signed in before needing a fresh invite. */
-const MEMBER_SESSION_DAYS = 90;
+/**
+ * How long a member stays signed in on a device, counted from their LAST
+ * visit rather than from the tap on the invite.
+ *
+ * The pastor, 2026-10-28: once somebody has opened their link on a phone, it should
+ * stay open on that phone for good. It was 90 days from the tap, after which a
+ * member who used the directory every week was signed out anyway and needed a
+ * fresh text from the office.
+ *
+ * So every visit pushes the end back out (see readMemberSession). 400 days is
+ * the most a browser will keep a cookie: Chrome caps any cookie at 400 days
+ * whatever it asks for, so "never" is not available, but "not unless the
+ * directory goes unopened for over a year" is. Access still ends the moment
+ * somebody is archived, revoked or taken out of the directory, because that is
+ * checked on every visit and does not depend on the date at all.
+ */
+const MEMBER_SESSION_DAYS = 400;
+/** Renewed at most once a day, so a busy afternoon is one write, not twenty. */
+const RENEW_AFTER_MS = 86400_000;
 /**
  * How long an invite link stays valid.
  *
@@ -35,7 +52,7 @@ const MEMBER_SESSION_DAYS = 90;
  * un-list somebody and their link dies immediately, used or not.
  */
 const INVITE_DAYS = 30;
-const COOKIE = 'seh_member';
+const COOKIE = 'changeme_member';
 
 export interface DirectoryPerson {
   id: number; firstName: string; lastName: string;
@@ -200,18 +217,23 @@ export interface MemberUser { personId: number; firstName: string; lastName: str
  * Read a member session, re-checking eligibility EVERY time.
  *
  * The check at invite time is not enough. Somebody revoked, archived, or
- * reclassified as a child on Monday must lose access on Monday — not in ninety
- * days when their session happens to expire.
+ * reclassified as a child on Monday must lose access on Monday — not whenever
+ * their session happens to expire.
+ *
+ * `renew` is for the directory's own pages: a visit there pushes the session
+ * and the cookie out another MEMBER_SESSION_DAYS. Not the photo endpoint,
+ * which runs a dozen times per page and has no business setting cookies on
+ * image responses.
  */
 export async function readMemberSession(
-  env: { DB: D1Database }, cookies: AstroCookies,
+  env: { DB: D1Database }, cookies: AstroCookies, renew?: { secure: boolean },
 ): Promise<MemberUser | null> {
   const token = cookies.get(COOKIE)?.value;
   if (!token) return null;
 
   const db = getDb(env);
   const rows = await db.select({
-    personId: schema.people.id,
+    personId: schema.people.id, expiresAt: schema.memberSessions.expiresAt,
     firstName: schema.people.firstName, lastName: schema.people.lastName,
     archived: schema.people.archived, adultChild: schema.people.adultChild,
     included: schema.people.includeInDirectory, status: schema.people.directoryStatus,
@@ -225,6 +247,19 @@ export async function readMemberSession(
   if (r.archived || r.adultChild !== 'adult' || !r.included || r.status === 'revoked') {
     await destroyMemberSession(env, cookies);
     return null;
+  }
+  const full = Date.now() + MEMBER_SESSION_DAYS * 86400_000;
+  if (renew && r.expiresAt < full - RENEW_AFTER_MS) {
+    // Caught: failing to extend is not a reason to refuse a session that is
+    // still good. The next visit tries again.
+    try {
+      await db.update(schema.memberSessions).set({ expiresAt: full })
+        .where(eq(schema.memberSessions.id, token));
+      cookies.set(COOKIE, token, {
+        httpOnly: true, sameSite: 'lax', secure: renew.secure, path: '/',
+        maxAge: MEMBER_SESSION_DAYS * 86400,
+      });
+    } catch { /* kept as it was */ }
   }
   return { personId: r.personId, firstName: r.firstName, lastName: r.lastName };
 }

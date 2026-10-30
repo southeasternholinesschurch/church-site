@@ -1,0 +1,243 @@
+---
+import { canAccess } from '../lib/permissions';
+import { getDb } from '../db';
+import { allHeroes } from '../lib/lobby-heroes-db';
+import { HERO_LIMITS } from '../lib/lobby-heroes';
+import { churchToday } from '../lib/services';
+import '../styles/lobby-hero.css';
+
+/**
+ * Hero frames: the list and the editor dialog. Lives on the Lobby tab
+ * (/lobby/manage); see lib/lobby-heroes.ts for the rules and
+ * styles/lobby-hero.css for how a frame looks and moves.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+/*
+ * The lobby screen's hero frames: the one part of the foyer TV that somebody
+ * makes by hand. Staff and admins (permissions.ts gates the API the same way).
+ * Caught like Care: a table not yet migrated is a card left off, never a
+ * dashboard that will not load.
+ */
+let heroes: Awaited<ReturnType<typeof allHeroes>> | null = null;
+if (canAccess(user.role, '/api/lobby/heroes')) {
+  try { heroes = await allHeroes(db); } catch { heroes = null; }
+}
+const today = churchToday();
+const heroStatus = (h: NonNullable<typeof heroes>[number]) =>
+  !h.active ? 'Off'
+  : h.endsOn && h.endsOn < today ? 'Ended'
+  : h.startsOn && h.startsOn > today ? 'Scheduled'
+  : 'Showing';
+const shortDate = (iso: string) => new Date(`${iso}T12:00:00Z`)
+  .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const heroDates = (h: NonNullable<typeof heroes>[number]) =>
+  h.startsOn && h.endsOn ? `${shortDate(h.startsOn)} – ${shortDate(h.endsOn)}`
+  : h.startsOn ? `From ${shortDate(h.startsOn)}`
+  : h.endsOn ? `Until ${shortDate(h.endsOn)}`
+  : 'Until switched off';
+---
+{heroes && (
+    <section class="card lobby" aria-labelledby="lobby-h">
+      <div class="lobby__head">
+        <h2 id="lobby-h">Hero frames</h2>
+        <div class="lobby__actions">
+          <button class="btn" type="button" data-hero-new>New hero frame</button>
+        </div>
+      </div>
+      <p class="muted lobby__lede">
+        Hero frames are your own graphics, shown full screen between the bulletin’s scenes and held a little longer.
+      </p>
+      {heroes.length === 0 ? (
+        <p class="muted" style="margin:0;">None yet. A revival poster, the Christmas drama or VBS make good ones.</p>
+      ) : (
+        <ul class="heroes">
+          {heroes.map((h) => (
+            <li>
+              <img class="heroes__thumb" src={h.image} alt="" width="160" height="90" loading="lazy" />
+              <div class="heroes__text">
+                <strong>{h.title}</strong>
+                <span class="muted">{h.kicker || h.subtitle}</span>
+                <span><span class:list={['chip', heroStatus(h) !== 'Showing' && 'chip--warn']}>{heroStatus(h)}</span> <span class="muted">{heroDates(h)}</span></span>
+              </div>
+              <div class="heroes__btns">
+                <button class="btn btn--ghost" type="button" data-hero-edit={h.id}>Edit</button>
+                <button class="btn btn--ghost" type="button" data-hero-toggle={h.id}>{h.active ? 'Switch off' : 'Switch on'}</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )}
+
+  {heroes && (
+    <dialog class="he" id="hero-editor" data-heroes={JSON.stringify(heroes)} aria-labelledby="he-title">
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+      <form id="he-form" novalidate>
+        <header class="he__head">
+          <h2 id="he-title">New hero frame</h2>
+          <button class="he__x" type="button" data-he-close aria-label="Close">×</button>
+        </header>
+        <div class="he__body">
+          <div class="he__left">
+            {/* The TV, at the size this dialog allows: the same markup and
+                stylesheet the screen uses, so this IS the frame, not a sketch
+                of it. The logo and clock bar are drawn too, so the corners the
+                text cannot have are visible. */}
+            <div class="he__screen" id="he-screen">
+              <div class="he__stage" id="he-stage">
+                <div id="he-frame"></div>
+                <img class="he__mark" src="/lobby-photos/wordmark.png" alt="" />
+                <div class="he__clock"><b>9:40</b><i></i><span>Morning Worship in 20 min</span></div>
+                <div class="he__progress"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="he__empty" id="he-empty">Choose a graphic to see the frame</div>
+              </div>
+            </div>
+            <div class="he__under">
+              <button class="btn btn--ghost" type="button" id="he-play">▶ Play the entrance</button>
+              <span class="muted">Exactly as the lobby TV will show it.</span>
+            </div>
+            <label class="he__file">
+              <input type="file" id="he-file" accept="image/jpeg,image/png,image/webp" />
+              <span class="btn btn--ghost">Choose a graphic…</span>
+              <small class="muted">16:9 fills the screen exactly; 3840 × 2160 is ideal. Anything else is cropped to its middle.</small>
+            </label>
+            <p class="he__note" id="he-note" hidden></p>
+          </div>
+          <div class="he__right">
+            <label class="field">
+              <span>Above the title <em class="he__count" data-count="kicker"></em></span>
+              <input name="kicker" maxlength={HERO_LIMITS.kicker} placeholder="Saturday · December 5" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Title <em class="he__count" data-count="title"></em></span>
+              <input name="title" maxlength={HERO_LIMITS.title} placeholder="Drive-thru Nativity" required autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Below the title <em class="he__count" data-count="subtitle"></em></span>
+              <textarea name="subtitle" rows="2" maxlength={HERO_LIMITS.subtitle} placeholder="The Christmas story on the church lawn, from 5:30 each evening"></textarea>
+            </label>
+            <fieldset class="he__seg">
+              <legend>Corner</legend>
+              <label><input type="radio" name="corner" value="bottom-left" /> Bottom left</label>
+              <label><input type="radio" name="corner" value="bottom-right" checked /> Bottom right</label>
+            </fieldset>
+            <fieldset class="he__seg">
+              <legend>Corner shade</legend>
+              <label><input type="radio" name="tone" value="dark" checked /> Dark</label>
+              <label><input type="radio" name="tone" value="light" /> Light</label>
+            </fieldset>
+            <label class="field he__range">
+              <span>Shade strength <em class="he__count" id="he-shade-n"></em></span>
+              <input type="range" name="shade" min="0" max="100" step="5" value="70" />
+            </label>
+            <fieldset class="he__seg">
+              <legend>Accent</legend>
+              <label><input type="radio" name="accent" value="red" checked /> Red</label>
+              <label><input type="radio" name="accent" value="gold" /> Gold</label>
+              <label><input type="radio" name="accent" value="plain" /> Plain</label>
+            </fieldset>
+            <fieldset class="he__seg">
+              <legend>Title type</legend>
+              <label><input type="radio" name="titleStyle" value="serif" checked /> Serif</label>
+              <label><input type="radio" name="titleStyle" value="bold" /> Bold</label>
+            </fieldset>
+            <div class="he__dates">
+              <label class="field"><span>Show from</span><input type="date" name="startsOn" /></label>
+              <label class="field"><span>Until</span><input type="date" name="endsOn" /></label>
+            </div>
+            <p class="muted he__hint">Leave both empty to show it until you switch it off.</p>
+            <label class="he__check"><input type="checkbox" name="active" checked /> Showing on the screen</label>
+          </div>
+        </div>
+        <p class="notice he__errors" id="he-errors" role="alert" hidden></p>
+        <footer class="he__foot">
+          <button class="btn btn--danger" type="button" id="he-delete" hidden>Delete</button>
+          <span class="he__spacer"></span>
+          <button class="btn btn--ghost" type="button" data-he-close>Cancel</button>
+          <button class="btn" type="submit" id="he-save">Save</button>
+        </footer>
+      </form>
+    </dialog>
+  )}
+
+
+<script>
+  import { startHeroEditor } from '../lib/lobby-hero-editor';
+  startHeroEditor();
+</script>
+
+<style>
+  /* ---- the lobby card and the hero editor ---- */
+  .lobby { margin-bottom: 26px; }
+  .lobby__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .lobby__head h2 { margin: 0; }
+  .lobby__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .lobby__lede { margin: 8px 0 16px; }
+  .heroes { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  /* Thumbnail and words side by side, the buttons on their own line: the card
+     sits in a narrow column beside the preview, and a third column squeezed
+     the title down to a few letters. */
+  .heroes li { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px 16px; align-items: center;
+               padding-top: 12px; border-top: 1px solid var(--hair); }
+  .heroes li:first-child { border-top: 0; padding-top: 0; }
+  .heroes__thumb { width: 160px; height: 90px; object-fit: cover; border-radius: 6px; background: #120e0c; display: block; }
+  .heroes__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .heroes__text strong, .heroes__text > .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .heroes__btns { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+  @media (max-width: 720px) {
+    .heroes li { grid-template-columns: 112px minmax(0, 1fr); }
+    .heroes__thumb { width: 112px; height: 63px; }
+  }
+
+  /* `hidden` must win over the display values below (the kiosk learned this
+     the hard way): the placeholder and Delete are hidden by attribute. */
+  .he [hidden] { display: none !important; }
+  .he { width: min(1180px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 0;
+        border-radius: var(--radius-lg); background: var(--cream, #f4efe7); color: var(--ink); }
+  .he::backdrop { background: rgba(26, 21, 18, .6); backdrop-filter: blur(4px); }
+  .he form { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
+  .he__head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 0; }
+  .he__head h2 { margin: 0; }
+  .he__x { border: 0; background: none; font-size: 28px; line-height: 1; padding: 4px 8px; cursor: pointer; color: var(--ink-soft); }
+  .he__body { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 24px; padding: 18px 22px; overflow: auto; }
+  .he__screen { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #120e0c;
+                box-shadow: 0 18px 40px -24px rgba(0, 0, 0, .6); }
+  .he__stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .he__mark { position: absolute; left: 96px; top: 70px; height: 52px; opacity: .82; }
+  .he__clock { position: absolute; right: 96px; top: 64px; height: 64px; display: flex; align-items: center; gap: 24px; padding: 0 30px;
+               border-radius: 999px; background: rgba(26, 21, 18, .38); border: 1px solid rgba(255, 255, 255, .12);
+               color: rgba(247, 242, 234, .84); font: 30px/1 system-ui, sans-serif; }
+  .he__clock b { font-size: 32px; } .he__clock i { width: 1px; height: 26px; background: rgba(247, 242, 234, .22); }
+  .he__clock span { color: rgba(247, 242, 234, .68); }
+  .he__progress { position: absolute; left: 96px; right: 96px; bottom: 52px; display: flex; gap: 10px; }
+  .he__progress i { flex: 1; height: 4px; border-radius: 2px; background: rgba(247, 242, 234, .22); }
+  .he__empty { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(247, 242, 234, .6); font: 44px system-ui, sans-serif; }
+  .he__under { display: flex; align-items: center; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
+  .he__file { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; cursor: pointer; }
+  .he__file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .he__file:focus-within .btn { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .he__note { margin: 10px 0 0; font-size: 14px; color: #8a5316; }
+  .he__count { font-style: normal; font-weight: 400; letter-spacing: 0; color: var(--ink-soft); float: right; }
+  .he__count.is-over { color: var(--red); font-weight: 700; }
+  .he__seg { border: 0; padding: 0; margin: 0 0 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .he__seg legend { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 6px; padding: 0; }
+  .he__seg label { position: relative; display: inline-flex; align-items: center; padding: 8px 14px; border: 1px solid var(--hair);
+                   border-radius: 999px; background: #fff; cursor: pointer; font-size: 15px; }
+  .he__seg input { position: absolute; opacity: 0; inset: 0; cursor: pointer; margin: 0; }
+  .he__seg label:has(input:checked) { background: var(--ink); border-color: var(--ink); color: var(--cream, #f4efe7); }
+  .he__seg label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .he__range input { width: 100%; accent-color: var(--ink); }
+  .he__dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .he__dates .field { margin-bottom: 4px; }
+  .he__hint { font-size: 13px; margin: 0 0 14px; }
+  .he__check { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+  .he__errors { margin: 0 22px; }
+  .he__foot { display: flex; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--hair); }
+  .he__spacer { flex: 1; }
+  @media (max-width: 860px) {
+    .he__body { grid-template-columns: 1fr; }
+  }
+
+</style>

@@ -52,6 +52,12 @@ interface Env {
    * means admin, which is what the public demo needs.
    */
   DEMO_ROLE?: string;
+  /**
+   * Where the lobby screen reads the site's events. Unset in production, which
+   * uses https://yourchurch.org/events.json; set in .dev.vars to a
+   * local copy for development.
+   */
+  LOBBY_EVENTS_URL?: string;
 }
 
 declare namespace App {

@@ -1,5 +1,6 @@
 ---
 import AppLayout from '../../layouts/AppLayout.astro';
+import ServingNav from '../../components/ServingNav.astro';
 import { readForm } from '../../lib/form';
 import {
   quarterOf, quarterFromKey, shiftQuarter, sundaysBetween, monthName, cellNames, singerTally,
@@ -107,7 +108,7 @@ const CHIP: Record<string, { mark: string; title: (r?: string) => string }> = {
 };
 ---
 <AppLayout title="Singing" user={user}>
-  <p style="margin:0 0 6px;"><a href="/bulletin">← Bulletin</a></p>
+  <ServingNav active="singing" />
   <div class="head">
     <h1>Singing schedule</h1>
     <a class="btn" href={`/singing/print?q=${q.key}`}>Print this quarter</a>

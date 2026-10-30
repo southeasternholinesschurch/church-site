@@ -1,4 +1,5 @@
 ---
+import PrintHint from '../../../components/PrintHint.astro';
 import { getDb, schema } from '../../../db';
 import { asc, eq } from 'drizzle-orm';
 import { closedReason, dayLabel, printParts, SIGNUP_KINDS } from '../../../lib/signups';
@@ -172,6 +173,7 @@ const px = (n: number) => `${n}px`;
       <a href={`/signups/${id}`}>← Back to the sheet</a>
       <span>{pages.length === 1 ? 'One page' : `${pages.length} pages`}</span>
       <button type="button" onclick="window.print()">Print</button>
+      <PrintHint />
     </div>
 
     {pages.map((pg, i) => (

@@ -54,12 +54,26 @@ digest**, and the public site has **Plan Your Visit**, the **pew guest card** an
   stopped coming, guest cards, reminders) and the care log.
 - **Guest cards** — `yourchurch.org/welcome` for the pew NFC tags and the
   link-tree, and "let us know you're coming" on `/visit`. They land on the Care list.
-- **The singing schedule** (`/singing`, its own Singing tab) — moved off the Google
+- **The singing schedule** (`/singing`, under the Serving tab) — moved off the Google
   Sheet, with a printout. The schedule was copied in from the sheet by 2026-10-12.
 - **The Monday digest** — one text to the pastors on Monday morning, and `/digest`.
 - **Sermons by Scripture** (`/sermons/scripture`) and passage-aware sermon search.
 - **Local search** — structured data on the site; the Google Business Profile half is
   yours, see "Local search" below.
+
+**Since 2026-10-21 it also carries the lobby screen, service orders and a texting
+troubleshooting page**, each with its own section below:
+
+- **The lobby screen** (`/lobby`, public) — the foyer TV, built from the published
+  bulletin, with its own **Lobby** tab (`/lobby/manage`) for hero frames, photos, its
+  words, pace and notices.
+- **Service orders** (`/service-orders`) — the running order of a service, printed
+  three slips to a sheet. It sits with sign-ups and singing under one **Serving** tab
+  (`/serving`, 2026-10-26).
+- **Website → Troubleshooting** — are texts going out, and which did not arrive.
+
+Their migrations (`0030_lobby_heroes.sql`, `0031_lobby_photos.sql`,
+`0032_service_orders.sql`) were all applied to `changeme-app` by 2026-10-26.
 
 **Two database migrations come with them — `0028_care.sql` and `0029_singing.sql`.
 Apply them to the remote database BEFORE this code is merged**, as every migration
@@ -73,8 +87,9 @@ who also comes to Fairhaven Kids is entered on both sides (a child's People page
 and how the live data was moved (people 242 → 146), is in
 [`docs/kids-separation-plan.md`](kids-separation-plan.md).
 
-**The nav bar is ten tabs and was fourteen.** Care was added on 2026-10-10 and only
-admins see it. Four screens were folded into the page that already asked their
+**The nav bar is eleven tabs and was fourteen.** Care was added on 2026-10-10 and only
+admins see it; Lobby on 2026-10-22; and on 2026-10-26 Service Order, Singing and
+Sign-ups became the one Serving tab. Four screens were folded into the page that already asked their
 question, which is worth knowing before hunting for a URL that has gone: Scheduled and Replies are now part of `/messaging`, Trends is a
 fold on `/attendance`, and Groups is a fold on `/people` with a picker beside the
 search box. `/messaging/inbox`, `/messaging/numbers` and `/attendance/trends` still
@@ -176,7 +191,7 @@ Worker — none are in the repo. `npx wrangler secret list` shows what is set.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Staff sign-in |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | Sending and validating texts. An API key + secret pair was tried first and was rejected with 20003; the account SID and auth token work. |
 | `TWILIO_MESSAGING_SERVICE_SID` | The Messaging Service messages are sent through. The delivery callback belongs on THIS, not on the number. |
-| `TWILIO_FROM_NUMBER` | +1 317 218 9622 |
+| `TWILIO_FROM_NUMBER` | +1 317 555 0199 |
 | `REMINDER_SHEET_CSV_URL` | The published singing-schedule CSV — read by the bulletin and the Monday reminder only until the schedule is copied into the app at `/singing`. After that it is never read and can be deleted, along with the published sheet. |
 | `SMS_CRON_SECRET` | Shared secret the `sms-cron` Worker presents to `/api/sms/run-due`, which is public to the middleware and guarded by this alone |
 | `DEPLOY_HOOK_URL` | Fires a site rebuild from the app's "Publish the website now" button. Server-side only — the random ID in the URL *is* the credential. |
@@ -206,7 +221,7 @@ real values as they arrive.
 - [x] SHC logo — done 2026-08-29. Real files live in `site/src/assets/brand/` (icon mark, dark and white horizontal lockups) and are wired into the nav/footer/favicon/PWA icons via Astro's image pipeline (auto-optimized to WebP). Fairhaven Kids/Fairhaven Youth marks are in too; Fairhaven Ladies/Fairhaven Men/Fairhaven Seniors still have no real logo.
 - [x] Fonts — settled. Texta (body/UI, self-hosted from the pastor's own files) + Instrument Serif (display, Google Fonts, OFL). BD Script was used in an earlier direction and has been dropped. Still open: the Texta web-embedding licence — see the note in the stack-choices table above.
 - [x] Calendar feed — done 2026-08-29, live and connected (currently empty, waiting on real events)
-- [x] **`YOUTUBE_API_KEY`** — fully done. Created on a church-owned Google Cloud project, added BOTH as a GitHub Actions secret (the nightly sermon import runs on it) and as a Cloudflare secret on the site Worker. `/api/live-status` returns `configured: true` and the Livestream page detects a live service; verified against a real test stream. Channel ID: `UCCjlcMeiioBKihboxwgvnEg`
+- [x] **`YOUTUBE_API_KEY`** — fully done. Created on a church-owned Google Cloud project, added BOTH as a GitHub Actions secret (the nightly sermon import runs on it) and as a Cloudflare secret on the site Worker. `/api/live-status` returns `configured: true` and the Livestream page detects a live service; verified against a real test stream. Channel ID: `UC…YOUR_CHANNEL_ID`
 - [x] Church inbox email — confirmed 2026-08-30: `hello@example.org`. Shown on the Contact page and the address the forms will deliver to. **Register the Web3Forms key with this address.**
 - [x] Real Facebook page URL — done 2026-08-29
 - [x] Real Zeffy giving URL — done 2026-08-29 (found via the church's Linktree)
@@ -224,15 +239,15 @@ address. The pastor's call — who to make a cheque out to is not something the 
 publishes. The Linktree (`givingLinksUrl` in site settings) covers the other
 digital options instead. Don't reinstate either without asking.
 - [x] Staff portrait confirmed as Pastor Alan (2026-08-30)
-- [x] Staff portraits — all three in place as of 2026-08-30. Felicia's came from a real photo squared up via ChatGPT (confirmed with the pastor; the filename alone doesn't distinguish an AI-generated image from an AI-edited one, and it's worth asking).
-- [x] All four staff portraits done. Notes for future ones: Portraits are circle-cropped, so head-and-shoulders works best. `focus` in the CMS moves the crop vertically, but ONLY on a non-square photo — a square source fills the circle exactly and `focus` does nothing. For a tall portrait, crop it square first and keep the uncropped original alongside (see `kenny-stetler-full.jpg`), because re-cropping later otherwise means digging the source out of git history. Note `luther.jpg` in the photo library is a wide congregation shot and is deliberately NOT offered as a portrait
+- [x] Staff portraits — all three in place as of 2026-08-30. Joanna's came from a real photo squared up via ChatGPT (confirmed with the pastor; the filename alone doesn't distinguish an AI-generated image from an AI-edited one, and it's worth asking).
+- [x] All four staff portraits done. Notes for future ones: Portraits are circle-cropped, so head-and-shoulders works best. `focus` in the CMS moves the crop vertically, but ONLY on a non-square photo — a square source fills the circle exactly and `focus` does nothing. For a tall portrait, crop it square first and keep the uncropped original alongside (see `alan-reeve-full.jpg`), because re-cropping later otherwise means digging the source out of git history. Note `luther.jpg` in the photo library is a wide congregation shot and is deliberately NOT offered as a portrait
 - [x] Staff page complete — four entries, real photos, the church's own bios. To add someone: `/admin` → Staff & Leadership (a new photo must be added to `src/lib/staff-assets.ts` first so it appears in the dropdown).
 - [x] Kids Club time — Wednesdays at 7:00 (confirmed 2026-08-30)
 - Ministry **locations** are deliberately not published for Fairhaven Youth / Fairhaven Ladies / Fairhaven Seniors — the pastor's call. The `where` field is simply omitted on those, so no row renders. Don't add placeholders back.
 - [ ] Fairhaven Ladies photo, and real branding (logo + colors) for Fairhaven Ladies and Fairhaven Seniors. **These no longer show any marker on the site** — a ministry without a logo simply shows none, and a card without a photo shows a panel tinted in that ministry's colour. Nothing looks broken to a visitor, so the outstanding work is tracked here rather than advertised on a public page
 - [x] Ministry meeting times — all four complete (Fairhaven Kids Sun 4:30 + Kids Club Wed 7:00; Fairhaven Youth Sun 4:30; Fairhaven Ladies monthly; Fairhaven Seniors Sunday school + every other month). Locations deliberately not published.
 
-Search the repo for `TODO(the pastor)` and `REPLACE_WITH` to find every one of these in place.
+Search the repo for `TODO(pastor)` and `REPLACE_WITH` to find every one of these in place.
 
 ---
 
@@ -343,7 +358,7 @@ The rest of this section is the record of how each piece was set up, 2026-08-29.
    tokens" left **unchecked** (this Worker doesn't implement token refresh — see its
    `src/index.ts` comments — so a non-expiring token is what it expects).
    `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` secrets set, `public/admin/config.yml`'s `repo`
-   and `base_url` point at the real values. **Verified end-to-end 2026-08-29**: the pastor logged
+   and `base_url` point at the real values. **Verified end-to-end 2026-08-29**: The pastor logged
    into `/admin` successfully via GitHub.
 
 Every subsequent push to `main` auto-deploys via Cloudflare's GitHub integration — no extra
@@ -368,7 +383,9 @@ deny-by-default — every route requires a staff session unless its prefix is li
 tested without standing up a request.
 
 *Members* never sign in at all. They receive a personal link by text, tap it once, and
-that device is remembered for 90 days. Their sessions live in `member_sessions`, a
+that device stays signed in: every visit pushes the session out another 400 days
+(the most a browser keeps a cookie), so it only lapses if the directory goes unopened
+for over a year. Archiving, revoking or un-listing someone still ends it at once. Their sessions live in `member_sessions`, a
 **different table** from the staff `sessions`. One table with a role column is how a
 member ends up holding a staff session after somebody writes a query that forgets to
 check the column; two tables cannot be confused.
@@ -633,6 +650,17 @@ arrived mid-window.
 outbound fetches and the 51st fails — the bug that once sent 51 of 75 and dropped the
 rest with no error. The remainder stays pending and the next tick takes it.
 
+**Each tick reads before it writes, because of the 10ms CPU limit.** The free Workers
+plan allows about 10ms of processor time a request. On 2026-10-24 re-expanding 25
+sign-up reminders on every tick — one refused insert per person, every five minutes —
+tipped the job over it, and Cloudflare stopped every run for seven hours (error 1102),
+so nothing queued was sent. Now `existingKeys` in `lib/schedule-runner.ts` asks once
+which queue keys already exist, and only the new rows are inserted, in one batch. A
+tick with nothing new costs one read. The unique index is still the guard against a
+duplicate; this only stops the job paying for the refusal. Each step also logs a line
+(`run-due: expanded`, `drained`, `checked`), so if a run is ever stopped again, the
+last line in `npx wrangler tail changeme-app` names the step that ran over.
+
 Times are stored as **local wall clock, not instants**, so 8am stays 8am across a DST
 change. Birthdays are matched by parsing month and day out of the string, never
 `new Date(iso)`. Leap-day birthdays are wished on the 28th in a common year.
@@ -640,6 +668,44 @@ change. Birthdays are matched by parsing month and day out of the string, never
 `sms-cron` runs `*/5 * * * *` **and** `0 * * * *`; only the hourly one passes
 `?roster=1`, so the roster's Google Sheet is still fetched 24 times a day rather than
 288.
+
+## Did it arrive? Delivery reports, and the troubleshooting page
+
+**Website → Troubleshooting** (`/website/troubleshooting`, admins only) answers "are
+texts going out?": whether Twilio is set up, when the five-minute job last ran (it
+stamps `app_settings.sms_cron_last_run` each run), anything overdue in the queue,
+every text of the last 30 days with how much of it arrived, and each number a text
+did not reach with the reason in plain words (`lib/text-status.ts` → `explainError`).
+The dashboard shows a one-line warning to admins when the job has stopped, a
+scheduled text is overdue, or a text failed in the last three days.
+
+**What was wrong (found 2026-10-21).** 303 texts from September and October were
+still marked "queued", spread across 39 people who had all received other texts.
+Twilio had accepted every one; the report of what happened next was not recorded.
+Twilio posts one report per step (queued → sent → delivered) as separate requests
+that can arrive out of order, and the webhook wrote whatever came last, so a late
+"queued" could undo a "delivered". Two fixes, both in `lib/text-status-db.ts`:
+
+- **A status only moves forward** (`movesForward`). A late, earlier report is ignored.
+- **The app asks Twilio about any text with no answer after 20 minutes**
+  (`checkStuckTexts`), five a run, newest first — and none at all on a run that has
+  just sent texts, because that run has already spent its CPU time (see the 10ms note
+  under "Scheduled and automatic texts"). Five a run still settles a 79-person
+  broadcast within the hour. A text Twilio still calls in flight after 24 hours, or does
+  not know at all, is recorded as `unconfirmed` and not asked about again.
+
+The webhook and the checker share `recordDeliveryStatus`, including reopening a
+reminder whose text the carrier dropped.
+
+**"Send it now" goes through the queue (2026-10-21).** It used to be the browser that
+sent a broadcast, 40 at a time, asking the server for the next 40 until nobody was
+left. If the phone locked, the person switched apps or the signal dropped between
+batches, everybody after that point was never sent to, and nothing recorded it. Now
+the first request puts every recipient in `scheduled_messages` in one batch (keys
+`now:{broadcastId}:{phone}`, or `kidsnow:` from the Fairhaven Kids page), then sends the first
+40; the page asks for the rest 40 at a time, and if it stops, the five-minute cron
+sends whatever is left. `lib/broadcast.ts`. A retried first request queues nobody
+twice (the unique `source_key`). Inbox replies go the same way, as a broadcast of one.
 
 ## Checking numbers without texting anyone
 
@@ -689,16 +755,33 @@ null and the section is simply absent — it must never take the bulletin down.
 date block beside it; the bulletin has no such block and passes `withDate: true`. Without
 that, "Coming Up" said "Sunday · 6:00 PM" with no way to tell which Sunday.
 
+## Serving — one tab for service orders, sign-ups and singing
+
+**`/serving`** (2026-10-26). Service orders, sign-up sheets and the singing schedule
+were three tabs; they are one job — who is doing what, put on paper — so they share
+one tab. The overview has a card for each, in order of use (service orders weekly,
+sign-ups several times a year, singing quarterly), and each card says where that job
+stands: the upcoming service orders, with a one-tap "Start Sunday morning's" when
+there is not one yet; the open sheets and how full they are, and unfinished drafts;
+who sings this Sunday, and a warning when fewer than four weeks are planned.
+
+The three pages kept their addresses (`/service-orders`, `/signups`, `/singing`), so
+bookmarks and printed links still work. `ServingNav` is the row of tabs across the
+top of all four pages, and `SECTIONS` in `AppLayout.astro` keeps the Serving tab lit
+on each of them. The dashboard has a Service order button as its fifth tile.
+
 ## Sign-up sheets
 
-Three kinds of paper sheet come off the foyer table: a **meal train** across a span of
-days, a **list** of names for an event or a volunteer call, and a **pitch-in** where
-staff decide the parts first and people sign up against them.
+Four kinds of paper sheet come off the foyer table: a **meal train** across a span of
+days, a **list** of names for an event or a volunteer call, a **pitch-in** where
+staff decide the parts first and people sign up against them, and **jobs and tasks**
+(added 2026-10-20 for a work night) where each job has a short description or list of
+supplies and the number of people it needs.
 
 They are one thing underneath — a list of **slots** with a capacity, that people
 **claim**. The kind decides only how the slots get made and what the form asks for.
 The public page, the taken/available display, the corrections and the reminders are
-written once. There is no third feature here to maintain.
+written once. There is no second feature here to maintain.
 
 **Built at `/signups`, reached at `/signup/{token}`.** Deliberately not in the website's
 menu: every open sheet goes into the bulletin on its own (see the bulletin section
@@ -731,6 +814,16 @@ of ham. A member can change their dish but not blank it, and can still take thei
 off with the box empty. A **"Coming so far"** card at the top of the public sheet lists
 every dish by part, because each part is folded and nobody opens the mains to sign up
 for a side. Meal trains and lists do not ask.
+
+**On a jobs sheet, each job carries a description** — what it involves, or what to
+bring — kept in `signup_slots.detail` (the column existed before; this is the first
+kind to fill it in). The public sheet shows it without the job being opened, and the
+status says how many people the job still needs ("4 people needed", "1 more needed").
+The note is optional. The printout puts the description under the job's heading.
+
+**Each kind has its own default reminder** when staff have not written one
+(`defaultReminderFor`): a meal, a dish, "you signed up for tomorrow", or "to help".
+Until 2026-10-20 every kind was sent the meal-train wording.
 
 **The printout** — "Print a sign-up sheet" on `/signups/{id}`, at
 `/signups/{id}/print` — is for the foyer table: everyone signed up so far, then a blank
@@ -775,6 +868,77 @@ careful with:
   actually reads — recording the consent and leaving the flag set is an opt-out that
   reads as handled in the log and texts the person anyway the next morning), and it
   **cancels what is already queued**, which the table updates do nothing about.
+
+## Service orders — printed slips with the running order
+
+**`/service-orders`** (under the Serving tab; made 2026-10-25). Staff-only, nothing public.
+Table `service_orders`, migrations/0032; rules in `lib/service-order.ts`.
+
+- **Two ways to start.** *Traditional service* fills in the usual Sunday order, and
+  pre-fills Special Song from the singing schedule and Message from that Sunday's
+  bulletin preacher (evening services get the evening singer and no preacher guess).
+  *Build your own* starts empty, for a service that does not follow the pattern. *Copy for
+  next time* on the list reuses an order's parts and notes with the leaders cleared.
+- **The editor** is plain form rows sharing input names, so the order on the page is the
+  saved order. Its only script adds, removes and moves rows.
+- **The printout** (`/service-orders/{id}/print`) is three identical slips across an
+  11×8.5in sheet, each with the wordmark at the foot (`public/print/wordmark.png`).
+  In print the sheet is turned a quarter turn onto an ordinary **portrait** page, so it
+  prints right with Safari's default settings. WebKit answers print media queries from the
+  window, not the paper, so the page cannot detect orientation itself. A script fits the
+  type to the slip, and switches long orders (an afternoon of singers) to a compact
+  layout before the type gets small. Checked through WebKit's print path and headless
+  Chrome.
+
+## The lobby screen — the foyer TV
+
+**`/lobby`** (made 2026-10-22) is one web page for the Samsung Frame in the foyer, which
+nobody touches most Sundays. It is standalone like the kiosk: no sign-in, no shared
+layout, no navigation, and it never reloads to change scene. Why it looks and moves the
+way it does is in [`handoff/DESIGN-lobby-screen.md`](../handoff/DESIGN-lobby-screen.md);
+the decisions behind it are in [`handoff/PLAN-lobby-screen.md`](../handoff/PLAN-lobby-screen.md).
+
+- **What it shows** is built from what already exists: the published bulletin
+  (announcements, prayer requests, scripture, who is singing, Coming Up, "Missed last
+  Sunday?"), the website's events, birthdays, open sign-up sheets, and QR codes. Give and
+  New Here scenes are always in the rotation. It follows the clock — before, during and
+  after a service, a countdown through the week, the church season — and the photos
+  reshuffle with each bulletin. `lib/lobby.ts` decides what to show and is tested under
+  Node; `lib/lobby-screen.ts` only draws it and keeps time. Every "what time is it" goes
+  through the church's timezone, never the TV box's.
+- **It asks before it downloads.** The TV polls `/api/lobby/feed` every couple of
+  minutes and sends the stamp it already has; the feed answers 204 "no change" unless
+  something it shows has changed (`lib/lobby-stamp-db.ts`). Building the full feed costs
+  26–87ms of CPU against the free plan's 10, so it is only built when needed. Publishing a
+  bulletin, a sign-up sheet opening or closing, a change on `/singing` or on the Lobby tab
+  shows within one poll; the website's events and a birthday edited on someone's page
+  wait for the hourly full refresh. A failed fetch keeps the last good feed, so the screen
+  never goes blank because the website hiccupped.
+- **The Lobby tab** (`/lobby/manage`, staff only) holds what a person sets by hand:
+  **hero frames** (an uploaded graphic, full screen, with a kicker, title and subtitle in
+  one corner; start and end dates are inclusive), **photos** (switch any built-in one
+  off, or upload your own — the browser resizes and re-encodes every upload, which drops
+  the camera's location data; children's photographs are welcome, the pastor 2026-10-22), the
+  screen's own **words** ("Please pray for", "Scan to give"), and its **pace**, scenes
+  switched off, and a one-line **notice**. Tables `lobby_heroes` and `lobby_photos`
+  (migrations 0030, 0031); the images are in R2 (`PHOTOS`); words and settings are the
+  `lobby_copy` and `lobby_settings` rows in `app_settings`.
+- **Public by design.** `/lobby` and `/api/lobby/feed` are public *exactly*
+  (`PUBLIC_EXACT` in `lib/public-paths.ts`), so a future `/lobby/remote` does not become
+  public by accident. `/api/lobby/hero/{id}` and `/api/lobby/photo/{id}` serve the
+  images without a session, and **their trailing slashes are load-bearing**: without
+  them, the staff routes `/api/lobby/heroes` and `/api/lobby/photos` would be public too.
+  `test/lobby.test.ts` holds those pairs. Anything put in a hero frame or a photo is shown
+  on a wall to whoever walks in; do not use them for anything else.
+- **Previewing a Sunday on a Thursday:** `?at=2026-10-25T09:40` pretends it is that time
+  at the church; `?season=advent`, `?channel=week`, `?scene=prayer` and `?hold` force a
+  season, start on a channel, jump to a scene, or pause.
+- **Not on the demo.** The demo Worker has no R2 bucket, so hero frames and uploaded
+  photos cannot be added there. Its screen runs on the built-in photos.
+
+How the page gets onto the Frame — a small box on HDMI, an installed Tizen app, or Art
+Mode posters — is weighed in the plan. This document does not yet record which was set
+up; add it here when it is.
 
 ## Care — the follow-up list, the care log and guest cards
 
@@ -843,7 +1007,7 @@ audience. Both are queued through the five-minute cron.
 
 ## The singing schedule
 
-`/singing`, the Singing tab next to Bulletin — planned a quarter at a time, typed the way
+`/singing`, under the Serving tab — planned a quarter at a time, typed the way
 the Google Sheet was: names separated by commas, or a note ("Fall Revival") where
 there are no singers. Under every cell, as it is typed, each name says whether it will
 get the Monday reminder — on People and textable, on People but not textable (and why),

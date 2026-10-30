@@ -31,9 +31,26 @@ const demo = isDemoInstance(Astro.locals.runtime.env);
     <title>Fairhaven Kids check-in</title>
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#081334" />
+    {/* The CROWN, not the wordmark — Fairhaven Kids itself installs with the wordmark,
+        and two identical icons on one home screen is a coin toss. The pastor will
+        have both on his phone while setting a tablet up. */}
+    <link rel="icon" type="image/png" sizes="32x32" href="/kiosk-icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/kiosk-icons/apple-touch-icon.png" />
+    {/* Installable, and `fullscreen` rather than `standalone`: this is a tablet
+        on a stand that does one thing, so even the status bar is a row of
+        pixels not showing a child their name. Platforms that cannot do
+        fullscreen fall back to standalone on their own.
+
+        The manifest and its icons are static files, so they are served without
+        the middleware ever running — which is what makes them fetchable during
+        install by a tablet that has a kiosk cookie and no staff session. The
+        page itself is NOT public: /kiosk still answers 403 to a device that has
+        not been paired. */}
+    <link rel="manifest" href="/kiosk.webmanifest" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Check-in" />
   </head>
   <body>
     <!-- waiting -->

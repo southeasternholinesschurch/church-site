@@ -28,6 +28,29 @@ design/photo-placement.jpg
 
 # Design build outputs (regenerate with design/build.py)
 design/*.dc.html
-design/*.html
+design/your-church-site-design.html
 design/preview/
 design/people-at-front.jpg
+
+# Fairhaven Kids source photography — the pastor's originals, ~450MB of full-resolution
+# candid shots of identifiable children. Deliberately NOT tracked:
+#
+#   1. The standing rule in handoff/BRIEF-kids.md §3 is that no member data
+#      goes in the repo, ever. Photographs of children are the sharpest version
+#      of that rule, not an exception to it.
+#   2. Git history is permanent. A 450MB mistake here cannot be undone by a
+#      later commit, only by rewriting history for everyone.
+#
+# The DERIVED background — downscaled, duotoned, faces no longer the subject —
+# is committed under app/public/. The originals stay on the pastor's machine.
+handoff/kids-design/Candid Kids Photos/
+
+# The Fairhaven Kids print artwork too. "door hanger" and the invite-card mockups carry
+# Joanna Sutter's name and personal mobile number in the artwork itself — the
+# same class of thing as the real phone number that once had to be scrubbed out
+# of a schema comment. Public on a printed card is not the same as public in a
+# git history that is cloned, mirrored and permanent.
+handoff/kids-design/
+
+# One transcript-cleaning run at a time — local state, not content
+site/transcripts/.cleaning.lock

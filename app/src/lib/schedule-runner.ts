@@ -12,7 +12,7 @@
  * capped by a hard platform limit. Keeping them apart means a slow or partial
  * send never loses the record of who was supposed to get it.
  */
-import { and, eq, inArray, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, like, lte, ne, sql } from 'drizzle-orm';
 import { getDb, schema, nowIso } from '../db';
 import { buildAudience } from './recipients';
 import { sendOne, smsConfigured, countSegments, type SmsEnv } from './sms';
@@ -23,6 +23,7 @@ import { consentByNumbers } from './consent';
 import { firstNameOf, reminderBodyFor, reminderDue, reminderKey, reminderMissed,
          renderReminder, shortWhen } from './signups';
 import { expandDigest } from './digest-db';
+import { chunks } from './archive';
 
 /**
  * Twilio sends per cron run.
@@ -47,7 +48,51 @@ export interface ExpandResult { queued: number; schedules: number; detail: strin
  * `origin` is the app's own address, for the link in the Monday digest — taken
  * from the request the cron made, so it is always the address that answered.
  */
-export async function expandDue(env: Env, now = new Date(), origin = 'https://app.yourchurch.org'): Promise<ExpandResult> {
+/**
+ * WHY EVERY EXPANSION LOOKS BEFORE IT WRITES.
+ *
+ * Each expansion runs on every five-minute tick while it is in its window, and
+ * the unique source_key is what stops a second text. Leaning on that alone
+ * meant re-inserting every row on every tick and letting the database refuse
+ * it: one database call per person, every five minutes. On 2026-10-24, 25
+ * sign-up reminders for the next day's pitch-in did that from 9am, and the
+ * bookkeeping for those calls pushed the request past the free plan's 10ms of
+ * processor time. From 10:55 Cloudflare stopped every run (error 1102), and
+ * nothing queued was sent for seven hours.
+ *
+ * So: one read for which keys already exist, then one batched write for the
+ * new ones. A tick with nothing new costs a single read. The unique index is
+ * still the guard against a duplicate; this only stops asking it needlessly.
+ */
+async function existingKeys(db: ReturnType<typeof getDb>, keys: string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (const part of chunks([...new Set(keys)])) {
+    if (!part.length) continue;
+    const rows = await db.select({ k: schema.scheduledMessages.sourceKey })
+      .from(schema.scheduledMessages)
+      .where(inArray(schema.scheduledMessages.sourceKey, part));
+    for (const r of rows) if (r.k) found.add(r.k);
+  }
+  return found;
+}
+
+type QueueRow = typeof schema.scheduledMessages.$inferInsert;
+
+/** Insert queue rows in batches, each still refused by the unique key if another tick got there first. */
+async function insertQueueRows(db: ReturnType<typeof getDb>, rows: QueueRow[]): Promise<void> {
+  // 45 statements a batch keeps each round trip small; the batch is one call.
+  for (const part of chunks(rows, 45)) {
+    const stmts = part.map((v) => db.insert(schema.scheduledMessages).values(v).onConflictDoNothing());
+    const [first, ...rest] = stmts;
+    if (first) await db.batch([first, ...rest]);
+  }
+}
+
+export async function expandDue(
+  env: Env, now = new Date(), origin = 'https://app.yourchurch.org',
+  /** Logs each part as it finishes; see run-due.ts for why. */
+  step: (name: string) => void = () => {},
+): Promise<ExpandResult> {
   const db = getDb(env);
   const local = localNow(now);
   const rows = await db.select().from(schema.messageSchedules)
@@ -71,25 +116,23 @@ export async function expandDue(env: Env, now = new Date(), origin = 'https://ap
       ? await namedTargets(env, s.recipientIds)
       : await groupTargets(env, s.groupId);
 
-    let added = 0;
-    for (const t of targets) {
-      // onConflictDoNothing against the unique source_key is the ONLY thing
-      // preventing a duplicate text. Not the loop, not a prior check — the
-      // database. That is why expansion may safely run every five minutes.
-      const ins = await db.insert(schema.scheduledMessages).values({
-        sourceKey: queueKey(s.id, occurrence, t.personId),
-        source: 'schedule',
-        scheduleId: s.id,
-        personId: t.personId,
-        phoneE164: t.phoneE164,
-        body: renderBody(s.body, t),
-        groupId: s.groupId,
-        sendAt: nowIso(),
-        status: 'pending',
-        createdAt: nowIso(),
-      }).onConflictDoNothing().returning({ id: schema.scheduledMessages.id });
-      if (ins[0]) added++;
-    }
+    // Only the people not already queued for this occurrence (see
+    // existingKeys). The unique source_key is still what prevents a duplicate.
+    const have = await existingKeys(db, targets.map((t) => queueKey(s.id, occurrence, t.personId)));
+    const fresh = targets.filter((t) => !have.has(queueKey(s.id, occurrence, t.personId)));
+    await insertQueueRows(db, fresh.map((t) => ({
+      sourceKey: queueKey(s.id, occurrence, t.personId),
+      source: 'schedule' as const,
+      scheduleId: s.id,
+      personId: t.personId,
+      phoneE164: t.phoneE164,
+      body: renderBody(s.body, t),
+      groupId: s.groupId,
+      sendAt: nowIso(),
+      status: 'pending' as const,
+      createdAt: nowIso(),
+    })));
+    const added = fresh.length;
 
     queued += added;
     detail.push(`${s.name}: ${added} queued (${targets.length} in audience)`);
@@ -101,17 +144,20 @@ export async function expandDue(env: Env, now = new Date(), origin = 'https://ap
       .where(eq(schema.messageSchedules.id, s.id));
   }
 
+  step('expand: schedules');
   // --- automatic birthday texts -------------------------------------------
   // Not a schedule and never was one on this screen: a standing arrangement
   // that runs every day the switch is on, with nothing for anyone to create.
   const bq = await expandBirthdays(env, local);
   if (bq) { queued += bq.queued; schedules++; detail.push(bq.detail); }
 
+  step('expand: birthdays');
   // --- "you are bringing a meal tomorrow" ---------------------------------
   // Same shape again: a standing arrangement, not a rule anybody creates.
   const sq = await expandSignupReminders(env, local);
   if (sq) { queued += sq.queued; schedules++; detail.push(sq.detail); }
 
+  step('expand: sign-up reminders');
   // --- the pastors' Monday digest -----------------------------------------
   // And again: switched on in Care, sent on Mondays, nothing to create.
   // Caught, because a digest that cannot be put together this morning must not
@@ -153,20 +199,20 @@ async function expandBirthdays(env: Env, local: ReturnType<typeof localNow>) {
 
   const db = getDb(env);
   const targets = await birthdayTargets(env, local.date);
-  let queued = 0;
-  for (const t of targets) {
-    const ins = await db.insert(schema.scheduledMessages).values({
-      sourceKey: `bday:${local.date}:${t.personId}`,
-      source: 'schedule',
-      personId: t.personId,
-      phoneE164: t.phoneE164,
-      body: renderBody(settings.body, t),
-      sendAt: nowIso(),
-      status: 'pending',
-      createdAt: nowIso(),
-    }).onConflictDoNothing().returning({ id: schema.scheduledMessages.id });
-    if (ins[0]) queued++;
-  }
+  const key = (t: Target) => `bday:${local.date}:${t.personId}`;
+  const have = await existingKeys(db, targets.map(key));        // see existingKeys
+  const fresh = targets.filter((t) => !have.has(key(t)));
+  await insertQueueRows(db, fresh.map((t) => ({
+    sourceKey: key(t),
+    source: 'schedule' as const,
+    personId: t.personId,
+    phoneE164: t.phoneE164,
+    body: renderBody(settings.body, t),
+    sendAt: nowIso(),
+    status: 'pending' as const,
+    createdAt: nowIso(),
+  })));
+  const queued = fresh.length;
   return { queued, detail: `Birthdays: ${queued} queued (${targets.length} today)` };
 }
 
@@ -219,7 +265,7 @@ async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow
     ownConsent: schema.signups.smsConsent,
     onDate: schema.signupSlots.onDate,
     eventDate: schema.signupSheets.eventDate,
-    reminderBody: schema.signupSheets.reminderBody,
+    reminderBody: schema.signupSheets.reminderBody, kind: schema.signupSheets.kind,
     memberPhone: schema.people.phoneE164,
     memberConsent: schema.people.smsConsent,
     memberArchived: schema.people.archived,
@@ -240,6 +286,17 @@ async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow
 
   if (!rows.length) return null;
 
+  // Only sign-ups whose reminder is due or has been missed, and that have not
+  // been handled already: see existingKeys. Without this, every tick from 9am
+  // re-wrote every reminder for the next day (the 2026-10-24 outage).
+  const inPlay = rows.filter((r) => {
+    const date = r.onDate ?? r.eventDate;
+    return reminderDue(date, local) || reminderMissed(date, local);
+  });
+  const have = await existingKeys(db, inPlay.map((r) => reminderKey(r.id)));
+  const todo = inPlay.filter((r) => !have.has(reminderKey(r.id)));
+  if (!todo.length) return null;
+
   /*
    * CONSENT IS MATCHED BY NUMBER, NEVER BY PERSON — the rule lib/consent.ts
    * exists to enforce, applied here at the moment of queueing rather than
@@ -254,11 +311,12 @@ async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow
   // that is the number they asked to be reached at.
   const numberFor = (r: { ownPhone: string | null; memberPhone: string | null }) =>
     r.ownPhone ?? r.memberPhone;
-  const numbers = [...new Set(rows.map(numberFor).filter((n): n is string => !!n))];
+  const numbers = [...new Set(todo.map(numberFor).filter((n): n is string => !!n))];
   const decision = await consentByNumbers(db, numbers);
 
   let queued = 0, skipped = 0;
-  for (const r of rows) {
+  const writes: QueueRow[] = [];
+  for (const r of todo) {
     const date = r.onDate ?? r.eventDate;
     const due = reminderDue(date, local);
     const missed = !due && reminderMissed(date, local);
@@ -270,7 +328,7 @@ async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow
     const allowed = Boolean(phone) && decision.get(phone!) === 'opted_in'
       && !(r.personId && r.memberArchived);
 
-    const body = renderReminder(reminderBodyFor(r.reminderBody), {
+    const body = renderReminder(reminderBodyFor(r.reminderBody, r.kind), {
       first: firstNameOf(r.name),
       when: shortWhen(date ?? ''),
     });
@@ -279,7 +337,7 @@ async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow
       ? 'Reminder window passed before this could be sent'
       : 'No consent to text this number at reminder time';
 
-    const ins = await db.insert(schema.scheduledMessages).values({
+    writes.push({
       sourceKey: reminderKey(r.id),
       // 'schedule', because that is what drainQueue sends. A different source
       // here would queue a row that nothing ever picks up.
@@ -292,11 +350,10 @@ async function expandSignupReminders(env: Env, local: ReturnType<typeof localNow
       sentAt: due && allowed ? null : nowIso(),
       note: due && allowed ? null : note,
       createdAt: nowIso(),
-    }).onConflictDoNothing().returning({ id: schema.scheduledMessages.id });
-
-    if (!ins[0]) continue;                 // already queued, sent or skipped
+    });
     if (due && allowed) queued++; else skipped++;
   }
+  await insertQueueRows(db, writes);
 
   if (!queued && !skipped) return null;
   return {
@@ -376,18 +433,37 @@ async function groupTargets(env: Env, groupId: number | null): Promise<Target[]>
   });
 }
 
-export interface DrainResult { sent: number; failed: number; remaining: number; errors: string[] }
+export interface DrainResult {
+  sent: number; failed: number; remaining: number; errors: string[];
+  /** Who a send failed for, for the person pressing Send. */
+  failures: { personId: number | null; phoneE164: string; reason: string }[];
+}
 
-/** Send what is queued and due, up to the per-run ceiling. */
-export async function drainQueue(env: Env, limit = SENDS_PER_RUN): Promise<DrainResult> {
+/**
+ * Queue keys for "Send it now". Every send from the Messaging page and the
+ * Fairhaven Kids page goes into the queue first and is drained from it (see
+ * lib/broadcast.ts), so the 'kids' prefix is how a row remembers which
+ * section's conversation it belongs to without a column of its own.
+ */
+export const NOW_PREFIX = 'now';
+export const KIDS_NOW_PREFIX = 'kidsnow';
+
+/**
+ * Send what is queued and due, up to the per-run ceiling.
+ *
+ * `keyPrefix` limits it to one broadcast's rows: the Send button drains its own
+ * broadcast straight away, and the cron drains everything left over.
+ */
+export async function drainQueue(env: Env, limit = SENDS_PER_RUN, keyPrefix?: string): Promise<DrainResult> {
   const db = getDb(env);
-  if (!smsConfigured(env)) return { sent: 0, failed: 0, remaining: 0, errors: ['Twilio not configured'] };
+  if (!smsConfigured(env)) return { sent: 0, failed: 0, remaining: 0, errors: ['Twilio not configured'], failures: [] };
 
   const due = await db.select().from(schema.scheduledMessages)
     .where(and(
       eq(schema.scheduledMessages.status, 'pending'),
       eq(schema.scheduledMessages.source, 'schedule'),
       lte(schema.scheduledMessages.sendAt, nowIso()),
+      keyPrefix ? like(schema.scheduledMessages.sourceKey, `${keyPrefix}%`) : undefined,
     ))
     .orderBy(schema.scheduledMessages.sendAt)
     .limit(limit + 1);
@@ -395,6 +471,7 @@ export async function drainQueue(env: Env, limit = SENDS_PER_RUN): Promise<Drain
   const batch = due.slice(0, limit);
   const remaining = Math.max(0, due.length - batch.length);
   const errors: string[] = [];
+  const failures: DrainResult['failures'] = [];
   let sent = 0, failed = 0;
 
   for (const row of batch) {
@@ -425,6 +502,9 @@ export async function drainQueue(env: Env, limit = SENDS_PER_RUN): Promise<Drain
       status: result.ok ? (result.status ?? 'queued') : 'failed',
       errorCode: result.errorCode ?? null, segments,
       scheduledMessageId: row.id, createdAt: nowIso(),
+      // A text sent from the Fairhaven Kids page belongs to that section's
+      // conversations (see migration 0018 and kids/replies.astro).
+      context: row.sourceKey?.startsWith(`${KIDS_NOW_PREFIX}:`) ? 'kids' : null,
     });
 
     await db.update(schema.scheduledMessages)
@@ -433,8 +513,13 @@ export async function drainQueue(env: Env, limit = SENDS_PER_RUN): Promise<Drain
       .where(eq(schema.scheduledMessages.id, row.id));
 
     if (result.ok) sent++;
-    else { failed++; errors.push(`${row.phoneE164}: ${result.error ?? result.errorCode}`); }
+    else {
+      failed++;
+      const reason = result.error ?? result.errorCode ?? 'failed';
+      errors.push(`${row.phoneE164}: ${reason}`);
+      failures.push({ personId: row.personId, phoneE164: row.phoneE164, reason });
+    }
   }
 
-  return { sent, failed, remaining, errors };
+  return { sent, failed, remaining, errors, failures };
 }

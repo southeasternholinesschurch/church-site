@@ -1,7 +1,30 @@
 import type { Announcement, PrayerRequest } from '../db/schema';
+import type { Celebrations } from './celebrations';
+import type { SingingForBulletin } from './roster';
+import type { BulletinSignup } from './signups';
 // Explicit .ts, as in roster.ts: Vite is happy either way, but plain Node's
 // ESM resolver needs it, and these functions are tested directly under Node.
 import { CHURCH_TZ } from './services.ts';
+
+/**
+ * The PUBLIC bulletin: what /api/bulletin/current returns and the lobby screen
+ * shows. Built in one place, lib/bulletin-feed.ts, so the website and the TV
+ * cannot drift apart on what is public.
+ */
+export interface PublicBulletin {
+  serviceDate: string;
+  title: string;
+  preacher: string | null;
+  announcements: Announcement[];
+  /** Text only — `since` is staff-facing. */
+  prayerRequests: string[];
+  scripture: string | null;
+  scriptureRef: string | null;
+  isCurrent: boolean;
+  celebrations: Celebrations | null;
+  singing: SingingForBulletin | null;
+  signups: BulletinSignup[];
+}
 
 /** Parsing is forgiving because these columns are hand-edited JSON: a broken
  *  value must degrade to an empty list, never take the bulletin page down. */

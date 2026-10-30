@@ -1,0 +1,61 @@
+---
+/**
+ * For the print pages' dark bar: what to do on an iPhone where Print does
+ * nothing.
+ *
+ * The staff app is installed to the home screen ("display": "standalone" in
+ * staff.webmanifest), and in a home-screen app iOS ignores window.print(): the
+ * button is pressed and nothing happens (the pastor, 2026-10-25, printing a service
+ * order). Safari itself prints fine, so on an iPhone in the home-screen app,
+ * and only there, this offers the same page in Safari, where Share has Print.
+ *
+ * An ordinary link cannot do that: a link to the app's own pages stays inside
+ * the home-screen app, target=_blank or not (the pastor tried it the same day; it
+ * flickered and went nowhere). The x-safari-https: scheme hands the address
+ * to Safari itself (iOS 17 and later). Copy is the fallback for when it does
+ * not, since pasting into Safari always works.
+ *
+ * `navigator.standalone` is set only by iOS, so Android and desktops, where
+ * Print works, never see this.
+ */
+const here = Astro.url.href;
+const inSafari = `x-safari-${here}`;
+---
+<div class="print-hint" id="print-hint" hidden>
+  <p>Printing does not work inside the home-screen app. Open this page in Safari, then tap Share and Print.</p>
+  <p class="print-hint__do">
+    <a class="print-hint__btn" href={inSafari}>Open in Safari</a>
+    <button class="print-hint__btn" type="button" id="print-hint-copy" data-url={here}>Copy link</button>
+    <span id="print-hint-said" aria-live="polite"></span>
+  </p>
+</div>
+
+<script is:inline>
+  // Plain ES; scripts/check-inline-scripts.mjs parses it.
+  (function () {
+    if (window.navigator.standalone !== true) return;
+    document.getElementById('print-hint').hidden = false;
+    var copy = document.getElementById('print-hint-copy');
+    var said = document.getElementById('print-hint-said');
+    copy.addEventListener('click', function () {
+      var url = copy.getAttribute('data-url');
+      var done = function () { said.textContent = 'Copied. Open Safari and paste it into the address bar.'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, function () { said.textContent = url; });
+      } else {
+        said.textContent = url;
+      }
+    });
+  })();
+</script>
+
+<style>
+  .print-hint { flex: 1 0 100%; font-size: 14px; line-height: 1.45; color: #ffd9a8; }
+  .print-hint p { margin: 0; }
+  .print-hint[hidden] { display: none; }
+  .print-hint__do { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px !important; }
+  .print-hint__btn { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 16px;
+                     border: 1px solid #ffd9a8; border-radius: 999px; background: transparent;
+                     color: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+  #print-hint-said { color: #fff; word-break: break-all; }
+</style>

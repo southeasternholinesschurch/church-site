@@ -17,13 +17,13 @@ const settings = settingsEntry.data;
 // client-side HTML — it is in the page source of every visitor's browser
 // either way, so committing it changes nothing. All it can do is deliver mail
 // to the address it was registered with
-// (yourchurchchurch@gmail.com); it grants no account access.
-const WEB3FORMS_ACCESS_KEY = '88368cc2-71e3-4573-8e62-3424a2003558';
+// (the church inbox); it grants no account access.
+const WEB3FORMS_ACCESS_KEY = 'REPLACE_WITH_YOUR_WEB3FORMS_KEY';
 const formsLive = !WEB3FORMS_ACCESS_KEY.startsWith('REPLACE_');
 const redirectUrl = `${Astro.site}contact/thank-you/`;
 
 // E.164 for the tap-to-text link. The displayed number carries no country
-// code, and stripping to digits alone produced sms:3172189622 — which some
+// code, and stripping to digits alone produced sms:3175550199 — which some
 // handsets will not dial.
 //
 // No ?body=START prefill: iOS wants &body= and Android wants ?body=, so there

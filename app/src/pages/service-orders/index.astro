@@ -1,0 +1,183 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import ServingNav from '../../components/ServingNav.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { desc, eq } from 'drizzle-orm';
+import { nextSunday } from '../../lib/bulletin';
+import { rosterDays } from '../../lib/singing-db';
+import {
+  isEvening, isIsoDate, LIMITS, longDate, parseItems, SERVICE_NAMES, singersText, traditionalItems,
+  type OrderItem,
+} from '../../lib/service-order';
+
+/**
+ * Service orders: the list, and where one is started (the pastor, 2026-10-25).
+ *
+ * Two ways in. "Traditional" is the usual Sunday order with who is singing and
+ * who is preaching already filled in; "Build your own" is an empty order for a
+ * service that does not follow the pattern (an afternoon of singers, choruses,
+ * prayer). Either way it goes straight to the editor, and either can be changed
+ * into anything there. "Copy" on an old one starts from it instead.
+ *
+ * Staff-only by the middleware, as every page outside ADMIN_ONLY is for
+ * editors and admins; the kids roles are allow-listed to /kids alone.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? '');
+  const at = nowIso();
+
+  if (action === 'copy') {
+    const [from] = await db.select().from(schema.serviceOrders)
+      .where(eq(schema.serviceOrders.id, Number(form.get('id')))).limit(1);
+    if (from) {
+      // Who led each part last time is usually not who leads it next time; the
+      // parts and their notes (song lists, the order itself) are what is reused.
+      const items = parseItems(from.items).map((x) => ({ ...x, who: '' }));
+      const [made] = await db.insert(schema.serviceOrders).values({
+        name: from.name, serviceDate: nextSunday(), line: '', kind: from.kind,
+        items: JSON.stringify(items), createdBy: user.email, createdAt: at, updatedAt: at, updatedBy: user.email,
+      }).returning({ id: schema.serviceOrders.id });
+      return Astro.redirect(`/service-orders/${made!.id}?copied=1`, 303);
+    }
+    return Astro.redirect('/service-orders', 303);
+  }
+
+  const name = String(form.get('name') ?? '').trim().slice(0, LIMITS.name) || 'Sunday Morning Worship';
+  const date = String(form.get('date') ?? '');
+  const kind = action === 'traditional' ? 'traditional' : 'custom';
+  if (!isIsoDate(date)) return Astro.redirect('/service-orders?bad=1', 303);
+
+  let items: OrderItem[] = [];
+  if (kind === 'traditional') {
+    // What the app already knows about that day, as a head start. Neither is
+    // allowed to stop an order being made: a failure is just an empty box.
+    let singers = '';
+    try {
+      const day = (await rosterDays(env))?.find((d) => d.sunday === date);
+      singers = singersText(day?.slots.find((s) => s.label === (isEvening(name) ? 'Evening' : 'Morning')));
+    } catch { /* left blank */ }
+    let preacher = '';
+    if (!isEvening(name)) {
+      try {
+        const [b] = await db.select({ preacher: schema.bulletins.preacher }).from(schema.bulletins)
+          .where(eq(schema.bulletins.serviceDate, date)).limit(1);
+        preacher = b?.preacher ?? '';
+      } catch { /* left blank */ }
+    }
+    items = traditionalItems({ singers, preacher });
+  }
+
+  const [made] = await db.insert(schema.serviceOrders).values({
+    name, serviceDate: date, line: '', kind, items: JSON.stringify(items),
+    createdBy: user.email, createdAt: at, updatedAt: at, updatedBy: user.email,
+  }).returning({ id: schema.serviceOrders.id });
+  return Astro.redirect(`/service-orders/${made!.id}${kind === 'custom' ? '?new=1' : ''}`, 303);
+}
+
+// Caught: before migrations/0032 is applied the table does not exist, and the
+// tab should say so plainly rather than show an error page.
+let orders: (typeof schema.serviceOrders.$inferSelect)[] = [];
+let missing = false;
+try {
+  orders = await db.select().from(schema.serviceOrders)
+    .orderBy(desc(schema.serviceOrders.serviceDate), desc(schema.serviceOrders.id)).limit(60);
+} catch { missing = true; }
+
+const defaultDate = nextSunday();
+---
+<AppLayout title="Service orders" user={user}>
+  <ServingNav active="orders" />
+  <h1>Service orders</h1>
+  <p class="muted" style="margin:-6px 0 22px; max-width:64ch;">
+    The running order of a service, with who leads each part. It prints three to a
+    sheet of paper, ready to cut into slips.
+  </p>
+
+  {missing && (
+    <p class="notice">
+      One step left before this works: the database needs its new table. Run
+      migration 0032 on the live database, then reload this page.
+    </p>
+  )}
+  {Astro.url.searchParams.get('bad') === '1' && <p class="notice">Pick the date of the service.</p>}
+
+  {!missing && (
+    <div class="card" style="margin-bottom:26px;">
+      <h2>Start one</h2>
+      <form method="POST">
+        <div class="so-start">
+          <label class="field">
+            <span>Which service</span>
+            <input name="name" list="so-names" maxlength={LIMITS.name} value="Sunday Morning Worship" required />
+            <datalist id="so-names">{SERVICE_NAMES.map((n) => <option value={n} />)}</datalist>
+          </label>
+          <label class="field">
+            <span>Date</span>
+            <input name="date" type="date" value={defaultDate} required />
+          </label>
+        </div>
+        <div class="so-ways">
+          <button class="so-way" type="submit" name="action" value="traditional">
+            <strong>Traditional service</strong>
+            <em>Opening prayer, singing, testimonies, prayer, offering, announcements, special
+              song, message, altar service or benediction. Who is singing and preaching is
+              filled in when the app knows.</em>
+          </button>
+          <button class="so-way" type="submit" name="action" value="custom">
+            <strong>Build your own</strong>
+            <em>Start empty and add each part yourself, for a service that does not follow the
+              usual order.</em>
+          </button>
+        </div>
+      </form>
+    </div>
+  )}
+
+  {!missing && (
+    <div class="card t-wrap" style="padding:0; overflow-x:auto;">
+      <table class="t-stack">
+        <thead><tr><th>Service</th><th>Date</th><th>Parts</th><th></th></tr></thead>
+        <tbody>
+          {orders.length === 0 ? (
+            <tr><td colspan="4" class="muted" style="padding:22px;">None yet.</td></tr>
+          ) : orders.map((o) => (
+            <tr>
+              <td><a href={`/service-orders/${o.id}`}>{o.name}</a>{o.line && <span class="muted"> · {o.line}</span>}</td>
+              <td data-label="Date">{longDate(o.serviceDate)}</td>
+              <td data-label="Parts">{parseItems(o.items).length}</td>
+              <td data-label="">
+                <a href={`/service-orders/${o.id}/print`}>Print</a>
+                <form method="POST" style="display:inline; margin-left:14px;">
+                  <input type="hidden" name="action" value="copy" />
+                  <input type="hidden" name="id" value={o.id} />
+                  <button class="btn btn--ghost btn--sm" type="submit">Copy for next time</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</AppLayout>
+
+<style>
+  .so-start { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 14px; max-width: 640px; }
+  .so-ways { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 760px; margin-top: 6px; }
+  .so-way { text-align: left; font: inherit; color: inherit; cursor: pointer; background: #fff;
+            border: 1px solid var(--hair); border-radius: var(--radius); padding: 14px 16px; }
+  .so-way:hover { background: var(--cream-deep); border-color: var(--ink); }
+  .so-way strong { display: block; font-size: 17px; margin-bottom: 4px; }
+  .so-way em { display: block; font-style: normal; font-size: 14px; color: var(--ink-soft); line-height: 1.45; }
+  .btn--sm { min-height: 36px; padding: 6px 14px; font-size: 14px; }
+  @media (max-width: 700px) {
+    .so-start, .so-ways { grid-template-columns: 1fr; }
+    .btn--sm { min-height: 44px; padding: 10px 18px; }
+  }
+</style>

@@ -1,8 +1,10 @@
 import type { APIRoute } from 'astro';
 import { asc, eq } from 'drizzle-orm';
-import { getDb, schema, nowIso } from '../../db';
+import { getDb, schema } from '../../db';
 import { isDemoInstance, DEMO_SEND_REFUSED } from '../../lib/demo-instance';
-import { countSegments, sendOne, smsConfigured } from '../../lib/sms';
+import { smsConfigured } from '../../lib/sms';
+import { drainQueue, KIDS_NOW_PREFIX } from '../../lib/schedule-runner';
+import { broadcastPrefix, broadcastProgress, enqueueBroadcast, isBroadcastId } from '../../lib/broadcast';
 import { kidsSendScope, mayTextRoute } from '../../lib/permissions';
 import { buildKidsAudience } from '../../lib/kids-recipients';
 
@@ -23,6 +25,11 @@ import { buildKidsAudience } from '../../lib/kids-recipients';
  * silently dropping 19, 21 and 24 recipients from three broadcasts. Bus routes
  * are small enough that one call will usually do — but "usually" is exactly how
  * that happened.
+ *
+ * THROUGH THE QUEUE, like the main sender (lib/broadcast.ts): the first call
+ * queues every handset, then each call sends 40. If the volunteer's phone
+ * locks mid-send, the five-minute cron sends the rest. Queue keys start
+ * `kidsnow:`, which is how the log rows are marked as the Fairhaven Kids section's.
  */
 const PER_CALL = 40;
 
@@ -38,7 +45,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const db = getDb(env);
 
   const body = await request.json().catch(() => null) as
-    { text?: string; routeId?: number | null; offset?: number } | null;
+    { text?: string; routeId?: number | null; broadcastId?: string; continue?: boolean } | null;
+  if (!isBroadcastId(body?.broadcastId)) return json({ error: 'Reload the page and try again.' }, 400);
+  const broadcastId = body!.broadcastId as string;
 
   const text = String(body?.text ?? '').trim();
   if (!text) return json({ error: 'The message is empty.' }, 400);
@@ -56,6 +65,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
     .orderBy(asc(schema.kidRouteCaptains.routeId));
   const scope = kidsSendScope(user.role, user.kidsCanText, assigned.map((a) => a.routeId));
   if (scope === null) return json({ error: 'You do not have permission to send Fairhaven Kids texts.' }, 403);
+
+  // A later call: send more of what this broadcast already queued (and was
+  // authorised for when it was queued).
+  if (body?.continue) {
+    const more = sendSome(env, broadcastId);
+    locals.runtime?.ctx?.waitUntil(more.catch(() => undefined));   // see api/sms/send.ts
+    return json(await more);
+  }
 
   const routeId = body?.routeId == null ? null : Number(body.routeId);
   if (routeId !== null && !Number.isInteger(routeId)) return json({ error: 'bad route' }, 400);
@@ -80,46 +97,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (audience.handsets.length === 0)
     return json({ error: 'Nobody on that route can be texted.' }, 400);
 
-  const segments = countSegments(text).segments;
-  const offset = Math.max(0, Number(body?.offset ?? 0));
-  const slice = audience.handsets.slice(offset, offset + PER_CALL);
-  const remaining = Math.max(0, audience.handsets.length - (offset + slice.length));
-
-  let sent = 0, failed = 0;
-  for (const handset of slice) {
-    // Never aborts: one bad number must not strand everyone after it.
-    const result = await sendOne(env, handset.phoneE164, text);
-    if (result.sid) sent++; else failed++;
-
-    /*
-     * One log row per PERSON so each history is complete, but the segments are
-     * counted once per handset — a shared family phone billed twice would
-     * inflate the month-to-date readout for one actual message.
-     *
-     * person_id is null for a guardian who is not a member, which is most of
-     * them. That is the cost of keeping bus families out of `people`, and the
-     * log tolerates it: the column has always been nullable for inbound texts
-     * from numbers nobody recognises.
-     */
-    for (const [i, person] of handset.people.entries()) {
-      await db.insert(schema.messageLog).values({
-        personId: person.personId,
-        phoneE164: handset.phoneE164,
-        body: text,
-        direction: 'out',
-        twilioSid: result.sid ?? null,
-        status: result.sid ? 'queued' : 'failed',
-        errorCode: result.error ?? null,
-        segments: i === 0 ? segments : 0,
-        // Marks the conversation as the children's section's — see 0018.
-        context: 'kids',
-        createdAt: nowIso(),
-      });
-    }
-  }
-
-  return json({ sent, failed, remaining, total: audience.handsets.length });
+  // Finishes even if the volunteer's phone drops the connection: see
+  // finishEvenIfDropped in api/sms/send.ts.
+  const work = (async () => {
+    await enqueueBroadcast(db, {
+      prefix: KIDS_NOW_PREFIX, broadcastId, body: text, groupId: null,
+      handsets: audience.handsets.map((h) => ({ phoneE164: h.phoneE164, personId: h.people[0]?.personId ?? null })),
+    });
+    return sendSome(env, broadcastId);
+  })();
+  locals.runtime?.ctx?.waitUntil(work.catch(() => undefined));
+  return json(await work);
 };
+
+async function sendSome(env: Env, broadcastId: string) {
+  await drainQueue(env, PER_CALL, broadcastPrefix(KIDS_NOW_PREFIX, broadcastId));
+  const p = await broadcastProgress(getDb(env), KIDS_NOW_PREFIX, broadcastId);
+  return { sent: p.sent, failed: p.failed, remaining: p.pending, total: p.total };
+}
 
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });

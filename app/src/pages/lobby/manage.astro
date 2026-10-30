@@ -1,0 +1,264 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import LobbyHeroes from '../../components/LobbyHeroes.astro';
+import LobbyPhotos from '../../components/LobbyPhotos.astro';
+import { getDb } from '../../db';
+import { nextSunday } from '../../lib/bulletin';
+import { addDays, zonedInstant } from '../../lib/lobby';
+import { COPY_SECTIONS, cleanCopy } from '../../lib/lobby-copy';
+import { HIDEABLE, NOTICE_LIMITS, PACES, cleanSettings, noticeLive } from '../../lib/lobby-settings';
+import { getLobbyCopy, getLobbySettings, setLobbyCopy, setLobbySettings } from '../../lib/lobby-copy-db';
+import { CHURCH_TZ } from '../../lib/services';
+
+/**
+ * THE LOBBY TAB: everything for the foyer TV in one place.
+ *
+ *   the screen, live, in a preview that can be pointed at any scene
+ *   a notice, put up now and taken down at a time
+ *   hero frames (components/LobbyHeroes.astro)
+ *   photographs: switch any off, upload more (components/LobbyPhotos.astro)
+ *   pace, and which scene types are shown
+ *   the screen's words, scene by scene
+ *
+ * Staff-only by default: only `/lobby` EXACTLY is public (lib/public-paths.ts,
+ * held by test/lobby.test.ts). Editors and admins; children's volunteers are
+ * allowlisted to /kids and never reach it.
+ *
+ * Saves are ordinary form posts that redirect back (so a refresh never posts
+ * twice). The screen picks changes up on its next poll, within two minutes:
+ * every save here changes the stamp the screen checks (lib/lobby-stamp-db.ts).
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+let errors: string[] = [];
+let saved = Astro.url.searchParams.get('saved');
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const current = await getLobbySettings(db);
+  if (action === 'words') {
+    const input = Object.fromEntries([...form.entries()].filter(([k, v]) => k.includes('.') && typeof v === 'string'));
+    const checked = cleanCopy(input);
+    if (checked.ok) { await setLobbyCopy(db, checked.value, user.email); return Astro.redirect('/lobby/manage?saved=words#words'); }
+    errors = checked.errors;
+  } else if (action === 'pace') {
+    const checked = cleanSettings({ pace: form.get('pace'), hidden: form.getAll('show').length
+      ? HIDEABLE.map((h) => h.kind).filter((k) => !form.getAll('show').includes(k))
+      : HIDEABLE.map((h) => h.kind), notice: current.notice, hiddenPhotos: current.hiddenPhotos });
+    if (checked.ok) { await setLobbySettings(db, checked.value, user.email); return Astro.redirect('/lobby/manage?saved=pace#pace'); }
+    errors = checked.errors;
+  } else if (action === 'notice' || action === 'notice-off') {
+    // "Take it down at" is typed in church time; stored as an instant.
+    const untilLocal = String(form.get('until') ?? '').trim();
+    const until = untilLocal ? zonedInstant(untilLocal.slice(0, 16))?.toISOString() ?? 'bad' : '';
+    const notice = action === 'notice-off' ? null
+      : { title: form.get('title'), detail: form.get('detail'), until };
+    const checked = cleanSettings({ pace: current.pace, hidden: current.hidden, notice, hiddenPhotos: current.hiddenPhotos });
+    if (checked.ok) { await setLobbySettings(db, checked.value, user.email); return Astro.redirect('/lobby/manage?saved=notice#notice'); }
+    errors = checked.errors;
+  }
+  saved = null;
+}
+
+const copy = await getLobbyCopy(db);
+const settings = await getLobbySettings(db);
+const live = noticeLive(settings.notice, new Date());
+
+/* Preview times, relative to the coming Sunday, so the preview shows a real
+ * Sunday morning with this week's bulletin on any day of the week. */
+const sunday = nextSunday();
+const at = {
+  'sunday-before': `${sunday}T09:40`, 'sunday-during': `${sunday}T10:30`,
+  'sunday-after': `${sunday}T11:40`, 'weekday': `${addDays(sunday, -3)}T12:00`,
+} as const;
+const previewUrl = (scene: string, when: keyof typeof at) => `/lobby?at=${at[when]}&scene=${scene}`;
+
+/* The notice's "take it down at", shown back in church time. */
+const untilValue = settings.notice?.until
+  ? new Date(settings.notice.until).toLocaleString('sv-SE', { timeZone: CHURCH_TZ }).slice(0, 16).replace(' ', 'T')
+  : '';
+const untilText = settings.notice?.until
+  ? new Date(settings.notice.until).toLocaleString('en-US', { timeZone: CHURCH_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  : null;
+const savedText: Record<string, string> = {
+  words: 'Words saved. The screen shows them within two minutes.',
+  pace: 'Pace and scenes saved. The screen picks them up within two minutes.',
+  notice: 'Notice updated. The screen shows it within two minutes.',
+};
+---
+<AppLayout title="Lobby" user={user}>
+  <div class="lb-head">
+    <h1>Lobby screen</h1>
+    <a class="btn btn--ghost" href="/lobby" target="_blank" rel="noopener">Open the screen ↗</a>
+  </div>
+  {saved && savedText[saved] && <p class="notice notice--ok" role="status">{savedText[saved]}</p>}
+  {errors.length > 0 && <p class="notice" role="alert">{errors.join(' · ')}</p>}
+
+  <div class="lb">
+    <div class="lb__main">
+
+      {/* ---- notice ------------------------------------------------------ */}
+      <section class="card" id="notice" aria-labelledby="notice-h">
+        <div class="lb-card-head">
+          <h2 id="notice-h">Notice</h2>
+          {live && <span class="chip">Showing{untilText ? ` until ${untilText}` : ''}</span>}
+        </div>
+        <p class="muted lb-lede">One line on the screen right away, straight after the welcome each time round. “Fellowship meal moved to 12:30.”</p>
+        <form method="post">
+          <input type="hidden" name="action" value="notice" />
+          <label class="field"><span>Notice</span>
+            <input name="title" maxlength={NOTICE_LIMITS.title} value={settings.notice?.title ?? ''} placeholder="Fellowship meal moved to 12:30" autocomplete="off" />
+          </label>
+          <label class="field"><span>Second line <em class="muted">optional</em></span>
+            <input name="detail" maxlength={NOTICE_LIMITS.detail} value={settings.notice?.detail ?? ''} placeholder="Downstairs in the fellowship hall" autocomplete="off" />
+          </label>
+          <label class="field"><span>Take it down at <em class="muted">optional</em></span>
+            <input type="datetime-local" name="until" value={untilValue} />
+          </label>
+          <div class="lb-btns">
+            <button class="btn" type="submit">{settings.notice ? 'Update the notice' : 'Put it up'}</button>
+            {settings.notice && <button class="btn btn--ghost" type="submit" name="action" value="notice-off">Take it down now</button>}
+            <button class="btn btn--ghost" type="button" data-preview={previewUrl('notice', 'sunday-before')}>Preview</button>
+          </div>
+        </form>
+      </section>
+
+      {/* ---- hero frames ------------------------------------------------- */}
+      <LobbyHeroes />
+
+      {/* ---- photos -------------------------------------------------------- */}
+      <LobbyPhotos />
+
+      {/* ---- pace and scenes --------------------------------------------- */}
+      <section class="card" id="pace" aria-labelledby="pace-h">
+        <h2 id="pace-h">Pace and scenes</h2>
+        <form method="post">
+          <input type="hidden" name="action" value="pace" />
+          <fieldset class="lb-seg">
+            <legend>How long each slide stays up</legend>
+            {PACES.map((p) => (
+              <label><input type="radio" name="pace" value={p.value} checked={settings.pace === p.value} /> {p.label}</label>
+            ))}
+          </fieldset>
+          <p class="muted lb-hint">
+            Every slide is timed by how much it has to read, and hero frames hold longest. Pace speeds all of that up or
+            slows it down together. Standard: a short slide about 12 seconds, a hero frame 26.
+          </p>
+          <fieldset class="lb-checks">
+            <legend>Show on the screen</legend>
+            {HIDEABLE.map((h) => (
+              <label><input type="checkbox" name="show" value={h.kind} checked={!settings.hidden.includes(h.kind)} /> {h.label}</label>
+            ))}
+          </fieldset>
+          <p class="muted lb-hint">The welcome, the countdown, the five-minute hold and the night clock always run.</p>
+          <button class="btn" type="submit">Save pace and scenes</button>
+        </form>
+      </section>
+
+      {/* ---- words ------------------------------------------------------- */}
+      <section class="card" id="words" aria-labelledby="words-h">
+        <h2 id="words-h">Words on the screen</h2>
+        <p class="muted lb-lede">
+          Every fixed phrase, slide by slide. Leave a field empty to use the original, shown greyed out.
+          The bulletin’s own content is edited in the Bulletin.
+        </p>
+        <form method="post">
+          <input type="hidden" name="action" value="words" />
+          {COPY_SECTIONS.map((sec) => (
+            <details class="lb-words" open={sec.fields.some((f) => copy[f.key])}>
+              <summary>
+                <span>{sec.title}</span>
+                {sec.fields.some((f) => copy[f.key]) && <span class="chip">Changed</span>}
+              </summary>
+              <div class="lb-words__body">
+                {sec.fields.map((f) => (
+                  <label class="field">
+                    <span>{f.label}</span>
+                    {f.long
+                      ? <textarea name={f.key} rows="2" maxlength={f.max} placeholder={f.default}>{copy[f.key] ?? ''}</textarea>
+                      : <input name={f.key} maxlength={f.max} value={copy[f.key] ?? ''} placeholder={f.default} autocomplete="off" />}
+                    {(f.hint || f.tokens) && (
+                      <small class="muted">{f.hint}{f.tokens ? ` ${f.tokens.map((t) => `{${t}}`).join(', ')} is filled in on the screen.` : ''}</small>
+                    )}
+                  </label>
+                ))}
+                <button class="btn btn--ghost" type="button" data-preview={previewUrl(sec.scene, sec.preview)}>Preview this slide</button>
+              </div>
+            </details>
+          ))}
+          <div class="lb-btns lb-btns--sticky">
+            <button class="btn" type="submit">Save words</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    {/* ---- the screen, live ---------------------------------------------- */}
+    <aside class="lb__side" aria-label="Preview">
+      <div class="lb-preview">
+        <div class="lb-preview__screen">
+          <iframe id="lb-frame" src="/lobby" title="The lobby screen" loading="lazy"></iframe>
+        </div>
+        <div class="lb-preview__bar">
+          <span class="muted" id="lb-what">Showing the screen as it is now</span>
+          <button class="btn btn--ghost" type="button" data-preview="/lobby">Now</button>
+        </div>
+        <p class="muted lb-hint">Saved changes appear here at once; on the TV within two minutes.</p>
+      </div>
+    </aside>
+  </div>
+</AppLayout>
+
+<script>
+  // Point the preview at a slide. It shows what is SAVED, which is also what
+  // the TV will show.
+  const frame = document.getElementById('lb-frame') as HTMLIFrameElement | null;
+  const what = document.getElementById('lb-what');
+  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-preview]')) {
+    b.addEventListener('click', () => {
+      if (!frame) return;
+      frame.src = b.dataset.preview!;
+      if (what) what.textContent = b.dataset.preview === '/lobby' ? 'Showing the screen as it is now'
+        : `Previewing: ${b.closest('details')?.querySelector('summary span')?.textContent ?? b.closest('section')?.querySelector('h2')?.textContent ?? ''}`;
+      if (matchMedia('(max-width: 1100px)').matches) frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+</script>
+
+<style>
+  .lb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .lb-head h1 { margin: 0; }
+  .lb { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 520px); gap: 24px; align-items: start; }
+  .lb__main { display: grid; gap: 22px; min-width: 0; }
+  .lb__main > .card { margin: 0; }
+  .lb__side { position: sticky; top: 16px; }
+  .lb-preview__screen { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #1a1512;
+                        box-shadow: 0 18px 40px -24px rgba(0, 0, 0, .6); }
+  .lb-preview__screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .lb-preview__bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+  .lb-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .lb-card-head h2 { margin: 0; }
+  .lb-lede { margin: 6px 0 16px; }
+  .lb-hint { font-size: 14px; margin: 6px 0 16px; }
+  .lb-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .lb-btns--sticky { position: sticky; bottom: 0; padding: 12px 0 4px; background: linear-gradient(transparent, #fff 30%); }
+  .lb-seg, .lb-checks { border: 0; padding: 0; margin: 0; }
+  .lb-seg legend, .lb-checks legend { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; padding: 0; }
+  .lb-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lb-seg label { position: relative; display: inline-flex; align-items: center; padding: 8px 14px; border: 1px solid var(--hair);
+                  border-radius: 999px; background: #fff; cursor: pointer; font-size: 15px; }
+  .lb-seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .lb-seg label:has(input:checked) { background: var(--ink); border-color: var(--ink); color: var(--cream, #f4efe7); }
+  .lb-seg label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .lb-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; margin-top: 8px; }
+  .lb-checks label { display: flex; align-items: center; gap: 8px; }
+  .lb-words { border-top: 1px solid var(--hair); }
+  .lb-words summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0; cursor: pointer; font-weight: 700; }
+  .lb-words__body { padding: 0 0 16px; }
+  .lb-words .field small { display: block; margin-top: 4px; font-size: 13px; }
+  @media (max-width: 1100px) {
+    .lb { grid-template-columns: 1fr; }
+    .lb__side { position: static; order: -1; }
+  }
+</style>

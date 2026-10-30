@@ -6,7 +6,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { countSegments } from '../../lib/sms';
 import { localNow } from '../../lib/schedules';
 import {
-  availability, closedReason, dayLabel, DEFAULT_REMINDER_BODY,
+  availability, closedReason, dayLabel, defaultReminderFor,
   invalidRangeReason, invalidReminderReason, LIST_SLOT_LABEL, nextSeat,
   planDays, reminderBodyFor, sampleReminder, SIGNUP_KINDS,
 } from '../../lib/signups';
@@ -178,6 +178,9 @@ if (Astro.request.method === 'POST') {
     const labels = form.getAll('slot_label').map(String);
     const caps = form.getAll('slot_cap').map(String);
     const dates = form.getAll('slot_date').map(String);
+    // Only a jobs sheet has a description box on each row. Other kinds post
+    // none, and their rows' detail is left exactly as it was.
+    const details = sheet.kind === 'tasks' ? form.getAll('slot_detail').map(String) : null;
 
     const current = await db.select({ id: schema.signupSlots.id })
       .from(schema.signupSlots).where(eq(schema.signupSlots.sheetId, id));
@@ -196,6 +199,7 @@ if (Astro.request.method === 'POST') {
       // Blank means NO LIMIT, which is why this is null and not zero.
       const capacity = Number.isInteger(capRaw) && capRaw > 0 && capRaw < 500 ? capRaw : null;
       const onDate = /^\d{4}-\d{2}-\d{2}$/.test(dates[i] ?? '') ? dates[i] : null;
+      const detail = details ? ((details[i] ?? '').trim().slice(0, 300) || null) : undefined;
 
       if (Number.isInteger(rowId) && rowId > 0) {
         if (!label) {
@@ -209,11 +213,11 @@ if (Astro.request.method === 'POST') {
             .where(and(eq(schema.signupSlots.id, rowId), eq(schema.signupSlots.sheetId, id)));
           continue;
         }
-        await db.update(schema.signupSlots).set({ label, capacity, onDate, sort: i })
+        await db.update(schema.signupSlots).set({ label, capacity, onDate, sort: i, ...(detail !== undefined ? { detail } : {}) })
           .where(and(eq(schema.signupSlots.id, rowId), eq(schema.signupSlots.sheetId, id)));
       } else if (label) {
         await db.insert(schema.signupSlots)
-          .values({ sheetId: id, sort: i, label, capacity, onDate });
+          .values({ sheetId: id, sort: i, label, capacity, onDate, detail: detail ?? null });
       }
     }
     return back(refused.length ? `kept=${refused.length}` : 'saved=slots');
@@ -371,7 +375,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 // The wording actually in force, so the box shows what will be sent rather
 // than an empty field standing in for a default nobody can see.
-const bodyInForce = reminderBodyFor(sheet.reminderBody);
+const bodyInForce = reminderBodyFor(sheet.reminderBody, sheet.kind);
 const seg = countSegments(sampleReminder(bodyInForce));
 
 /** Three spare rows, so adding a dish never needs a page reload. */
@@ -498,7 +502,7 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
       <label class="field">
         <span class="visually-hidden">Reminder wording</span>
         <textarea name="reminderBody" rows="3"
-                  placeholder={DEFAULT_REMINDER_BODY}>{sheet.reminderBody ?? ''}</textarea>
+                  placeholder={defaultReminderFor(sheet.kind)}>{sheet.reminderBody ?? ''}</textarea>
       </label>
       <p class="muted hint" style="margin-top:-8px;">
         {/* The same count the validator uses, from the same function, so the
@@ -565,6 +569,13 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
       </p>
     )}
 
+    {sheet.kind === 'tasks' && (
+      <p class="muted sec__why">
+        One line for each job: what it is, how many people it needs, and
+        underneath, what it involves or what to bring. People sign up for a job.
+      </p>
+    )}
+
     {sheet.kind === 'list' ? (
       <form method="POST">
         <p class="muted sec__why">
@@ -583,9 +594,9 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
       </form>
     ) : (
       <form method="POST">
-        <div class:list={['slotrows', sheet.kind === 'meal-train' && 'slotrows--dated']}>
+        <div class:list={['slotrows', sheet.kind === 'meal-train' && 'slotrows--dated', sheet.kind === 'tasks' && 'slotrows--tasks']}>
           <div class="slotrow slotrow--head">
-            <span class="label">{sheet.kind === 'meal-train' ? 'Day' : 'What'}</span>
+            <span class="label">{sheet.kind === 'meal-train' ? 'Day' : sheet.kind === 'tasks' ? 'Job' : 'What'}</span>
             {sheet.kind === 'meal-train' && <span class="label">Date</span>}
             <span class="label">How many</span>
             <span class="label">Taken</span>
@@ -596,7 +607,7 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
               <div class="slotrow">
                 <input type="hidden" name="slot_id" value={s.id ?? 0} />
                 <input name="slot_label" value={s.label ?? ''}
-                       placeholder={sheet.kind === 'dish' ? 'Main dish' : 'Tuesday'}
+                       placeholder={sheet.kind === 'dish' ? 'Main dish' : sheet.kind === 'tasks' ? 'Paint the nursery' : 'Tuesday'}
                        maxlength="80" />
                 {sheet.kind === 'meal-train' && (
                   <input type="date" name="slot_date" value={s.onDate ?? ''} />
@@ -604,6 +615,11 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
                 <input type="number" name="slot_cap" value={s.capacity ?? ''}
                        min="1" max="499" placeholder="No limit" />
                 <span class="muted taken">{s.id ? (has || '—') : ''}</span>
+                {sheet.kind === 'tasks' && (
+                  <input class="slotrow__detail" name="slot_detail" value={s.detail ?? ''} maxlength="300"
+                         aria-label="What it involves, or what to bring"
+                         placeholder="What it involves, or what to bring: rollers, drop cloths, old clothes" />
+                )}
               </div>
             );
           })}
@@ -611,7 +627,7 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
         <p class="muted hint">
           Clear a line to take it off. A line somebody has already signed up for
           is kept rather than dropped — move those people first.
-          {sheet.kind === 'dish' && <> Leave "how many" blank for no limit.</>}
+          {(sheet.kind === 'dish' || sheet.kind === 'tasks') && <> Leave "how many" blank for no limit.</>}
         </p>
         <button class="btn" type="submit" name="action" value="slots">Save</button>
       </form>
@@ -775,6 +791,9 @@ const lastDated = [...slots].reverse().find((s) => s.onDate)?.onDate ?? null;
      — fell back to three columns and dropped "Taken" onto a line of its own. */
   .slotrows--dated .slotrow { grid-template-columns: minmax(0,2fr) 170px minmax(0,1fr) 70px; }
   .slotrow--head { padding-bottom: 2px; }
+  /* A job's description sits under its row, the full width. */
+  .slotrows--tasks .slotrow:not(.slotrow--head) { padding-bottom: 10px; border-bottom: 1px solid var(--hair); }
+  .slotrow .slotrow__detail { grid-column: 1 / -1; min-height: 40px; font-size: 15px; }
   .slotrow input { width: 100%; font: inherit; min-height: 44px; padding: 8px 11px;
                    border: 1px solid var(--hair); border-radius: var(--radius); background: #fff; }
   .slotrow input:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }

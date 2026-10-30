@@ -135,7 +135,8 @@ const configured = smsConfigured(env);
       status.textContent = 'Sending…';
       const res = await fetch('/api/sms/send', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body, to: (f as HTMLElement).dataset.to }),
+        // A reply is a broadcast to one phone: it goes through the same queue.
+        body: JSON.stringify({ body, to: (f as HTMLElement).dataset.to, broadcastId: crypto.randomUUID() }),
       });
       const data = await res.json().catch(() => ({})) as { error?: string; sent?: number };
       if (!res.ok || !data.sent) { status.textContent = data.error ?? 'Did not send.'; return; }

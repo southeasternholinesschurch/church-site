@@ -197,7 +197,7 @@ for (const [cid, name, desc, lo, hi] of KID_CLASSES) {
  * /kids/classes is a feature you can see rather than an empty dropdown.
  */
 const KID_STAFF = [
-  ['felicia', 'Felicia S.', 'kids-director'],
+  ['joanna', 'Joanna S.', 'kids-director'],
   ['karen',   'Karen H.',   'kids'],
   ['bethany', 'Bethany R.', 'kids'],
   ['darrell', 'Darrell M.', 'kids'],
@@ -322,7 +322,7 @@ const note = (kidId, body, staffId, author, mins) =>
   out.push(`INSERT INTO kid_notes (kid_id, body, staff_id, author_name, created_at)
     VALUES (${kidId}, ${q(body)}, ${staffId ?? 'NULL'}, ${q(author)}, ${ago(mins)});`);
 const noted = kidRows.slice(-12);   // bus children, in BUS_KIDS order: [2] Jayden, [3] Aaliyah, [6] Elijah
-note(noted[2].id, 'Kept pushing in line and would not stop when asked. Sent to sit with Felicia for the last half hour.', 2, 'Karen H.', 95);
+note(noted[2].id, 'Kept pushing in line and would not stop when asked. Sent to sit with Joanna for the last half hour.', 2, 'Karen H.', 95);
 note(noted[2].id, 'Told his family at the door. They said they would talk to him tonight.', 4, 'Darrell M.', 70);
 note(noted[3].id, 'Upset when she arrived — said she had not had dinner. Gave her crackers from the cupboard.', 3, 'Bethany R.', 7 * 24 * 60 + 40);
 note(noted[6].id, 'Brought a friend from his street, first time here. Friend\'s mum is happy for him to ride the bus next week.', null, 'Tamsin W.', 14 * 24 * 60);
@@ -383,14 +383,14 @@ for (const k of kidRows) {
   if (!chance(0.8)) continue;
   if (chance(0.15)) {
     out.push(`INSERT INTO kid_cards (kid_id, token, active, issued_at, revoked_at, issued_by)
-      VALUES (${k.id}, '${fakeToken()}', 0, datetime('now','-60 days'), datetime('now','-20 days'), 'felicia@example.org');`);
+      VALUES (${k.id}, '${fakeToken()}', 0, datetime('now','-60 days'), datetime('now','-20 days'), 'joanna@example.org');`);
   }
   out.push(`INSERT INTO kid_cards (kid_id, token, active, issued_at, issued_by)
-    VALUES (${k.id}, '${fakeToken()}', 1, datetime('now','-20 days'), 'felicia@example.org');`);
+    VALUES (${k.id}, '${fakeToken()}', 1, datetime('now','-20 days'), 'joanna@example.org');`);
 }
 
 out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by)
-  VALUES ('kid_bucks_per_visit', '${PER_VISIT}', datetime('now'), 'felicia@example.org');`);
+  VALUES ('kid_bucks_per_visit', '${PER_VISIT}', datetime('now'), 'joanna@example.org');`);
 
 /*
  * A kiosk the demo visitor can pair in one click.
@@ -461,10 +461,10 @@ const sheet = (o) => {
      'demo@example.org', datetime('now','-9 days'), datetime('now','-9 days'));`);
   return sheetId;
 };
-const slot = (sh, sort, label, onDate, capacity, takers) => {
+const slot = (sh, sort, label, onDate, capacity, takers, detail = null) => {
   slotId++;
   out.push(`INSERT INTO signup_slots (id, sheet_id, sort, label, detail, on_date, capacity)
-    VALUES (${slotId}, ${sh}, ${sort}, ${q(label)}, NULL, ${q(onDate)},
+    VALUES (${slotId}, ${sh}, ${sort}, ${q(label)}, ${q(detail)}, ${q(onDate)},
             ${capacity === null ? 'NULL' : capacity});`);
   takers.forEach((t, i) => {
     // Seats are 1-based and unique per slot — see nextSeat() in lib/signups.ts.
@@ -552,6 +552,25 @@ const done = sheet({
   const day = inDays(-back);
   slot(done, i, dayName(day), day, 1, [member(adultsPool[(i * 7) % adultsPool.length])]);
 });
+
+// 5. A work night: jobs, each with what it involves and how many it needs.
+const work = sheet({
+  title: 'Fall work night',
+  intro: 'Saturday from 9 until noon. Lunch is on the church. Come for an hour or the morning.',
+  kind: 'tasks',
+  eventDate: inDays(12),
+});
+const w = inDays(12);
+slot(work, 0, 'Paint the nursery', w, 4, [
+  member(adultsPool[3], { note: 'Bringing a ladder.' }), member(adultsPool[11]),
+], 'Rollers, trays and drop cloths are in the closet. Wear old clothes.');
+slot(work, 1, 'Clear the gutters', w, 2, [member(adultsPool[7])],
+  'Bring a ladder and work gloves if you have them.');
+slot(work, 2, 'Weed the front beds', w, 5, [],
+  'Gloves, a kneeling pad and a trowel. Bags are provided.');
+slot(work, 3, 'Clean the fellowship hall kitchen', w, 3, [
+  member(adultsPool[14]), guest(adultsPool[19]), member(adultsPool[22]),
+], 'Cleaning supplies are under the sink.');
 
 /* ------------------------------------------------------------------ care --
  *
@@ -666,6 +685,48 @@ out.push(`INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES
     out.push(`INSERT INTO singing_schedule (sunday, morning, evening, updated_at, updated_by)
       VALUES ('${iso}', ${q(morning || null)}, ${q(evening || null)}, datetime('now'), 'demo@example.org');`);
   }
+}
+
+/* ------------------------------------------------------- service orders --
+ *
+ * The states an order is in on a real list: next Sunday's filled in, the
+ * evening one just started from the traditional order with nobody named yet,
+ * a custom revival night with notes, and last Sunday's, already printed and
+ * past. No lobby_heroes or lobby_photos: both are images in R2, and the demo
+ * Worker has no bucket, so a row there would only be a broken picture.
+ */
+{
+  const name = (x) => `${x.first} ${x.last}`;
+  const lead = adultsPool.filter((x) => x.phone);
+  const TRAD = ['Opening Prayer', 'Congregational Singing', 'Testimony Time', 'Prayer Time',
+    'Offering', 'Announcements', 'Special Song', 'Message', 'Altar Service or Benediction'];
+  const nextSunday = inDays(7 - new Date().getUTCDay());
+  const lastSunday = inDays(-((new Date().getUTCDay()) || 7));
+  const filled = (notes = {}) => TRAD.map((title, i) => ({
+    title,
+    who: title === 'Message' ? 'Pastor' : title === 'Offering' ? 'Ushers' : name(lead[i % lead.length]),
+    notes: notes[title] || '',
+  }));
+  const order = (id, nm, day, line, kind, items, ago) =>
+    out.push(`INSERT INTO service_orders (id, name, service_date, line, kind, items, created_by, created_at, updated_at, updated_by)
+      VALUES (${id}, ${q(nm)}, '${day}', ${q(line)}, '${kind}', ${q(JSON.stringify(items))}, 'demo@example.org',
+      datetime('now','-${ago} days'), datetime('now','-${ago} days'), 'demo@example.org');`);
+  out.push('DELETE FROM service_orders;');
+  order(1, 'Sunday Morning Worship', nextSunday, '', 'traditional', filled({
+    'Congregational Singing': '#112 Victory in Jesus, #45 Power in the Blood',
+    'Special Song': 'The Carver Sisters',
+    'Message': 'Romans 12:1-2',
+  }), 2);
+  order(2, 'Sunday Evening Service', nextSunday, '', 'traditional',
+    TRAD.map((title) => ({ title, who: '', notes: '' })), 0);
+  order(3, 'Fall Revival — Night One', inDays(10), 'Evangelist Rev. Paul Ainsworth', 'custom', [
+    { title: 'Welcome', who: 'Pastor', notes: 'Introduce the evangelist.' },
+    { title: 'Choruses', who: name(lead[3]), notes: 'Keep it short tonight.' },
+    { title: 'Special Song', who: name(lead[5]), notes: '' },
+    { title: 'Message', who: 'Rev. Paul Ainsworth', notes: '' },
+    { title: 'Altar Service', who: 'Pastor', notes: 'Altar workers down front during the last verse.' },
+  ], 5);
+  order(4, 'Sunday Morning Worship', lastSunday, '', 'traditional', filled({ 'Message': 'Psalm 103' }), 9);
 }
 
 console.log(out.join('\n'));

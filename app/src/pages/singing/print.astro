@@ -1,4 +1,5 @@
 ---
+import PrintHint from '../../components/PrintHint.astro';
 import { quarterOf, quarterFromKey, sundaysBetween, monthName, printRow, type PrintRow } from '../../lib/singing';
 import { scheduleSource, scheduleRows, rosterDays, getPrintNote } from '../../lib/singing-db';
 import { churchDate } from '../../lib/care';
@@ -183,6 +184,7 @@ const dayNum = (iso: string) => Number(iso.slice(8, 10));
     <div class="bar">
       <a href={`/singing?q=${q.key}`}>← Back to the schedule</a>
       <button type="button" onclick="window.print()">Print</button>
+      <PrintHint />
     </div>
 
     <main class:list={['paper', size.cls]}>

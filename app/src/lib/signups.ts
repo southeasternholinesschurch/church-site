@@ -22,7 +22,7 @@ import type { LocalNow } from './schedules.ts';
 
 /* ------------------------------------------------------------- the kinds -- */
 
-export type SignupKind = 'meal-train' | 'list' | 'dish';
+export type SignupKind = 'meal-train' | 'list' | 'dish' | 'tasks';
 
 /**
  * What staff pick from when creating a sheet. Blurbs rather than names alone:
@@ -38,10 +38,14 @@ export const SIGNUP_KINDS: { id: SignupKind; label: string; blurb: string }[] = 
   { id: 'dish', label: 'Pitch-in or dinner',
     blurb: 'You name the parts — two mains, six sides, four desserts — and people '
          + 'sign up against them.' },
+  // The pastor, 2026-10-20: for a work night, though it suits any day of jobs.
+  { id: 'tasks', label: 'Jobs and tasks',
+    blurb: 'List the jobs — paint the nursery, clear the gutters — with what each '
+         + 'involves or what to bring, and how many people it needs.' },
 ];
 
 export const isSignupKind = (v: string): v is SignupKind =>
-  v === 'meal-train' || v === 'list' || v === 'dish';
+  v === 'meal-train' || v === 'list' || v === 'dish' || v === 'tasks';
 
 /** The one slot a plain list has. Named here so the label is not typed twice. */
 export const LIST_SLOT_LABEL = 'Sign up';
@@ -212,6 +216,19 @@ export function availability(capacity: number | null, taken: number): Availabili
   if (open === 0) return { full: true, open: 0, text: 'Full' };
   if (taken === 0) return { full: false, open, text: 'Available' };
   return { full: false, open, text: open === 1 ? '1 still open.' : `${open} still open.` };
+}
+
+/**
+ * A job on a work-night sheet says how many hands it still needs, which is the
+ * question somebody choosing a job is asking. Null when there is no limit, or
+ * nothing left to ask for; the ordinary wording is used then.
+ */
+export function stillNeeded(capacity: number | null, taken: number): string | null {
+  if (capacity === null) return null;
+  const open = capacity - taken;
+  if (open <= 0) return null;
+  if (taken === 0) return `${capacity} ${capacity === 1 ? 'person' : 'people'} needed`;
+  return `${open} more needed`;
 }
 
 export interface SlotStatus {
@@ -442,10 +459,24 @@ export function invalidReminderReason(body: string): string | null {
  * Reading is not the moment to discover somebody saved something broken; by
  * then a text is about to go out.
  */
-export function reminderBodyFor(stored: string | null | undefined): string {
+/**
+ * The wording used when staff have not written their own, by kind. Until
+ * 2026-10-20 every kind got the meal-train text, so a nursery volunteer was
+ * thanked for bringing a meal. Each is one GSM-7 segment (tested).
+ */
+const DEFAULT_BY_KIND: Record<SignupKind, string> = {
+  'meal-train': DEFAULT_REMINDER_BODY,
+  dish: 'Fairhaven Community - Reminder: you signed up to bring a dish tomorrow, {when}. Thank you!',
+  list: 'Fairhaven Community - Reminder: you signed up for tomorrow, {when}. Thank you!',
+  tasks: 'Fairhaven Community - Reminder: you signed up to help tomorrow, {when}. Thank you!',
+};
+export const defaultReminderFor = (kind: string | null | undefined): string =>
+  isSignupKind(kind ?? '') ? DEFAULT_BY_KIND[kind as SignupKind] : DEFAULT_REMINDER_BODY;
+
+export function reminderBodyFor(stored: string | null | undefined, kind?: string | null): string {
   const text = (stored ?? '').trim();
   if (text && !invalidReminderReason(text)) return text;
-  return DEFAULT_REMINDER_BODY;
+  return defaultReminderFor(kind);
 }
 
 /* ------------------------------------------------------------- summaries -- */

@@ -1,0 +1,140 @@
+/*
+ * A lobby HERO FRAME: a graphic the pastor uploads, full screen, with three lines of
+ * type in one bottom corner over a vignette that darkens only that corner.
+ *
+ * Shared by the screen (pages/lobby) and the editor's preview on the dashboard,
+ * so the preview is the TV, not an impression of it. All sizes are on the
+ * 1920×1080 stage; both hosts zoom that stage to fit.
+ *
+ * The markup comes from heroHtml() in lib/lobby-heroes.ts.
+ */
+@font-face { font-family: 'Texta'; src: url('/fonts/texta-regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Texta'; src: url('/fonts/texta-bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Texta'; src: url('/fonts/texta-black.woff2') format('woff2'); font-weight: 900; font-display: swap; }
+
+.hero-frame {
+  --hero-serif: 'Instrument Serif', Georgia, serif;
+  --hero-sans: 'Texta', ui-sans-serif, system-ui, sans-serif;
+  --hero-ease-out: cubic-bezier(.16, 1, .3, 1);
+  --hero-ease-inout: cubic-bezier(.45, 0, .55, 1);
+  --hero-ease-in: cubic-bezier(.55, 0, .75, .2);
+  /* Tone: a dark corner under cream type, the default… */
+  --hero-ink: #f7f2ea;
+  --hero-soft: rgba(247, 242, 234, .74);
+  --hero-shade-rgb: 14, 10, 8;
+  --hero-accent: #ef6a58;           /* brand red, lifted to read on a dark corner (≥4.5:1 at 70% shade) */
+  --hero-glow: 0 2px 28px rgba(0, 0, 0, .35);
+  /* No background of its own: on the screen the frame is layered OVER the
+     outgoing scene and dissolves in; an opaque ground would flash first. */
+  position: absolute; inset: 0; overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+/* …or a pale corner under ink, for a light graphic where a dark corner would
+   read as a stain. */
+.hero-frame[data-tone='light'] {
+  --hero-ink: #1a1512;
+  --hero-soft: rgba(26, 21, 18, .7);
+  --hero-shade-rgb: 247, 242, 234;
+  --hero-accent: #a3151a;           /* brand red, deepened (6.6:1 on cream) */
+  --hero-glow: 0 1px 20px rgba(247, 242, 234, .5);
+}
+.hero-frame[data-accent='gold']                    { --hero-accent: #ebc56c; }
+.hero-frame[data-accent='gold'][data-tone='light'] { --hero-accent: #7d5a12; }
+.hero-frame[data-accent='plain']                   { --hero-accent: var(--hero-ink); }
+
+/* ---- the graphic: always the full 16:9 frame ---------------------------- */
+.hero-img, .hero-zoom { position: absolute; inset: 0; }
+.hero-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* SHARP FROM ITS FIRST FRAME. A blurred placeholder dissolving into the
+   graphic was tried as a "focus pull" and dropped: layered over the outgoing
+   scene it read as cheap pixelation, not as a lens (the pastor, 2026-10-22). The
+   graphic is never blurred, filtered or upscaled from a smaller copy. */
+
+/* ---- the vignette: only the chosen corner ------------------------------- *
+ * An ellipse anchored ON the corner, so its strongest point is under the text
+ * and it is gone by the middle of the screen. Five stops, because two leave a
+ * visible band on a large panel.
+ */
+.hero-shade {
+  position: absolute; inset: 0; pointer-events: none;
+  --at: 100% 100%;
+  background: radial-gradient(ellipse 74% 92% at var(--at),
+    rgba(var(--hero-shade-rgb), calc(.94 * var(--shade, .7))) 0%,
+    rgba(var(--hero-shade-rgb), calc(.86 * var(--shade, .7))) 24%,
+    rgba(var(--hero-shade-rgb), calc(.60 * var(--shade, .7))) 44%,
+    rgba(var(--hero-shade-rgb), calc(.20 * var(--shade, .7))) 62%,
+    rgba(var(--hero-shade-rgb), 0) 80%);
+}
+.hero-frame[data-corner='bottom-left'] .hero-shade { --at: 0% 100%; }
+
+/* ---- the type ------------------------------------------------------------ *
+ * Inside the safe area: 96 px from the side, 104 px from the bottom (the
+ * progress line), and never taller than the space below the clock bar.
+ */
+.hero-text {
+  position: absolute; right: 96px; bottom: 104px; max-width: 1060px; max-height: calc(1080px - 160px - 104px);
+  display: flex; flex-direction: column; align-items: flex-end; text-align: right;
+  color: var(--hero-ink); text-shadow: var(--hero-glow);
+}
+.hero-frame[data-corner='bottom-left'] .hero-text { right: auto; left: 96px; align-items: flex-start; text-align: left; }
+.hero-rule { display: block; width: 72px; height: 3px; border-radius: 2px; background: var(--hero-accent); margin-bottom: 28px; transform-origin: right; }
+.hero-frame[data-corner='bottom-left'] .hero-rule { transform-origin: left; }
+.hero-kicker {
+  margin: 0 0 22px; font: 700 30px/1.2 var(--hero-sans); letter-spacing: .22em; text-transform: uppercase;
+  color: var(--hero-accent);
+}
+.hero-title { margin: 0; font-family: var(--hero-serif); font-weight: 400; line-height: .94; letter-spacing: -.012em; text-wrap: balance; }
+.hero-frame[data-style='bold'] .hero-title { font-family: var(--hero-sans); font-weight: 900; line-height: .98; letter-spacing: -.02em; }
+/* Each word in its own mask, so it can rise into view from behind its baseline. */
+.hw { display: inline-block; overflow: hidden; vertical-align: top; padding: 0 .02em .12em; margin: 0 -.02em -.12em; }
+.hw > span { display: inline-block; }
+.hero-sub {
+  margin: 28px 0 0; max-width: 920px; font-family: var(--hero-serif); font-style: italic;
+  font-size: 52px; line-height: 1.16; color: var(--hero-soft); text-wrap: balance;
+}
+
+/*
+ * THE ENTRANCE, about 4.5 s. Slower and more deliberate than an ordinary scene,
+ * because this is the one somebody made on purpose.
+ *
+ *   0    – 2.4 s   the graphic dissolves in over the outgoing scene
+ *   0    – 4.6 s   …while easing back from 112% to full frame — a long,
+ *                  decelerating pull that settles rather than stops
+ *   1.3  – 3.5 s   the corner darkens
+ *   2.0  s         the accent rule draws out from the corner
+ *   2.1  s         the kicker tightens into place from wide tracking
+ *   2.35 s +       each word of the title rises out of its mask, 90 ms apart
+ *   then           the subtitle comes into focus
+ *
+ * After that the graphic keeps drifting in, about 4% over the frame's life,
+ * so a long hold never looks frozen. `.is-playing` is set by the screen on an
+ * entering layer and by the editor's "Play" button.
+ */
+.hero-frame.is-playing .hero-img       { animation: hero-in 2.4s var(--hero-ease-inout) both; }
+.hero-frame.is-playing .hero-zoom      { animation: hero-pull 4.6s var(--hero-ease-out) both, hero-drift var(--life, 28s) var(--hero-ease-inout) 4.6s forwards; }
+.hero-frame.is-playing .hero-shade     { animation: hero-in 2.2s var(--hero-ease-inout) 1.3s both; }
+.hero-frame.is-playing .hero-rule      { animation: hero-rule 1.2s var(--hero-ease-out) 2s both; }
+.hero-frame.is-playing .hero-kicker    { animation: hero-track 1.8s var(--hero-ease-out) 2.1s both; }
+.hero-frame.is-playing .hw > span      { animation: hero-word 1.5s var(--hero-ease-out) both; animation-delay: calc(2.35s + var(--w, 0) * 90ms); }
+.hero-frame.is-playing .hero-sub       { animation: hero-focus 1.6s var(--hero-ease-out) both; animation-delay: calc(2.75s + var(--n, 1) * 90ms); }
+/* Leaving: the type goes first and the graphic stays under whatever comes next.
+   `.is-playing` stays on as well, so the drift carries on rather than snapping
+   back to 100% at the moment of hand-off. */
+.hero-frame.is-leaving .hero-text      { animation: hero-recede .9s var(--hero-ease-in) both; }
+.hero-frame.is-leaving .hero-shade     { animation: hero-out 1.6s var(--hero-ease-inout) both; }
+
+@keyframes hero-in     { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hero-out    { from { opacity: 1; } to { opacity: 0; } }
+@keyframes hero-pull   { from { transform: scale(1.12); } to { transform: scale(1); } }
+@keyframes hero-drift  { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes hero-rule   { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes hero-track  { from { opacity: 0; letter-spacing: .5em; } to { opacity: 1; letter-spacing: .22em; } }
+@keyframes hero-word   { from { transform: translateY(108%); } to { transform: none; } }
+@keyframes hero-focus  { from { opacity: 0; transform: translateY(14px); filter: blur(6px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes hero-recede { from { opacity: 1; } to { opacity: 0; transform: translateY(-8px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-frame.is-playing .hero-zoom { animation: none; }
+  .hero-frame.is-playing .hero-rule, .hero-frame.is-playing .hero-kicker,
+  .hero-frame.is-playing .hw > span, .hero-frame.is-playing .hero-sub { animation-name: hero-in; }
+}

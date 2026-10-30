@@ -230,26 +230,40 @@ const TEMPLATES = [
       send.disabled = true;
       result.textContent = 'Sending…';
       var payload = { text: body.value, routeId: opt().value === '' ? null : Number(opt().value) };
+      /* The first call queues everyone and sends the first 40; later calls
+         send the rest. If this page stops (a locked phone), the app's
+         five-minute job sends whatever is left, so nobody is missed. */
+      var broadcastId = crypto.randomUUID();
+      var sentSoFar = 0;
 
-      function go(offset, tally) {
+      function go(first) {
         return fetch('/kids/send', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: payload.text, routeId: payload.routeId, offset: offset }),
+          body: JSON.stringify(first
+            ? { text: payload.text, routeId: payload.routeId, broadcastId: broadcastId }
+            : { broadcastId: broadcastId, continue: true }),
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
           .then(function (res) {
-            if (!res.ok) { result.textContent = res.d.error || 'That did not send.'; send.disabled = false; return; }
-            tally.sent += res.d.sent; tally.failed += res.d.failed;
-            // Keep going until the slices are exhausted — the Worker can only
-            // make so many outbound requests per incoming one.
-            if (res.d.remaining > 0) return go(offset + res.d.sent + res.d.failed, tally);
-            result.textContent = 'Sent to ' + tally.sent + (tally.sent === 1 ? ' phone' : ' phones')
-              + (tally.failed ? ', ' + tally.failed + ' failed' : '') + '.';
+            if (!res.ok) {
+              result.textContent = first ? (res.d.error || 'That did not send.')
+                : 'It stopped after ' + sentSoFar + '. The rest are queued and will go out within five minutes; do not send it again.';
+              send.disabled = false; return;
+            }
+            sentSoFar = res.d.sent;
+            if (res.d.remaining > 0) {
+              result.textContent = 'Sending… ' + res.d.sent + ' of ' + res.d.total;
+              return go(false);
+            }
+            result.textContent = 'Sent to ' + res.d.sent + (res.d.sent === 1 ? ' phone' : ' phones')
+              + (res.d.failed ? ', ' + res.d.failed + ' failed' : '') + '.';
             body.value = '';
             refresh();
           });
       }
-      go(0, { sent: 0, failed: 0 }).catch(function () {
-        result.textContent = 'That did not send.';
+      go(true).catch(function () {
+        result.textContent = sentSoFar
+          ? 'The connection dropped after ' + sentSoFar + '. The rest are queued and will go out within five minutes; do not send it again.'
+          : 'That did not send.';
         send.disabled = false;
       });
     });

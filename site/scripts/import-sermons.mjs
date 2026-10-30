@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(HERE, '..', 'src', 'content', 'sermons');
-const CHANNEL_ID = 'UCCjlcMeiioBKihboxwgvnEg';
+const CHANNEL_ID = 'UC…YOUR_CHANNEL_ID';
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);

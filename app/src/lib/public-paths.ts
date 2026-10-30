@@ -63,12 +63,42 @@ export const PUBLIC_PREFIXES = [
    * handled inside it (a honeypot, links refused, a per-connection hourly cap).
    */
   '/api/guest-card',
+  /*
+   * A lobby hero frame's GRAPHIC, by id, for the foyer TV.
+   *
+   * THE TRAILING SLASH IS LOAD-BEARING, as with '/signup/': the staff route
+   * that creates and edits frames is '/api/lobby/heroes', and `'/api/lobby/hero'`
+   * without the slash would publish it. The route only reads: it looks the frame
+   * up by id and serves the key on that row. test/lobby.test.ts holds the pair.
+   */
+  '/api/lobby/hero/',
+  /*
+   * An uploaded lobby photograph, by id. Same rule, same reason: the trailing
+   * slash keeps the staff route '/api/lobby/photos' private.
+   */
+  '/api/lobby/photo/',
 ];
 
-/** The whole decision. One function, one list, and a test that holds the pair
- *  `/signup/abc` and `/signups` apart. */
+/**
+ * Paths public ONLY EXACTLY — never as a prefix.
+ *
+ * The lobby screen on the foyer TV, and the feed it polls. Public because
+ * everything on it already is: the published bulletin (the same data as
+ * /api/bulletin/current), the site's events, and photographs. No pairing yet —
+ * see handoff/PLAN-lobby-screen.md, "Access".
+ *
+ * EXACT because a staff "Lobby" remote is planned, and its natural home is
+ * /lobby/remote. As a prefix, `'/lobby'` would make that page public the day it
+ * is written — and `/lobbyanything` with it. A trailing slash is allowed, since
+ * a TV browser may add one; nothing else is. test/lobby.test.ts holds this.
+ */
+export const PUBLIC_EXACT = ['/lobby', '/api/lobby/feed'];
+
+/** The whole decision. One function, two lists, and tests that hold the pairs
+ *  `/signup/abc` and `/signups`, and `/lobby` and `/lobby/remote`, apart. */
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+  const exact = pathname.length > 1 ? pathname.replace(/\/$/, '') : pathname;
+  return PUBLIC_EXACT.includes(exact) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 /**

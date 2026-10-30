@@ -1,0 +1,195 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { getDb } from '../../db';
+import { smsConfigured } from '../../lib/sms';
+import { CHURCH_TZ } from '../../lib/services';
+import { explainError } from '../../lib/text-status';
+import {
+  textHealth, recentSends, undelivered, queueProblems, markSeen, CRON_LATE_MINUTES,
+} from '../../lib/troubleshoot-db';
+import { nowIso } from '../../db';
+
+/**
+ * Troubleshooting: is everything working, and if not, what and why.
+ *
+ * The pastor, 2026-10-21, after hearing some texts had not gone out. Texts first,
+ * because that is where it hurt: whether the five-minute job is running,
+ * anything stuck in the queue, every recent broadcast with how much of it
+ * arrived, and each number a text did not reach with the reason in plain words.
+ * Other parts of the app can add sections here as they need them.
+ *
+ * Admins only: it is under /website, which is in ADMIN_ONLY.
+ */
+const user = Astro.locals.user!;
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+const health = await textHealth(db, 7);
+const sends = await recentSends(db, 30);
+const bad = await undelivered(db, 30);
+const queue = await queueProblems(db, 30);
+const twilioReady = smsConfigured(env);
+
+// Looking here clears the dashboard's texting alert for this person until
+// something new goes wrong (lib/troubleshoot-db.ts, `since`). Caught: a
+// failure to record it must not stop the page showing.
+try { await markSeen(db, user.id, nowIso()); } catch { /* the alert simply stays */ }
+
+const cronOk = health.cronMinutesAgo !== null && health.cronMinutesAgo <= CRON_LATE_MINUTES;
+const allClear = twilioReady && cronOk && health.overdue === 0 && health.notDelivered === 0;
+
+const when = (iso: string) => new Date(iso.length === 13 ? `${iso}:00:00Z` : iso)
+  .toLocaleString('en-US', { timeZone: CHURCH_TZ, weekday: 'short', month: 'short', day: 'numeric',
+                             hour: 'numeric', minute: iso.length === 13 ? undefined : '2-digit' });
+const day = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`)
+  .toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+const ago = (m: number) => m < 2 ? 'just now' : m < 90 ? `${m} minutes ago`
+  : m < 60 * 36 ? `${Math.round(m / 60)} hours ago` : `${Math.round(m / 1440)} days ago`;
+const clip = (s: string, n = 70) => s.length > n ? `${s.slice(0, n - 1)}…` : s;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+---
+<AppLayout title="Troubleshooting" user={user}>
+  <p style="margin:0 0 4px;"><a href="/website">← Website</a></p>
+  <h1 style="margin-bottom:4px;">Troubleshooting</h1>
+  <p class="muted" style="margin:0 0 20px;">Whether texts are going out, and what did not arrive.</p>
+
+  {/* ---- the state of things, at a glance ---- */}
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Texting</h2>
+    {allClear && <p class="good">Everything is working. No text has failed to arrive in the last week.</p>}
+    <ul class="checks">
+      <li class:list={[twilioReady ? 'ok' : 'bad']}>
+        <strong>Twilio</strong>
+        {twilioReady ? 'is set up.' : 'is not set up: nothing can be sent. The Twilio settings on the app need adding.'}
+      </li>
+      <li class:list={[cronOk ? 'ok' : 'bad']}>
+        <strong>The five-minute text job</strong>
+        {health.cronMinutesAgo === null
+          ? 'has not reported in yet. It should within five minutes of this update going live; if this still says so later, scheduled texts and reminders are not going out.'
+          : cronOk
+            ? <>last ran {ago(health.cronMinutesAgo)}.</>
+            : <>last ran {ago(health.cronMinutesAgo)}. It should run every five minutes, so <strong>scheduled texts, birthday texts and reminders are not going out</strong>. The sms-cron Worker in Cloudflare needs looking at.</>}
+      </li>
+      <li class:list={[health.overdue === 0 ? 'ok' : 'bad']}>
+        <strong>Waiting to send:</strong>
+        {health.overdue === 0
+          ? ' nothing is overdue.'
+          : <> {plural(health.overdue, 'text is', 'texts are')} past the time it was due and not sent.</>}
+      </li>
+      <li class:list={[health.notDelivered === 0 ? 'ok' : 'warn']}>
+        <strong>Last 7 days:</strong>
+        {health.notDelivered === 0
+          ? ' every text that was sent arrived, or is still being confirmed.'
+          : <> {plural(health.notDelivered, 'text', 'texts')} did not arrive. The numbers are listed below.</>}
+      </li>
+      {health.waiting > 0 && (
+        <li class="wait">
+          <strong>Being checked:</strong> {plural(health.waiting, 'text', 'texts')} still waiting for word
+          from Twilio. The app asks Twilio about these itself, ten every five minutes, so this number
+          goes down on its own.
+        </li>
+      )}
+    </ul>
+  </div>
+
+  {/* ---- who did not get a text ---- */}
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Texts that did not arrive</h2>
+    <p class="muted why">The last 30 days, by number. A number that fails every time needs fixing on the person's page; one that failed once usually clears up by itself.</p>
+    {bad.length === 0 ? <p class="muted">None.</p> : (
+      <div class="rows">
+        {bad.map((b) => {
+          const e = explainError(b.errorCode);
+          return (
+            <div class="row">
+              <div class="row__who">
+                {b.personId ? <a href={`/people/${b.personId}`}>{b.name ?? b.phone}</a> : <span>{b.phone}</span>}
+                <span class="muted"> · {plural(Number(b.times), 'time', 'times')}, last {day(b.last)}
+                  {Number(b.deliveredToo) === 0 ? ' · nothing has reached this number' : ` · ${b.deliveredToo} others did arrive`}</span>
+              </div>
+              <div class="row__why"><strong>{e.what}.</strong> {e.fix}{b.errorCode && <span class="muted"> (error {b.errorCode})</span>}</div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+
+  {/* ---- every recent send ---- */}
+  <div class="card" style="margin-bottom:20px;">
+    <h2>Recent texts</h2>
+    <p class="muted why">Every text sent in the last 30 days, one line per message. Counted by phone, so a family sharing a phone counts once.</p>
+    {sends.length === 0 ? <p class="muted">Nothing sent.</p> : (
+      <table class="sends">
+        <thead><tr><th>When</th><th>Message</th><th class="n">Sent to</th><th class="n">Arrived</th><th class="n">Didn't</th><th class="n">Not known</th></tr></thead>
+        <tbody>
+          {sends.map((s) => {
+            const unknown = Number(s.waiting) + Number(s.unknown);
+            return (
+              <tr>
+                <td class="when">{when(s.hour)}</td>
+                <td>{clip(s.body)}</td>
+                <td class="n">{s.handsets}</td>
+                <td class="n">{Number(s.delivered) + Number(s.sent)}</td>
+                <td class:list={['n', Number(s.bad) > 0 && 'n--bad']}>{s.bad || '—'}</td>
+                <td class:list={['n', unknown > 0 && 'n--wait']}>{unknown || '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
+    <p class="muted why" style="margin-top:12px;">"Arrived" includes texts the carrier accepted but sent no receipt for, which a few carriers never do. "Not known" means Twilio has not said yet; the app keeps asking.</p>
+  </div>
+
+  {/* ---- reminders and scheduled texts that were held back ---- */}
+  <div class="card">
+    <h2>Reminders that were skipped or failed</h2>
+    <p class="muted why">Scheduled texts, birthday texts and singing reminders from the last 30 days that did not go, with the reason noted at the time.</p>
+    {queue.length === 0 ? <p class="muted">None.</p> : (
+      <ul class="queue">
+        {queue.map((q) => (
+          <li><span class="muted">{day(q.sendAt)} · {q.status === 'skipped' ? 'Skipped' : 'Failed'}{Number(q.n) > 1 && ` ×${q.n}`}</span> {q.note ?? 'No reason recorded'}</li>
+        ))}
+      </ul>
+    )}
+  </div>
+</AppLayout>
+
+<style>
+  .good { margin: 0 0 12px; font-weight: 700; color: #16532c; }
+  .why { margin: -6px 0 14px; font-size: 15px; }
+  .checks { list-style: none; margin: 0; padding: 0; }
+  .checks li { position: relative; padding: 10px 0 10px 28px; border-top: 1px solid var(--hair); font-size: 16px; line-height: 1.5; }
+  .checks li:first-child { border-top: 0; }
+  .checks li::before { position: absolute; left: 2px; top: 10px; font-weight: 700; }
+  .checks .ok::before { content: '✓'; color: #16532c; }
+  .checks .bad::before { content: '!'; color: var(--red); }
+  .checks .bad { color: var(--red-deep, #8a1212); }
+  .checks .warn::before { content: '!'; color: #8a5a00; }
+  .checks .wait::before { content: '…'; color: var(--ink-soft); }
+  .rows .row { padding: 12px 0; border-top: 1px solid var(--hair); }
+  .rows .row:first-child { border-top: 0; padding-top: 0; }
+  .row__why { margin-top: 4px; font-size: 15px; line-height: 1.5; }
+  .sends { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .sends th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-soft); padding: 0 8px 6px 0; }
+  .sends td { padding: 8px 8px 8px 0; border-top: 1px solid var(--hair); vertical-align: top; }
+  .sends .n { text-align: right; white-space: nowrap; }
+  .sends .when { white-space: nowrap; color: var(--ink-soft); }
+  .n--bad { color: var(--red); font-weight: 700; }
+  .n--wait { color: #8a5a00; }
+  .queue { margin: 0; padding: 0; list-style: none; }
+  .queue li { padding: 8px 0; border-top: 1px solid var(--hair); font-size: 15px; }
+  .queue li:first-child { border-top: 0; }
+  @media (max-width: 700px) {
+    .sends thead { display: none; }
+    .sends tr { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px 8px; padding: 10px 0; border-top: 1px solid var(--hair); }
+    .sends td { border: 0; padding: 0; }
+    .sends td:nth-child(1), .sends td:nth-child(2) { grid-column: 1 / -1; }
+    .sends td.n { text-align: left; }
+    .sends td:nth-child(3)::before { content: 'Sent '; color: var(--ink-soft); }
+    .sends td:nth-child(4)::before { content: 'Arrived '; color: var(--ink-soft); }
+    .sends td:nth-child(5)::before { content: "Didn't "; color: var(--ink-soft); }
+    .sends td:nth-child(6)::before { content: 'Unknown '; color: var(--ink-soft); }
+  }
+</style>

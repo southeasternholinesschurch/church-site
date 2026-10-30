@@ -170,6 +170,50 @@ export async function sendOne(env: SmsEnv, to: string, body: string): Promise<Se
   }
 }
 
+export interface StatusResult {
+  ok: boolean;
+  /** Twilio's status for the message: queued, sent, delivered, undelivered… */
+  status?: string;
+  errorCode?: string | null;
+  /** True when Twilio has no such message. */
+  missing?: boolean;
+  error?: string;
+}
+
+/**
+ * Ask Twilio what became of a message we sent, by its SID.
+ *
+ * The delivery report Twilio posts to the webhook is how a text normally gets
+ * from "queued" to "delivered" — but if that report is lost, the text sits at
+ * "queued" for ever and nobody can tell whether it arrived. On 2026-10-21 that
+ * was 303 texts. This asks directly instead. Read-only and free.
+ *
+ * NEVER THROWS, like sendOne.
+ */
+export async function fetchMessageStatus(env: SmsEnv, sid: string): Promise<StatusResult> {
+  if (env.DEMO_INSTANCE === '1') return { ok: false, error: DEMO_SEND_REFUSED };
+  const cred = credentials(env);
+  if (!cred || !env.TWILIO_ACCOUNT_SID) return { ok: false, error: 'Twilio is not configured' };
+  if (!/^[A-Za-z0-9]{10,64}$/.test(sid)) return { ok: false, error: 'Not a message id' };
+
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages/${sid}.json`;
+  try {
+    const res = await fetch(url, {
+      headers: { authorization: `Basic ${btoa(`${cred.user}:${cred.pass}`)}` },
+    });
+    if (res.status === 404) return { ok: true, missing: true };
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: String(data.message ?? `Twilio returned ${res.status}`) };
+    return {
+      ok: true,
+      status: String(data.status ?? ''),
+      errorCode: data.error_code == null ? null : String(data.error_code),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /* ---------------------------------------------------------------- lookup -- */
 
 export interface LookupResult {

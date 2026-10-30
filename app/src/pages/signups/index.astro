@@ -1,5 +1,6 @@
 ---
 import AppLayout from '../../layouts/AppLayout.astro';
+import ServingNav from '../../components/ServingNav.astro';
 import { readForm } from '../../lib/form';
 import { getDb, schema, nowIso } from '../../db';
 import { desc, inArray } from 'drizzle-orm';
@@ -110,8 +111,9 @@ const rank = (r: typeof rows[number]) =>
   r.sheet.status === 'draft' ? 1 : r.shut ? 2 : 0;
 rows.sort((a, b) => rank(a) - rank(b));
 ---
-<AppLayout title="Sign-ups" user={user}>
-  <h1>Sign-ups</h1>
+<AppLayout title="Sign-up sheets" user={user}>
+  <ServingNav active="signups" />
+  <h1>Sign-up sheets</h1>
   <p class="muted" style="margin:-6px 0 22px; max-width:64ch;">
     A sheet lives at its own link. Put that link in the bulletin, in a text, or
     on the pew link-tree. It is not in the website's menu.

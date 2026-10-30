@@ -1,0 +1,253 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import { readForm } from '../../lib/form';
+import { getDb, schema, nowIso } from '../../db';
+import { eq } from 'drizzle-orm';
+import {
+  isIsoDate, itemsFromForm, LIMITS, longDate, parseItems, QUICK_PARTS, SERVICE_NAMES,
+} from '../../lib/service-order';
+
+/**
+ * One service order: its name and date, and its parts in order, each with who
+ * is leading it and a note. See lib/service-order.ts.
+ *
+ * The parts are plain form rows whose inputs share a name, so the order on the
+ * page IS the saved order (FormData keeps document order). The script below
+ * only adds, removes and moves rows; with it switched off the existing rows
+ * still edit and save.
+ */
+const user = Astro.locals.user!;
+const db = getDb(Astro.locals.runtime.env);
+const id = Number(Astro.params.id);
+
+const load = async () => (await db.select().from(schema.serviceOrders)
+  .where(eq(schema.serviceOrders.id, id)).limit(1))[0];
+
+let order = Number.isInteger(id) ? await load() : undefined;
+if (!order) return Astro.redirect('/service-orders', 303);
+
+let errors: string[] = [];
+if (Astro.request.method === 'POST') {
+  const form = await readForm(Astro.request);
+  const action = String(form.get('action') ?? 'save');
+
+  if (action === 'delete') {
+    await db.delete(schema.serviceOrders).where(eq(schema.serviceOrders.id, id));
+    return Astro.redirect('/service-orders', 303);
+  }
+
+  const name = String(form.get('name') ?? '').trim().slice(0, LIMITS.name);
+  const date = String(form.get('date') ?? '');
+  const line = String(form.get('line') ?? '').trim().replace(/\s+/g, ' ').slice(0, LIMITS.line);
+  const items = itemsFromForm(form.getAll('item_title'), form.getAll('item_who'), form.getAll('item_notes'));
+  if (!name) errors.push('Give the service a name.');
+  if (!isIsoDate(date)) errors.push('Pick the date of the service.');
+
+  if (!errors.length) {
+    await db.update(schema.serviceOrders)
+      .set({ name, serviceDate: date, line, items: JSON.stringify(items), updatedAt: nowIso(), updatedBy: user.email })
+      .where(eq(schema.serviceOrders.id, id));
+    return Astro.redirect(action === 'print' ? `/service-orders/${id}/print` : `/service-orders/${id}?saved=1`, 303);
+  }
+  // Show what was typed, not what was stored, so nothing is lost to a mistake.
+  order = { ...order, name, serviceDate: date, line, items: JSON.stringify(items) };
+}
+
+const items = parseItems(order.items);
+const q = Astro.url.searchParams;
+---
+<AppLayout title={`${order.name} · Service Order`} user={user}>
+  <p style="margin:0 0 4px;"><a href="/service-orders">← Service orders</a></p>
+  <h1 style="margin-bottom:4px;">{order.name}</h1>
+  <p class="muted" style="margin:0 0 20px;">{isIsoDate(order.serviceDate) ? longDate(order.serviceDate) : ''}</p>
+
+  {q.get('saved') === '1' && <p class="notice notice--ok">Saved.</p>}
+  {q.get('copied') === '1' && <p class="notice notice--ok">Copied, with the leaders cleared. Check the date, then fill in who is leading each part.</p>}
+  {q.get('new') === '1' && <p class="notice notice--ok">Add each part of the service below, in order. The buttons under the list add the usual ones in one tap.</p>}
+  {errors.length > 0 && <p class="notice">{errors.join(' ')}</p>}
+
+  <form method="POST" id="so-form">
+    <div class="card" style="margin-bottom:20px;">
+      <div class="so-head">
+        <label class="field">
+          <span>Service</span>
+          <input name="name" list="so-names" maxlength={LIMITS.name} value={order.name} required />
+          <datalist id="so-names">{SERVICE_NAMES.map((n) => <option value={n} />)}</datalist>
+        </label>
+        <label class="field">
+          <span>Date</span>
+          <input name="date" type="date" value={order.serviceDate} required />
+        </label>
+      </div>
+      <label class="field" style="margin-bottom:0;">
+        <span>A line under the name <em class="muted">(optional)</em></span>
+        <input name="line" maxlength={LIMITS.line} value={order.line}
+               placeholder="Homecoming · Guest speaker Bro. Smith · Psalm 100" />
+      </label>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h2>The order of service</h2>
+      <p class="muted why">Top to bottom, as it will print. Who is leading and the notes are
+        both optional; a note can be a song list, a scripture or a reminder for that part.</p>
+
+      <ol class="parts" id="so-parts">
+        {items.map((it) => (
+          <li class="part">
+            <div class="part__fields">
+              <input class="part__title" name="item_title" value={it.title} maxlength={LIMITS.title}
+                     placeholder="Part of the service" aria-label="Part of the service" />
+              <input class="part__who" name="item_who" value={it.who} maxlength={LIMITS.who}
+                     placeholder="Who is leading it" aria-label="Who is leading it" />
+              <textarea class="part__notes" name="item_notes" rows="1" maxlength={LIMITS.notes}
+                        placeholder="Notes (optional)" aria-label="Notes">{it.notes}</textarea>
+            </div>
+            <div class="part__tools">
+              <button type="button" data-move="-1" aria-label="Move up" title="Move up">↑</button>
+              <button type="button" data-move="1" aria-label="Move down" title="Move down">↓</button>
+              <button type="button" data-remove aria-label="Remove this part" title="Remove">✕</button>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p class="muted" id="so-empty" hidden={items.length > 0} style="margin:0 0 12px;">No parts yet.</p>
+
+      <div class="quick">
+        <button type="button" class="btn btn--ghost btn--sm" data-add="">+ Add a part</button>
+        {QUICK_PARTS.map((p) => <button type="button" class="quick__chip" data-add={p}>{p}</button>)}
+      </div>
+    </div>
+
+    <div class="so-actions">
+      <button class="btn" type="submit" name="action" value="save">Save</button>
+      <button class="btn btn--ghost" type="submit" name="action" value="print">Save and print</button>
+      <span class="muted" id="so-dirty" hidden>Unsaved changes</span>
+    </div>
+  </form>
+
+  <form method="POST" style="margin-top:40px;" data-confirm="Delete this service order? This cannot be undone.">
+    <input type="hidden" name="action" value="delete" />
+    <button class="linkish" type="submit">Delete this service order</button>
+  </form>
+
+  <template id="so-row">
+    <li class="part">
+      <div class="part__fields">
+        <input class="part__title" name="item_title" maxlength={LIMITS.title}
+               placeholder="Part of the service" aria-label="Part of the service" />
+        <input class="part__who" name="item_who" maxlength={LIMITS.who}
+               placeholder="Who is leading it" aria-label="Who is leading it" />
+        <textarea class="part__notes" name="item_notes" rows="1" maxlength={LIMITS.notes}
+                  placeholder="Notes (optional)" aria-label="Notes"></textarea>
+      </div>
+      <div class="part__tools">
+        <button type="button" data-move="-1" aria-label="Move up" title="Move up">↑</button>
+        <button type="button" data-move="1" aria-label="Move down" title="Move down">↓</button>
+        <button type="button" data-remove aria-label="Remove this part" title="Remove">✕</button>
+      </div>
+    </li>
+  </template>
+</AppLayout>
+
+<script is:inline>
+  /*
+   * Adding, removing and moving parts. Plain ES — scripts/check-inline-scripts.mjs
+   * parses this, and astro check does not. Nothing from the server is
+   * interpolated into it.
+   */
+  (function () {
+    var list = document.getElementById('so-parts');
+    var tpl = document.getElementById('so-row');
+    var empty = document.getElementById('so-empty');
+    var dirtyNote = document.getElementById('so-dirty');
+    var form = document.getElementById('so-form');
+    var dirty = false;
+
+    function markDirty() { dirty = true; dirtyNote.hidden = false; }
+    function refresh() { empty.hidden = list.children.length > 0; }
+    // Notes grow with what is typed in them, so a song list is readable while it is written.
+    function fit(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; }
+
+    document.addEventListener('click', function (e) {
+      var add = e.target.closest('[data-add]');
+      if (add) {
+        var row = tpl.content.firstElementChild.cloneNode(true);
+        var title = add.getAttribute('data-add');
+        row.querySelector('.part__title').value = title;
+        list.appendChild(row);
+        (title ? row.querySelector('.part__who') : row.querySelector('.part__title')).focus();
+        refresh(); markDirty();
+        return;
+      }
+      var li = e.target.closest('.part');
+      if (!li) return;
+      if (e.target.closest('[data-remove]')) {
+        var named = li.querySelector('.part__title').value.trim();
+        if (named && !window.confirm('Remove "' + named + '"?')) return;
+        li.remove(); refresh(); markDirty();
+        return;
+      }
+      var mv = e.target.closest('[data-move]');
+      if (mv) {
+        if (mv.getAttribute('data-move') === '-1' && li.previousElementSibling) list.insertBefore(li, li.previousElementSibling);
+        else if (mv.getAttribute('data-move') === '1' && li.nextElementSibling) list.insertBefore(li.nextElementSibling, li);
+        mv.focus(); markDirty();
+      }
+    });
+
+    form.addEventListener('input', function (e) {
+      markDirty();
+      if (e.target.classList.contains('part__notes')) fit(e.target);
+    });
+    form.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    Array.prototype.forEach.call(document.querySelectorAll('.part__notes'), fit);
+
+    document.addEventListener('submit', function (e) {
+      var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+      if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+  })();
+</script>
+
+<style>
+  .why { margin: -6px 0 16px; font-size: 15px; max-width: 64ch; }
+  .so-head { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 14px; }
+
+  .parts { list-style: none; margin: 0 0 14px; padding: 0; counter-reset: part; }
+  .part { counter-increment: part; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto;
+          gap: 10px; align-items: start; padding: 12px 0; border-top: 1px solid var(--hair); }
+  .part:first-child { border-top: 0; padding-top: 0; }
+  .part::before { content: counter(part); font-family: var(--serif, Georgia, serif); font-size: 22px;
+                  line-height: 44px; color: var(--red); text-align: right; }
+  .part__fields { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 8px; }
+  .part__fields input, .part__fields textarea {
+    font: inherit; font-size: 16px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--hair);
+    border-radius: 8px; background: #fff; color: inherit; width: 100%; }
+  .part__title { font-weight: 700; }
+  .part__notes { grid-column: 1 / -1; resize: vertical; line-height: 1.4; min-height: 40px; }
+  .part__tools { display: flex; gap: 4px; }
+  .part__tools button { width: 44px; height: 44px; border: 1px solid var(--hair); border-radius: 8px;
+                        background: #fff; color: var(--ink-soft); font-size: 18px; cursor: pointer; }
+  .part__tools button:hover { color: var(--ink); border-color: var(--ink); }
+  .part__tools [data-remove]:hover { color: var(--red); border-color: var(--red); }
+
+  .quick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .quick__chip { font: inherit; font-size: 14px; min-height: 36px; padding: 6px 12px; border-radius: 999px;
+                 border: 1px solid var(--hair); background: #fff; color: var(--ink); cursor: pointer; }
+  .quick__chip:hover { border-color: var(--ink); background: var(--cream-deep); }
+  .btn--sm { min-height: 36px; padding: 6px 14px; font-size: 14px; }
+
+  .so-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; position: sticky; bottom: 0;
+                padding: 12px 0; background: var(--cream); }
+  .linkish { font: inherit; font-size: 15px; background: none; border: 0; padding: 0; color: var(--red);
+             text-decoration: underline; cursor: pointer; }
+
+  @media (max-width: 700px) {
+    .so-head { grid-template-columns: 1fr; }
+    .part { grid-template-columns: 22px minmax(0, 1fr); }
+    .part__fields { grid-template-columns: 1fr; }
+    .part__tools { grid-column: 2; }
+    .quick__chip, .btn--sm { min-height: 44px; }
+  }
+</style>

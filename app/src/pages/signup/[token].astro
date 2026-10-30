@@ -8,7 +8,7 @@ import { numberConsent } from '../../lib/consent';
 import { toE164 } from '../../lib/sms';
 import { localNow } from '../../lib/schedules';
 import {
-  availability, closedReason, dayLabel, nextSeat, SIGNUP_KINDS, slotStatus,
+  availability, closedReason, dayLabel, nextSeat, SIGNUP_KINDS, slotStatus, stillNeeded,
 } from '../../lib/signups';
 
 /**
@@ -371,6 +371,9 @@ const showLabel = (s: { label: string; onDate: string | null }) =>
         const avail = availability(slot.capacity, mine.length);
         const open = !shut && !avail.full;
         const status = slotStatus(slot.capacity, mine.map((t) => t.name), Boolean(shut));
+        // A job says how many people it still needs (see stillNeeded).
+        const need = sheet.kind === 'tasks' && !shut ? stillNeeded(slot.capacity, mine.length) : null;
+        if (need) status.text = need;
 
         /*
          * WITH ONE SLOT THERE IS NOTHING TO CHOOSE BETWEEN, so nothing is
@@ -391,7 +394,11 @@ const showLabel = (s: { label: string; onDate: string | null }) =>
 
         const head = (
           <>
-            {showLabel(slot) && <span class="slot__lbl">{labelFor(slot)}</span>}
+            {/* A job shows what it involves without being opened, so people
+                can choose between jobs at a glance (the pastor, 2026-10-20). */}
+            {showLabel(slot) && (sheet.kind === 'tasks' && slot.detail
+              ? <span class="slot__name"><span class="slot__lbl">{labelFor(slot)}</span><span class="slot__about">{slot.detail}</span></span>
+              : <span class="slot__lbl">{labelFor(slot)}</span>)}
             <span class:list={['slot__st', !showLabel(slot) && 'slot__st--lead']}>
               {status.text}
             </span>
@@ -400,7 +407,7 @@ const showLabel = (s: { label: string; onDate: string | null }) =>
 
         const body = (
           <div class="slot__body">
-            {slot.detail && <p class="muted slot__detail">{slot.detail}</p>}
+            {slot.detail && sheet.kind !== 'tasks' && <p class="muted slot__detail">{slot.detail}</p>}
             {mine.length > 0 && (
               <ul class="names">
                 {mine.map((t) => (
@@ -451,7 +458,9 @@ const showLabel = (s: { label: string; onDate: string | null }) =>
                          ? 'Bringing chicken and dumplings, about 6pm'
                          : sheet.kind === 'dish'
                            ? 'Ham, deviled eggs, a pecan pie…'
-                           : 'Optional'} />
+                           : sheet.kind === 'tasks'
+                             ? 'Bringing my own ladder'
+                             : 'Optional'} />
                 {sheet.kind === 'dish' && (
                   <small class="muted">Shown on this page, so others can plan around it.</small>
                 )}
@@ -577,6 +586,8 @@ const showLabel = (s: { label: string; onDate: string | null }) =>
   summary::-webkit-details-marker { display:none; }
   summary:focus-visible { outline:2px solid var(--red); outline-offset:-2px; }
   .slot__lbl { font-family:var(--font-display); font-size:21px; line-height:1.15; }
+  .slot__name { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .slot__about { font-size:15px; line-height:1.45; color:var(--ink-soft); }
   .slot__st { flex:none; font-size:15px; color:var(--ink-soft); text-align:right; }
   /* A taken day should read as settled rather than as a row still asking to be
      pressed — the whole point of the sheet is telling the two apart at a

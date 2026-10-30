@@ -1,0 +1,42 @@
+---
+/**
+ * The Serving tab's own row of tabs (the pastor, 2026-10-26).
+ *
+ * Service orders, sign-up sheets and the singing schedule are one job: getting
+ * people lined up for what they are doing, and putting it on paper. So they
+ * share one slot in the nav, and this row moves between them without going
+ * back to the overview first. The same shape as KidsMessageTabs.
+ *
+ * Only on the four list pages. An editor or a printout already has its own
+ * way back, and a second row of tabs there would be one more thing to read.
+ */
+interface Props { active: 'overview' | 'orders' | 'signups' | 'singing' }
+const { active } = Astro.props;
+const TABS = [
+  ['overview', '/serving', 'Overview'],
+  ['orders', '/service-orders', 'Service orders'],
+  ['signups', '/signups', 'Sign-up sheets'],
+  ['singing', '/singing', 'Singing'],
+] as const;
+---
+<nav class="sv-tabs" aria-label="Serving">
+  {TABS.map(([key, href, label]) => (
+    <a href={href} aria-current={active === key ? 'page' : undefined}>{label}</a>
+  ))}
+</nav>
+
+<style>
+  .sv-tabs { display: flex; gap: 8px; margin: 0 0 22px; }
+  .sv-tabs a { flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: 40px;
+               padding: 8px 16px; border-radius: 999px; border: 1px solid var(--hair);
+               background: rgba(255, 255, 255, .9); color: var(--ink-soft);
+               font-weight: 700; font-size: 15px; text-decoration: none; white-space: nowrap; }
+  .sv-tabs a:hover { border-color: var(--ink); color: var(--ink); }
+  .sv-tabs a[aria-current="page"] { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+  /* Four across does not fit a phone, and a row that scrolls sideways hid
+     Singing off the edge where nobody would think to swipe for it. Two by two
+     keeps all four in sight. */
+  @media (max-width: 560px) {
+    .sv-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+  }
+</style>

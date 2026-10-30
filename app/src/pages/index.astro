@@ -4,6 +4,9 @@ import { getDb, schema } from '../db';
 import { sql, eq, desc } from 'drizzle-orm';
 import { canAccess } from '../lib/permissions';
 import { dueCounts, refreshMissing } from '../lib/care-db';
+import { textHealth, lastSeen, CRON_LATE_MINUTES } from '../lib/troubleshoot-db';
+import { allHeroes } from '../lib/lobby-heroes-db';
+import { churchToday } from '../lib/services';
 
 const user = Astro.locals.user!;
 const db = getDb(Astro.locals.runtime.env);
@@ -72,6 +75,44 @@ if (canAccess(user.role, '/care')) {
     care = await dueCounts(careEnv);
   } catch { care = null; }
 }
+/*
+ * A warning when texting has a problem, for the admins who can fix it (the pastor,
+ * 2026-10-21: "so I can see notifications if texts don't go out"). Shown only
+ * for something worth acting on: the five-minute job has stopped, texts are
+ * overdue, or texts in the last three days did not arrive. Caught like Care.
+ *
+ * Only what is NEW since this person last opened the troubleshooting page
+ * ("once a dashboard alert is clicked on it is cleared"). A job that has
+ * stopped is new if it was still running when they last looked.
+ */
+let textLine: string | null = null;
+if (canAccess(user.role, '/website')) {
+  try {
+    const seen = await lastSeen(db, user.id);
+    const h = await textHealth(db, 3, seen);
+    textLine = [
+      h.cronMinutesAgo !== null && h.cronMinutesAgo > CRON_LATE_MINUTES
+        && (!seen || (h.cronLastRun ?? '') > seen)
+        && 'the five-minute text job has stopped, so scheduled texts and reminders are not going out',
+      h.overdue > 0 && `${h.overdue} scheduled ${h.overdue === 1 ? 'text is' : 'texts are'} overdue`,
+      h.notDelivered > 0 && `${h.notDelivered} ${h.notDelivered === 1 ? 'text' : 'texts'} did not arrive ${seen ? 'since you last checked' : 'in the last 3 days'}`,
+    ].filter(Boolean).join('; ') || null;
+  } catch { textLine = null; }
+}
+
+/*
+ * The lobby screen gets one line here; everything for it is on the Lobby tab.
+ * Caught: a table not yet migrated is a card left off, never a dashboard that
+ * will not load.
+ */
+let heroCount: number | null = null;
+if (canAccess(user.role, '/lobby/manage')) {
+  try {
+    const today = churchToday();
+    heroCount = (await allHeroes(db)).filter((h) => h.active && (!h.startsOn || h.startsOn <= today) && (!h.endsOn || h.endsOn >= today)).length;
+  } catch { heroCount = null; }
+}
+
 const careLine = care && care.total > 0 ? [
   care.guest && `${care.guest} guest ${care.guest === 1 ? 'card' : 'cards'}`,
   care.reminder && `${care.reminder} ${care.reminder === 1 ? 'reminder' : 'reminders'}`,
@@ -102,15 +143,22 @@ const careLine = care && care.total > 0 ? [
     </p>
   )}
 
+  {textLine && (
+    <p class="notice">
+      <strong>Texting:</strong> {textLine}. <a href="/website/troubleshooting">See what happened</a>.
+    </p>
+  )}
+
   {careLine && (
     <p class="notice notice--care">
       <strong>To follow up:</strong> {careLine}. <a href="/care">Open Care</a>.
     </p>
   )}
 
-  {/* The four most-used screens, as targets big enough to hit on a phone
-      without aiming. Deliberately not a fifth: the moment this becomes a menu
-      it stops being faster than the nav bar above it. */}
+  {/* The most-used screens, as targets big enough to hit on a phone without
+      aiming. Four became five on 2026-10-26 when the pastor asked for the service
+      order, which he makes most weeks. Keep it near there: the moment this
+      becomes a menu it stops being faster than the nav bar above it. */}
   <nav class="quick" aria-label="Jump to">
     <a href="/messaging">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -142,6 +190,16 @@ const careLine = care && care.total > 0 ? [
       <span class="quick__n">Build this week’s</span>
     </a>
 
+    <a href="/service-orders">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 6.5h11M9 12h11M9 17.5h11" />
+        <path d="M4 6.5h.01M4 12h.01M4 17.5h.01" stroke-width="2.4" />
+      </svg>
+      <span class="quick__l">Service order</span>
+      <span class="quick__n">Who leads each part</span>
+    </a>
+
     <a href="/signups">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -153,6 +211,14 @@ const careLine = care && care.total > 0 ? [
       <span class="quick__n">Meals, nursery, helpers</span>
     </a>
   </nav>
+
+  {heroCount !== null && (
+    <a class="card lobby-link" href="/lobby/manage">
+      <span><strong>Lobby screen</strong>
+        <span class="muted"> · {heroCount === 0 ? 'no hero frames showing' : `${heroCount} hero ${heroCount === 1 ? 'frame' : 'frames'} showing`}</span></span>
+      <span class="lobby-link__go">Hero frames, words and pace →</span>
+    </a>
+  )}
 
   <div class="card">
     <h2>Recent services</h2>
@@ -170,10 +236,11 @@ const careLine = care && care.total > 0 ? [
     )}
   </div>
 </AppLayout>
-
 <style>
-  /* Four squares. Two-up on a phone, which keeps them square there as well —
-     a 4-wide row on a 375px screen gives tiles too small to label. */
+  /* Five squares in a row. Two-up on a phone, which keeps them square there as
+     well — a 5-wide row on a 375px screen gives tiles too small to label — and
+     the fifth, alone on its row, becomes a wide bar rather than a square with
+     a hole beside it. */
   /* minmax(0, …) and not a plain 1fr.
    *
    * A 1fr track has an AUTO minimum, which is min-content — and on a tile with
@@ -188,7 +255,7 @@ const careLine = care && care.total > 0 ? [
   .notice--care { border-color: var(--ok); background: #e8f2eb; color: #16532c; }
   .notice--care a { color: #16532c; font-weight: 700; }
   .quick {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 14px; margin-bottom: 26px;
   }
   .quick a {
@@ -218,9 +285,22 @@ const careLine = care && care.total > 0 ? [
   .quick__n { font-size: 13px; line-height: 1.35; color: var(--ink-soft); }
   .quick a:hover .quick__n { color: rgba(244, 239, 231, .8); }
 
-  @media (max-width: 720px) {
+  @media (max-width: 900px) {
     .quick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .quick a:last-child:nth-child(odd) {
+      grid-column: 1 / -1; aspect-ratio: auto; min-height: 96px;
+      display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+      column-gap: 16px; row-gap: 2px; justify-content: start; text-align: left; padding: 16px 20px;
+    }
+    .quick a:last-child:nth-child(odd) svg { grid-row: 1 / 3; align-self: center; }
+    .quick a:last-child:nth-child(odd) .quick__l { align-self: end; }
+    .quick a:last-child:nth-child(odd) .quick__n { align-self: start; }
   }
+  .lobby-link { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+                margin-bottom: 26px; color: var(--ink); text-decoration: none; }
+  .lobby-link:hover { border-color: var(--ink); }
+  .lobby-link__go { font-weight: 700; }
+
   @media (prefers-reduced-motion: reduce) {
     .quick a { transition: none; }
     .quick a:active { transform: none; }

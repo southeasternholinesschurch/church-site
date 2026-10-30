@@ -1,0 +1,350 @@
+---
+/**
+ * The lobby screen: the Samsung Frame in the foyer.
+ *
+ * PUBLIC, and EXACTLY this path (see PUBLIC_EXACT in lib/public-paths.ts).
+ * Everything it shows is already public — the published bulletin and the
+ * site's events — and it never reads `locals.user`.
+ *
+ * Standalone like the kiosk: no shared layout or stylesheet, no navigation,
+ * and it never reloads to change scene. Data arrives by fetch from
+ * /api/lobby/feed every couple of minutes; the last good copy is kept when a
+ * fetch fails. The programme, the clock and the remote live in
+ * lib/lobby-screen.ts; the judgement about what to show lives in lib/lobby.ts.
+ *
+ * Why it looks and moves the way it does: handoff/DESIGN-lobby-screen.md.
+ *
+ * Preview helpers, for screenshots and for checking a Sunday on a Thursday:
+ *   ?at=2026-10-25T09:40   pretend it is this time at the church
+ *   ?season=advent         force a season
+ *   ?channel=week          start on a channel (today, week, events, photos)
+ *   ?scene=prayer          jump to the first scene of a kind, and hold it
+ *   ?hold                  pause on whatever is showing
+ */
+export const prerender = false;
+import '../../styles/lobby-hero.css';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#1a1512" />
+    <title>Lobby · Fairhaven Community Church</title>
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <link rel="preload" href="/fonts/texta-regular.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
+  <body data-season="ordinary">
+    <div id="frame">
+      <div id="stage" aria-hidden="false">
+        <main id="scenes" aria-live="off"></main>
+
+        <div id="glance">
+          <div class="scrim scrim--top"></div>
+          <div class="scrim scrim--bottom"></div>
+          <img class="wordmark" src="/lobby-photos/wordmark.png" alt="Fairhaven Community Church" width="321" height="52" />
+          <div class="clockbar" id="clockbar">
+            <span class="clockbar__time" id="clock"></span>
+            <span class="clockbar__rule" aria-hidden="true"></span>
+            <span class="clockbar__next" id="next"></span>
+          </div>
+          <div class="progress" id="progress" aria-hidden="true"></div>
+        </div>
+
+        <div class="hud" id="hud" hidden></div>
+      </div>
+    </div>
+
+    <script>
+      import { start } from '../../lib/lobby-screen';
+      start();
+    </script>
+
+    <style is:global>
+      @font-face { font-family: 'Texta'; src: url('/fonts/texta-regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+      @font-face { font-family: 'Texta'; src: url('/fonts/texta-bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+
+      /* The site's tokens (site/src/styles/tokens.css), plus the screen's own. */
+      :root {
+        --ink: #1a1512; --ink-soft: #4a4038;
+        --red: #b01818; --red-tint: #f0d5d5;
+        --cream: #f7f2ea;
+        --serif: 'Instrument Serif', Georgia, serif;
+        --sans: 'Texta', ui-sans-serif, system-ui, sans-serif;
+        /* Motion. Arrivals start fast and settle long; dissolves and drift have
+           no corners; exits start gently and then go. */
+        --ease-out: cubic-bezier(.16, 1, .3, 1);
+        --ease-inout: cubic-bezier(.45, 0, .55, 1);
+        --ease-in: cubic-bezier(.55, 0, .75, .2);
+        --accent: var(--red);
+        --accent-tint: var(--red-tint);
+      }
+
+      /* Church seasons re-tint the accent only. Each passes 4.5:1 on the light
+         glass as a label, and carries cream text as a fill. */
+      [data-season='advent']       { --accent: #4b3f8f; --accent-tint: #d9d3f2; }
+      [data-season='christmas']    { --accent: #a3221b; --accent-tint: #f3d3cf; }
+      [data-season='lent']         { --accent: #5e3d73; --accent-tint: #e4d5ee; }
+      [data-season='holy-week']    { --accent: #6b1d1d; --accent-tint: #ecd0cc; }
+      [data-season='easter']       { --accent: #8a6418; --accent-tint: #f2e3bf; }
+      [data-season='pentecost']    { --accent: #b3351a; --accent-tint: #f6d6c9; }
+      [data-season='thanksgiving'] { --accent: #9a4a17; --accent-tint: #f2dcc8; }
+
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      html, body { margin: 0; height: 100%; background: #1a1512; overflow: hidden; cursor: none; }
+      body { font-family: var(--sans); color: var(--cream); -webkit-font-smoothing: antialiased; }
+      p, h1, h2, ul { margin: 0; }
+      ul { list-style: none; padding: 0; }
+
+      /* One 1920×1080 stage, zoomed to the screen (lobby-screen.ts sets the
+         zoom). Zoom rather than a transform: layout happens at the real size,
+         so text is drawn sharp at 4K instead of scaled up from 1080. */
+      #frame { position: fixed; inset: 0; display: grid; place-items: center; }
+      #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #2a211c; }
+      #scenes { position: absolute; inset: 0; }
+
+      /* ---- materials ---------------------------------------------------- */
+      .layer[data-material='light'] {
+        --glass-bg: rgba(247, 242, 234, .78); --glass-ink: var(--ink); --glass-soft: var(--ink-soft);
+        --glass-hair: rgba(26, 21, 18, .16); --glass-edge: rgba(255, 255, 255, .55);
+        /* The accent, deepened for small capitals on light glass: brand red
+           measured 4.6:1 there, and signage wants nearer 7:1. */
+        --label: color-mix(in srgb, var(--accent) 78%, #000);
+      }
+      .layer[data-material='dark'] {
+        --glass-bg: rgba(30, 24, 20, .56); --glass-ink: var(--cream); --glass-soft: rgba(247, 242, 234, .76);
+        --glass-hair: rgba(247, 242, 234, .2); --glass-edge: rgba(255, 255, 255, .14);
+        --label: var(--accent-tint);
+      }
+      .glass {
+        background: var(--glass-bg); color: var(--glass-ink);
+        -webkit-backdrop-filter: blur(40px) saturate(1.4); backdrop-filter: blur(40px) saturate(1.4);
+        border: 1px solid var(--glass-edge); border-radius: 28px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 50px 100px -50px rgba(0, 0, 0, .6);
+      }
+
+      /* ---- the picture -------------------------------------------------- */
+      .m-photo { position: absolute; inset: 0; overflow: hidden; background: #2a211c; }
+      .m-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+                     filter: saturate(.94) contrast(1.03) brightness(.86); }
+      .m-photo img.blurred { filter: blur(30px) saturate(1.1) brightness(.9); }
+      .m-photo--night { background: radial-gradient(ellipse at 50% 40%, #2b221d, #120e0c 70%); }
+      /* A sharp strip of the photograph across the top (Give, New Here), over a
+         blurred copy of itself, so the faces stay in view above the band. */
+      .m-photo--strip { bottom: auto; height: 640px; background: none;
+                        -webkit-mask-image: linear-gradient(#000 58%, transparent); mask-image: linear-gradient(#000 58%, transparent); }
+
+      /* ---- type: six sizes on the 1080 stage ----------------------------- */
+      .t-label { font-size: 30px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--label); }
+      .t-big     { font-family: var(--serif); font-size: 176px; line-height: .78; font-weight: 400; }
+      .t-heading { font-family: var(--serif); font-size: 96px; line-height: 1; font-weight: 400; text-wrap: balance; }
+      .t-title   { font-family: var(--serif); font-size: 64px; line-height: 1.04; font-weight: 400; text-wrap: balance; }
+      .t-quote   { font-family: var(--serif); font-size: 76px; line-height: 1.1; font-weight: 400; text-wrap: balance; }
+      .t-item    { font-family: var(--serif); font-size: 48px; line-height: 1.1; }
+      .t-body    { font-size: 42px; line-height: 1.35; color: var(--glass-soft); text-wrap: pretty; }
+      .byline    { display: flex; align-items: baseline; gap: 28px; }
+      .t-meta    { font-size: 32px; line-height: 1.3; color: var(--glass-soft); }
+      .t-em      { font-family: var(--serif); font-style: italic; }
+      .hair      { height: 1px; background: var(--glass-hair); }
+
+      /*
+       * ---- THE SAFE AREA: where a panel may be -------------------------------
+       *
+       * Two bands of the stage are RESERVED for the glance layer and nothing
+       * else may enter them:
+       *
+       *   top     0 – 160 px    the wordmark and the clock bar (which end at 128)
+       *   bottom  976 – 1080    the progress line (at 1024)
+       *
+       * and 96 px at each side. Every panel is placed inside that box by a
+       * `.pos` that IS the box, and cannot grow out of it (max-height/width
+       * 100%, overflow hidden). Content that would not fit is first set
+       * slightly smaller by fitPanels() in lobby-screen.ts, and long lists are
+       * paginated in lib/lobby.ts before they ever get here — so the clip is a
+       * backstop that never shows, never an overlap.
+       */
+      .pos { position: absolute; inset: 160px 96px 104px; display: flex; pointer-events: none; }
+      .pos > .m-panel { max-width: 100%; max-height: 100%; overflow: hidden; }
+      .pos--hero      { align-items: flex-end; justify-content: flex-start; }
+      .pos--statement, .pos--center { align-items: center; justify-content: center; }
+      .pos--feature   { align-items: center; justify-content: flex-end; }
+      .pos--list      { align-items: center; }
+      .pos--shelf     { align-items: flex-end; }
+
+      .hero      { width: 1000px; padding: 56px 64px; display: flex; flex-direction: column; gap: 30px; }
+      .statement { width: 1480px; padding: 88px 120px; display: flex; flex-direction: column; align-items: center; gap: 36px; text-align: center; }
+      .feature   { width: 800px; padding: 60px 64px; display: flex; flex-direction: column; justify-content: space-between; gap: 40px; }
+      .list      { width: 100%; padding: 64px 80px; display: flex; gap: 96px; }
+      .shelf     { padding: 48px 64px 56px; }
+      .list > .col, .list > .stack { min-height: 0; }
+      .card      { width: 1180px; padding: 84px 100px; display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center; }
+
+      .countdown { display: flex; align-items: flex-end; gap: 28px; }
+      .countdown__words { font-size: 42px; line-height: 1.2; padding-bottom: 4px; }
+      .countdown__words .t-meta { display: block; }
+
+      .stack { display: flex; flex-direction: column; gap: 26px; }
+      .col { flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+      .rows > li { border-bottom: 1px solid var(--glass-hair); padding: 18px 0; }
+      .chips { display: grid; grid-template-rows: repeat(7, auto); grid-auto-flow: column; column-gap: 56px; }
+      .chips > li { display: flex; align-items: center; gap: 26px; border-bottom: 1px solid var(--glass-hair); padding: 12px 0; font-size: 42px; }
+      .chip-day { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; flex: none;
+                  background: var(--accent); color: var(--cream); font-size: 32px; font-weight: 700; }
+
+      .events { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 520px)); margin-top: 32px; }
+      .event { display: flex; gap: 32px; padding: 0 40px; border-left: 1px solid var(--glass-hair); }
+      .event:first-child { border-left: 0; padding-left: 0; }
+      .dateblock { flex: none; width: 116px; height: 132px; border-radius: 18px; display: grid; place-items: center; text-align: center;
+                   background: var(--accent); color: var(--cream); }
+      .dateblock b { display: block; font-size: 26px; letter-spacing: .16em; }
+      .dateblock span { display: block; font-family: var(--serif); font-size: 64px; line-height: .95; }
+      .dateblock--range span { font-size: 46px; }
+      /* Titles line up across the shelf, and the date and the time are a line
+         each: a balanced wrap broke "Saturday 24 Oct · 11:00 AM" after
+         "Saturday 24", which reads as a mistake from across a room. */
+      .event__text { display: flex; flex-direction: column; justify-content: flex-start; gap: 10px; min-width: 0; }
+      .event__when > span { display: block; }
+      .event__title { font-family: var(--serif); font-size: 48px; line-height: 1.04; text-wrap: balance; }
+
+      .qr { display: flex; align-items: center; gap: 40px; }
+      .qr__code { flex: none; background: #fff; border-radius: 20px; padding: 6px; }
+      .qr__code svg { display: block; width: 240px; height: 240px; }
+
+      /* The standing invitations (Give, New Here): a band along the bottom, the
+         words on the left, the code on the right where the eye finishes. The
+         code is the biggest thing in the panel — about 23 cm on a 65" Frame,
+         which a phone reads from two metres — because scanning it is the only
+         thing the scene asks anyone to do. */
+      .invite { width: 100%; padding: 52px 64px 52px 72px; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+                gap: 88px; align-items: center; }
+      .invite__words { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+      .invite__head { font-size: 104px; line-height: .98; }
+      .invite__head em { display: block; font-style: italic; }
+      .invite__words .t-body { max-width: 980px; }
+      .invite__code { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; width: 420px; }
+      .invite__code .qr__code { margin-bottom: 18px; border-radius: 22px; box-shadow: 0 18px 40px -24px rgba(0, 0, 0, .5); }
+      .invite__code .qr__code svg { width: 320px; height: 320px; }
+      .invite__scan { font-size: 40px; font-weight: 700; color: var(--glass-ink); }
+      .invite__addr { color: var(--glass-ink); letter-spacing: .01em; }
+      /* "Missed last Sunday?": the invitation shelf with the sermon set between
+         the words and the code as a card of its own — the one thing on the
+         slide that changes each week, so it gets an edge round it. */
+      .invite--sermon { grid-template-columns: auto minmax(0, 1fr) auto; gap: 64px; }
+      .invite--sermon .invite__head { font-size: 88px; }
+      .invite--sermon .invite__code { width: 400px; }
+      .invite--sermon .invite__addr { font-size: 28px; }
+      .invite--sermon .invite__code .qr__code svg { width: 280px; height: 280px; }
+      .sermon-card { align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 18px;
+                     padding: 40px 44px; border: 1px solid var(--glass-hair); border-radius: 22px;
+                     background: color-mix(in srgb, var(--glass-ink) 5%, transparent); min-width: 0; }
+      .sermon-card__date { color: var(--label); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 26px; }
+      .sermon-card__title { font-size: 60px; }
+      .sermon-card__facts { display: flex; flex-wrap: wrap; gap: 14px 48px; margin: 6px 0 0; padding-top: 22px; border-top: 1px solid var(--glass-hair); }
+      .sermon-card__facts dt { font-size: 24px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--glass-soft); }
+      .sermon-card__facts dd { margin: 4px 0 0; font-size: 38px; color: var(--glass-ink); }
+
+      .services { display: grid; grid-template-columns: auto auto 1fr; column-gap: 36px; }
+      .services > * { padding: 16px 0; border-bottom: 1px solid var(--glass-hair); font-size: 40px; }
+      .services .t-title { font-size: 48px; }
+
+
+      .clamp3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+      /* ---- night: a dim clock, nothing else ----------------------------- */
+      .night { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+               gap: 24px; color: rgba(247, 242, 234, .42); text-align: center; }
+      .night .t-big { font-size: 220px; }
+      body.is-night #glance { opacity: 0; }
+
+      /* ---- the glance layer: never animates on a scene change ----------- */
+      #glance { position: absolute; inset: 0; pointer-events: none; z-index: 100000; transition: opacity 2.4s var(--ease-inout); }
+      .scrim { position: absolute; left: 0; right: 0; }
+      .scrim--top { top: 0; height: 200px; background: linear-gradient(180deg, rgba(20, 15, 12, .32), rgba(20, 15, 12, 0)); }
+      .scrim--bottom { bottom: 0; height: 140px; background: linear-gradient(0deg, rgba(20, 15, 12, .28), rgba(20, 15, 12, 0)); }
+      .wordmark { position: absolute; left: 96px; top: 70px; height: 52px; width: auto; opacity: .82; }
+      /* Readable, not loud: smoked glass, cream at reduced strength. */
+      .clockbar { position: absolute; right: 96px; top: 64px; height: 64px; display: flex; align-items: center; gap: 24px;
+                  padding: 0 30px; border-radius: 999px; color: rgba(247, 242, 234, .84);
+                  background: rgba(26, 21, 18, .38); border: 1px solid rgba(255, 255, 255, .12);
+                  -webkit-backdrop-filter: blur(24px) saturate(1.2); backdrop-filter: blur(24px) saturate(1.2);
+                  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+      .clockbar__time { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .clockbar__rule { width: 1px; height: 26px; background: rgba(247, 242, 234, .22); }
+      .clockbar__next { font-size: 30px; color: rgba(247, 242, 234, .68); }
+      .clockbar__next:empty, .clockbar__rule:has(+ .clockbar__next:empty) { display: none; }
+      .progress { position: absolute; left: 96px; right: 96px; bottom: 52px; display: flex; gap: 10px; }
+      .progress > i { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: rgba(247, 242, 234, .22); }
+      .progress > i.done::after, .progress > i.now::after { content: ''; display: block; height: 100%; background: rgba(247, 242, 234, .62); }
+      .progress > i.now::after { transform-origin: left; animation: fill var(--dur, 10s) linear both; }
+      body.is-paused .progress > i.now::after { animation-play-state: paused; }
+      @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+      /* The remote's feedback: a quiet chip, top centre, for three seconds. */
+      .hud { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 100001; height: 64px; display: flex; align-items: center;
+             padding: 0 34px; border-radius: 999px; font-size: 30px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+             color: var(--cream); background: rgba(26, 21, 18, .5); border: 1px solid rgba(255, 255, 255, .14);
+             -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); animation: settle .9s var(--ease-out) both; }
+
+      /*
+       * MOTION. One choreographed hand-off per scene change, about 3.5 s, with
+       * the incoming scene layered OVER the outgoing one — never through black.
+       *
+       *   0    – 0.8 s   outgoing words recede (ease-in, lift 6 px)
+       *   0.3  – 2.7 s   incoming photograph dissolves over the old, already drifting
+       *   0.9  – 2.3 s   the glass panel settles (rise 14 px, scale .985 → 1)
+       *   1.25 s +       lines come into focus in reading order, 110 ms apart
+       *
+       * Only opacity, transform and a small text blur are animated, which the
+       * compositor handles on a modest box. backdrop-filter is never animated.
+       */
+      .layer { position: absolute; inset: 0; }
+      .layer.entering .m-photo { animation: dissolve 2.4s var(--ease-inout) .3s both; }
+      .layer.entering .m-panel { animation: settle 1.4s var(--ease-out) .9s both; }
+      .layer.entering .m-line  { animation: focusin 1.5s var(--ease-out) both; animation-delay: calc(1.25s + var(--i, 0) * 110ms); }
+      .layer.entering .night   { animation: dissolve 3s var(--ease-inout) both; }
+      .layer.leaving .m-panel  { animation: recede .8s var(--ease-in) both; }
+      .layer.instant .m-photo, .layer.instant .m-panel, .layer.instant .m-line { animation-delay: 0s !important; animation-duration: .01s !important; }
+
+      /* The drift: continuous, eased at both ends, ~6% over the scene's whole
+         life, in one of four directions so consecutive photos never push the
+         same way. A blurred background barely moves. */
+      .m-photo img { animation: drift var(--life, 24s) var(--ease-inout) both; }
+      .m-photo[data-v='0'] img { transform-origin: 30% 40%; }
+      .m-photo[data-v='1'] img { transform-origin: 72% 58%; }
+      .m-photo[data-v='2'] img { transform-origin: 50% 35%; animation-name: drift-out; }
+      .m-photo[data-v='3'] img { transform-origin: 62% 70%; }
+      .m-photo img.blurred { animation-name: drift-soft; }
+
+      @keyframes dissolve   { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes settle     { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+      @keyframes focusin    { from { opacity: 0; transform: translateY(16px); filter: blur(6px); } to { opacity: 1; transform: none; filter: blur(0); } }
+      @keyframes recede     { from { opacity: 1; } to { opacity: 0; transform: translateY(-6px); } }
+      @keyframes drift      { from { transform: scale(1); } to { transform: scale(1.065); } }
+      @keyframes drift-out  { from { transform: scale(1.065); } to { transform: scale(1); } }
+      @keyframes drift-soft { from { transform: scale(1.15); } to { transform: scale(1.19); } }
+
+      /* A changing number (the clock, a countdown): the old fades up and out as
+         the new settles in. Small enough that nobody notices the movement,
+         only that the number changed gracefully. */
+      .tick { display: inline-grid; }
+      .tick > span { grid-area: 1 / 1; }
+      .tick .in  { animation: tick-in .7s var(--ease-out) both; }
+      .tick .out { animation: tick-out .5s var(--ease-in) both; }
+      @keyframes tick-in  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      @keyframes tick-out { to { opacity: 0; transform: translateY(-4px); } }
+
+      /* Asked for less motion: everything becomes a slow, plain fade. */
+      @media (prefers-reduced-motion: reduce) {
+        .m-photo img { animation: none !important; }
+        .m-photo img.blurred { transform: scale(1.15); }
+        .layer.entering .m-line, .layer.entering .m-panel, .tick .in { animation-name: dissolve !important; }
+        .layer.leaving .m-panel, .tick .out { animation-name: dissolve !important; animation-direction: reverse !important; }
+      }
+    </style>
+  </body>
+</html>

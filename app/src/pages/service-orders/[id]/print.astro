@@ -1,0 +1,241 @@
+---
+import { getDb, schema } from '../../../db';
+import { eq } from 'drizzle-orm';
+import { isIsoDate, longDate, parseItems } from '../../../lib/service-order';
+import PrintHint from '../../../components/PrintHint.astro';
+
+/**
+ * A service order for paper: three identical slips across a sheet of Letter
+ * turned sideways, to be cut apart and handed out (the pastor, 2026-10-25).
+ *
+ * HOW IT GETS ONTO THE PAPER, AND WHY THIS WAY. The slips are laid out as one
+ * landscape sheet, 11in x 8.5in, and in print that sheet is turned a quarter
+ * turn onto an ordinary PORTRAIT page. Physically the result is the same — three
+ * columns across the long edge — but nobody has to find the landscape switch in
+ * Safari's print dialog, and nothing depends on Safari honouring
+ * `@page { size: landscape }`. Media queries cannot detect the paper's
+ * orientation either: WebKit answers them from the WINDOW, not the page
+ * (checked through WebKit's own print path, 2026-10-25).
+ *
+ * Sizes are fixed CSS pixels at 96 to the inch, so what fits on screen fits on
+ * paper. If a browser's page is a little smaller than Letter (Safari scales
+ * some), WebKit shrinks the whole sheet evenly to the page width; the slips
+ * stay equal and the cut lines stay straight.
+ *
+ * FITTING. A long order (an afternoon of singers, each with a song) must still
+ * be one slip, so the script below steps the type down until the parts fit
+ * above the logo, switching to a compact layout before the type gets small,
+ * and steps it up a little for a short one. No CSS columns and
+ * no flex on paper: see the memory note about Safari dropping both.
+ *
+ * Black and white first: the ink is black, the one red is the small heading and
+ * the logo's quarter, and both read as grey on a mono printer.
+ */
+const db = getDb(Astro.locals.runtime.env);
+const id = Number(Astro.params.id);
+const [order] = Number.isInteger(id)
+  ? await db.select().from(schema.serviceOrders).where(eq(schema.serviceOrders.id, id)).limit(1)
+  : [];
+if (!order) return Astro.redirect('/service-orders', 303);
+
+const items = parseItems(order.items);
+const date = isIsoDate(order.serviceDate) ? longDate(order.serviceDate) : '';
+const SLIPS = [0, 1, 2];
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{order.name} · {date}</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/staff-icons/favicon-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" />
+    <style is:global>
+      @font-face { font-family:'Texta'; font-weight:400; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-regular.woff2') format('woff2'); }
+      @font-face { font-family:'Texta'; font-weight:700; font-style:normal; font-display:swap;
+                   src:url('/fonts/texta-bold.woff2') format('woff2'); }
+      :root {
+        --ink:#14100d; --ink-soft:#4a4038; --red:#b01818; --cream:#f4efe7; --hair:#cfc8bf;
+        --serif:'Instrument Serif', Georgia, 'Times New Roman', serif;
+        --sans:'Texta', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--cream); color: var(--ink); font-family: var(--sans); }
+
+      /* ---- the bar above the paper, screen only ---- */
+      .bar { position: sticky; top: 0; z-index: 2; background: var(--ink); color: var(--cream);
+             display: flex; gap: 14px; align-items: center; justify-content: space-between;
+             flex-wrap: wrap; padding: 10px clamp(16px, 4vw, 32px); }
+      .bar a { color: rgba(244,239,231,.85); font-size: 15px; }
+      .bar p { margin: 0; font-size: 14px; color: rgba(244,239,231,.75); flex: 1 1 260px; }
+      .bar p strong { color: #ffd9a8; }
+      .bar button { font: inherit; font-weight: 700; font-size: 15px; cursor: pointer;
+                    background: var(--cream); color: var(--ink); border: 0; border-radius: 6px;
+                    min-height: 40px; padding: 8px 18px; }
+
+      /* ---- the sheet: 11in x 8.5in, three slips ---- */
+      /* The preview's width comes from the screen in CSS, and the sheet inside
+         is scaled to it; overflow is clipped so the full-size sheet can never
+         widen the page. Without that, a phone saw a 1056px page, zoomed the
+         whole thing out, and the Print button became a speck (2026-10-25). */
+      .stage { margin: 24px auto 60px; width: min(1056px, calc(100vw - 32px)); height: calc(816px * var(--zoom, 1));
+               overflow: hidden; }
+      .sheet { position: relative; width: 1056px; height: 816px; background: #fff; overflow: hidden;
+               transform-origin: 0 0; transform: scale(var(--zoom, 1));
+               box-shadow: 0 2px 24px rgba(20,16,13,.16); }
+      .slip { position: absolute; top: 0; width: 352px; height: 816px; padding: 40px 32px 0; }
+      .slip:nth-child(1) { left: 0; }
+      .slip:nth-child(2) { left: 352px; }
+      .slip:nth-child(3) { left: 704px; }
+      /* Where to cut. Faint, so a slip that is cut a hair off still looks clean. */
+      .cut { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed #b3aca4; }
+
+      .slip__body { --s: 1; max-height: 692px; overflow: hidden; }   /* = ROOM in the script: an order too long is cut cleanly above the logo, never over it */
+      .kicker { margin: 0; font-size: calc(8.5pt * var(--s)); font-weight: 700; letter-spacing: .26em;
+                text-transform: uppercase; color: var(--red); }
+      .name { margin: calc(8px * var(--s)) 0 0; font-family: var(--serif); font-weight: 400;
+              font-size: calc(27pt * var(--s)); line-height: .98; letter-spacing: -.005em; }
+      .date { margin: calc(6px * var(--s)) 0 0; font-family: var(--serif); font-style: italic;
+              font-size: calc(13pt * var(--s)); color: var(--ink-soft); }
+      .line { margin: calc(5px * var(--s)) 0 0; font-size: calc(9.5pt * var(--s)); line-height: 1.35; color: var(--ink-soft); }
+      .rule { margin: calc(14px * var(--s)) 0 calc(6px * var(--s)); border: 0; border-top: 1.5px solid var(--ink); }
+
+      .parts { list-style: none; margin: 0; padding: 0; }
+      .part { padding: calc(9px * var(--s)) 0 calc(8px * var(--s)); border-bottom: 1px solid var(--hair); }
+      .part:last-child { border-bottom: 0; }
+      .part__title { margin: 0; font-family: var(--serif); font-size: max(10pt, calc(16pt * var(--s))); line-height: 1.08; }
+      .part__who { margin: calc(3px * var(--s)) 0 0; font-size: max(6.5pt, calc(8.5pt * var(--s))); font-weight: 700;
+                   letter-spacing: .14em; text-transform: uppercase; line-height: 1.3; color: var(--ink); }
+      .part__notes { margin: calc(3px * var(--s)) 0 0; font-size: max(7.5pt, calc(9.5pt * var(--s))); line-height: 1.35;
+                     color: var(--ink-soft); white-space: pre-line; }
+      /*
+       * COMPACT, for a long order (an afternoon of singers): each part on as
+       * few lines as it will go, with the leader and the note running on after
+       * the title instead of under it. The script switches to it only when the
+       * full layout would need the type smaller than reads comfortably.
+       */
+      .is-compact .part { padding: calc(5px * var(--s)) 0 calc(5px * var(--s)); line-height: 1.25; }
+      .is-compact .part__title, .is-compact .part__who, .is-compact .part__notes { display: inline; margin: 0; }
+      .is-compact .part__title { line-height: 1.15; }
+      .is-compact .part__who { margin-left: .55em; }
+      .is-compact .part__notes { white-space: normal; }
+      .is-compact .part__notes::before { content: '\2014\00a0'; }
+      .empty { font-family: var(--serif); font-style: italic; font-size: 14pt; color: var(--ink-soft); }
+
+      .slip__foot { position: absolute; left: 32px; right: 32px; bottom: 34px; text-align: center; }
+      .slip__foot img { display: block; width: 210px; height: auto; margin: 0 auto; }
+
+      /*
+       * PRINT: the landscape sheet, turned onto a portrait Letter page. The
+       * stage is the page (8.5in x 11in) and clips, so the turned sheet cannot
+       * widen the document and make the browser shrink it.
+       */
+      @page { size: letter portrait; margin: 0; }
+      @media print {
+        body { background: #fff; }
+        .bar { display: none; }
+        .stage { margin: 0; width: 816px; height: 1056px; overflow: hidden; position: relative; }
+        .sheet { position: absolute; top: 0; left: 0; box-shadow: none;
+                 transform: translateX(816px) rotate(90deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <a href={`/service-orders/${order.id}`}>← Back to editing</a>
+      <p id="fit-note">Three slips to a sheet. Print it as it comes — portrait, on Letter — and the slips run across the long edge.</p>
+      <button type="button" id="print">Print</button>
+      <PrintHint />
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="sheet">
+        {SLIPS.map(() => (
+          <section class="slip">
+            <div class="slip__body">
+              <p class="kicker">Order of Service</p>
+              <h1 class="name">{order.name}</h1>
+              {date && <p class="date">{date}</p>}
+              {order.line && <p class="line">{order.line}</p>}
+              <hr class="rule" />
+              {items.length === 0 ? <p class="empty">No parts yet.</p> : (
+                <ol class="parts">
+                  {items.map((it) => (
+                    <li class="part">
+                      <p class="part__title">{it.title}</p>
+                      {it.who && <p class="part__who">{it.who}</p>}
+                      {it.notes && <p class="part__notes">{it.notes}</p>}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+            <div class="slip__foot">
+              <img src="/print/wordmark.png" alt="Fairhaven Community Church" />
+            </div>
+          </section>
+        ))}
+        <div class="cut" style="left:352px"></div>
+        <div class="cut" style="left:704px"></div>
+      </div>
+    </div>
+
+    <script is:inline>
+      /*
+       * Fit the parts to the slip, then fit the sheet to the screen. Plain ES —
+       * scripts/check-inline-scripts.mjs parses this.
+       *
+       * The room for the parts is the slip less its top padding and the logo
+       * block at the foot. The type scale --s is the largest step that fits,
+       * from a little larger than normal down to about two-thirds. All three
+       * slips are identical, so the first is measured and all three are set.
+       */
+      (function () {
+        var SLIP_H = 816, TOP = 40, FOOT = 34 + 34 + 16;   // logo bottom, logo height, a gap above it
+        var ROOM = SLIP_H - TOP - FOOT;                    // 692: .slip__body's max-height
+        var bodies = document.querySelectorAll('.slip__body');
+        var note = document.getElementById('fit-note');
+
+        function setS(s) { for (var i = 0; i < bodies.length; i++) bodies[i].style.setProperty('--s', String(s)); }
+        function setCompact(on) { for (var i = 0; i < bodies.length; i++) bodies[i].classList.toggle('is-compact', on); }
+        // Measured without the cap, so "too long" is seen rather than hidden by it.
+        function fits() {
+          bodies[0].style.maxHeight = 'none';
+          var ok = bodies[0].offsetHeight <= ROOM;
+          bodies[0].style.maxHeight = '';
+          return ok;
+        }
+        // The largest step from `hi` down to `lo` that fits, or false.
+        function settle(hi, lo) {
+          for (var s = hi; s >= lo - 0.001; s = Math.round((s - 0.02) * 100) / 100) { setS(s); if (fits()) return true; }
+          return false;
+        }
+
+        function fit() {
+          // The full layout while the type stays a comfortable size, then the
+          // compact one (see the CSS), and only then smaller type.
+          setCompact(false);
+          if (settle(1.16, 0.86)) return;
+          setCompact(true);
+          if (settle(1.1, 0.6)) return;
+          note.innerHTML = '<strong>This order is too long for one slip</strong> even at the smallest type, so the end will be cut off. Shorten some notes, or leave a few out.';
+        }
+
+        function zoom() {
+          var stage = document.getElementById('stage');
+          stage.style.setProperty('--zoom', String(Math.min(1, stage.clientWidth / 1056)));
+        }
+
+        zoom();
+        window.addEventListener('resize', zoom);
+        // Measure with the real fonts; Instrument Serif is narrower than its fallback.
+        (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fit);
+        document.getElementById('print').addEventListener('click', function () { window.print(); });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,183 @@
+---
+import { getDb } from '../db';
+import { LOBBY_PHOTOS, INVITE_PHOTOS } from '../lib/lobby';
+import { allPhotos } from '../lib/lobby-photos-db';
+import { getLobbySettings } from '../lib/lobby-copy-db';
+import { ALT_MAX, FACE_CHOICES } from '../lib/lobby-photos';
+
+/**
+ * The Lobby tab's Photos card: every photograph that can sit behind the
+ * screen's scenes, built in or uploaded, each with an on/off switch. Rules in
+ * lib/lobby-photos.ts; what the screen does with them in lib/lobby.ts
+ * (screenPhotos). Uploads are resized and re-encoded in the browser by
+ * lib/lobby-photos-editor.ts before they are sent.
+ */
+const db = getDb(Astro.locals.runtime.env);
+const settings = await getLobbySettings(db);
+let uploads: Awaited<ReturnType<typeof allPhotos>> = [];
+try { uploads = await allPhotos(db); } catch { uploads = []; }   // table not migrated yet: built-in only
+
+const builtIn = LOBBY_PHOTOS.map((p) => ({
+  key: p.file, thumb: `/lobby-photos/thumbs/${p.file}.jpg`, alt: p.alt,
+  on: !settings.hiddenPhotos.includes(p.file),
+  uses: (['give', 'guest'] as const).filter((k) => INVITE_PHOTOS[k].includes(p.file)),
+}));
+const onCount = builtIn.filter((p) => p.on).length + uploads.filter((u) => u.active).length;
+const USE_LABEL = { give: 'Give', guest: 'New here' } as const;
+---
+<section class="card lp" id="photos" aria-labelledby="photos-h" data-uploads={JSON.stringify(uploads)}>
+  <div class="lp__head">
+    <h2 id="photos-h">Photos</h2>
+    <button class="btn" type="button" data-photo-new>Add a photo</button>
+  </div>
+  <p class="muted lp__lede">
+    The photographs behind the screen’s slides. {onCount} in rotation; switch off any you would rather not use.
+    If every one is off, the screen goes back to the built-in set rather than a blank wall.
+  </p>
+
+  {uploads.length > 0 && (
+    <>
+      <h3 class="lp__sub">Added here</h3>
+      <ul class="lp__grid">
+        {uploads.map((u) => (
+          <li class:list={['lp__tile', !u.active && 'is-off']}>
+            <img src={u.src} alt="" loading="lazy" />
+            <span class="lp__alt">{u.alt}</span>
+            <span class="lp__uses">{u.uses.map((k) => <span class="chip">{USE_LABEL[k]}</span>)}</span>
+            <span class="lp__btns">
+              <button class="lp__switch" type="button" aria-pressed={u.active ? 'true' : 'false'} data-photo-toggle={u.id}>{u.active ? 'On' : 'Off'}</button>
+              <button class="btn btn--ghost lp__edit" type="button" data-photo-edit={u.id}>Edit</button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )}
+
+  <h3 class="lp__sub">Built in</h3>
+  <ul class="lp__grid">
+    {builtIn.map((p) => (
+      <li class:list={['lp__tile', !p.on && 'is-off']}>
+        <img src={p.thumb} alt="" loading="lazy" />
+        <span class="lp__alt">{p.alt}</span>
+        <span class="lp__uses">{p.uses.map((k) => <span class="chip">{USE_LABEL[k]}</span>)}</span>
+        <span class="lp__btns">
+          <button class="lp__switch" type="button" aria-pressed={p.on ? 'true' : 'false'} aria-label={`${p.alt}: ${p.on ? 'on' : 'off'}`} data-builtin-toggle={p.key}>{p.on ? 'On' : 'Off'}</button>
+        </span>
+      </li>
+    ))}
+  </ul>
+</section>
+
+<dialog class="lpe" id="photo-editor" aria-labelledby="lpe-title">
+  <form id="lpe-form" novalidate>
+    <header class="lpe__head">
+      <h2 id="lpe-title">Add a photo</h2>
+      <button class="lpe__x" type="button" data-lpe-close aria-label="Close">×</button>
+    </header>
+    <div class="lpe__body">
+      <div>
+        {/* The shaded band is what shows above the Give and New here panels:
+            moving "where are the faces" moves it, so the faces can be seen
+            landing inside it. */}
+        <div class="lpe__preview" id="lpe-preview">
+          <img id="lpe-img" alt="" hidden />
+          <div class="lpe__band" id="lpe-band" hidden></div>
+          <p class="lpe__empty" id="lpe-empty">Choose a photo</p>
+        </div>
+        <label class="lpe__file" id="lpe-file-wrap">
+          <input type="file" id="lpe-file" accept="image/jpeg,image/png,image/webp" />
+          <span class="btn btn--ghost">Choose a photo…</span>
+          <small class="muted">Landscape works best. It is resized for the TV and its camera details, location included, are removed.</small>
+        </label>
+        <p class="lpe__note" id="lpe-note" hidden></p>
+      </div>
+      <div>
+        <label class="field">
+          <span>Describe it <em class="lpe__count" id="lpe-count"></em></span>
+          <input name="alt" maxlength={ALT_MAX} placeholder="Children singing at VBS" autocomplete="off" required />
+        </label>
+        <fieldset class="lpe__seg">
+          <legend>Where are the faces?</legend>
+          {FACE_CHOICES.map((f) => (
+            <label><input type="radio" name="face" value={f.value} checked={f.value === 0.45} /> {f.label}</label>
+          ))}
+        </fieldset>
+        <p class="muted lpe__hint">The Give and New here slides show only a band across the top of the photo; this keeps the faces in it.</p>
+        <fieldset class="lpe__checks">
+          <legend>Also use it behind</legend>
+          <label><input type="checkbox" name="give" /> Give</label>
+          <label><input type="checkbox" name="guest" /> New here?</label>
+        </fieldset>
+      </div>
+    </div>
+    <p class="notice lpe__errors" id="lpe-errors" role="alert" hidden></p>
+    <footer class="lpe__foot">
+      <button class="btn btn--danger" type="button" id="lpe-delete" hidden>Delete</button>
+      <span class="lpe__spacer"></span>
+      <button class="btn btn--ghost" type="button" data-lpe-close>Cancel</button>
+      <button class="btn" type="submit" id="lpe-save">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<script>
+  import { startPhotoEditor } from '../lib/lobby-photos-editor';
+  startPhotoEditor();
+</script>
+
+<style>
+  .lp__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .lp__head h2 { margin: 0; }
+  .lp__lede { margin: 8px 0 12px; }
+  .lp__sub { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin: 18px 0 10px; }
+  .lp__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .lp__tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; transition: opacity .2s ease; }
+  .lp__tile img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px; background: #e8e0d6; display: block; }
+  .lp__tile.is-off img { filter: grayscale(1); opacity: .45; }
+  .lp__alt { font-size: 13px; line-height: 1.35; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .lp__uses { display: flex; gap: 4px; flex-wrap: wrap; min-height: 0; }
+  .lp__uses:empty { display: none; }
+  .lp__btns { display: flex; gap: 6px; align-items: center; }
+  /* A real switch: the state is in the words as well as the colour. */
+  .lp__switch { border: 1px solid var(--hair); border-radius: 999px; padding: 5px 14px; font: inherit; font-size: 14px; font-weight: 700;
+                cursor: pointer; background: #fff; color: var(--ink-soft); min-width: 64px; }
+  .lp__switch[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: var(--cream, #f4efe7); }
+  .lp__switch:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .lp__switch:disabled { opacity: .5; cursor: progress; }
+  .lp__edit { padding: 5px 12px; font-size: 14px; }
+
+  .lpe [hidden] { display: none !important; }
+  .lpe { width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 0;
+         border-radius: var(--radius-lg); background: var(--cream, #f4efe7); color: var(--ink); }
+  .lpe::backdrop { background: rgba(26, 21, 18, .6); }
+  .lpe form { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
+  .lpe__head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 0; }
+  .lpe__head h2 { margin: 0; }
+  .lpe__x { border: 0; background: none; font-size: 28px; line-height: 1; padding: 4px 8px; cursor: pointer; color: var(--ink-soft); }
+  .lpe__body { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 22px; padding: 18px 22px; overflow: auto; }
+  .lpe__preview { position: relative; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #1a1512; }
+  .lpe__preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .lpe__band { position: absolute; left: 0; right: 0; height: 30%; box-shadow: 0 0 0 999px rgba(26, 21, 18, .45);
+               border-top: 2px dashed rgba(255, 255, 255, .8); border-bottom: 2px dashed rgba(255, 255, 255, .8); transition: top .25s ease; }
+  .lpe__empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: rgba(247, 242, 234, .6); }
+  .lpe__file { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; cursor: pointer; }
+  .lpe__file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .lpe__file:focus-within .btn { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .lpe__note { margin: 10px 0 0; font-size: 14px; color: #8a5316; }
+  .lpe__count { font-style: normal; font-weight: 400; letter-spacing: 0; color: var(--ink-soft); float: right; }
+  .lpe__seg, .lpe__checks { border: 0; padding: 0; margin: 0 0 12px; }
+  .lpe__seg legend, .lpe__checks legend { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 6px; padding: 0; }
+  .lpe__seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lpe__seg label { position: relative; display: inline-flex; padding: 8px 14px; border: 1px solid var(--hair); border-radius: 999px; background: #fff; cursor: pointer; font-size: 15px; }
+  .lpe__seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .lpe__seg label:has(input:checked) { background: var(--ink); border-color: var(--ink); color: var(--cream, #f4efe7); }
+  .lpe__seg label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .lpe__checks { display: flex; gap: 16px; flex-wrap: wrap; }
+  .lpe__checks label { display: flex; align-items: center; gap: 8px; }
+  .lpe__hint { font-size: 13px; margin: 0 0 14px; }
+  .lpe__errors { margin: 0 22px; }
+  .lpe__foot { display: flex; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--hair); }
+  .lpe__spacer { flex: 1; }
+  @media (max-width: 760px) { .lpe__body { grid-template-columns: 1fr; } }
+</style>

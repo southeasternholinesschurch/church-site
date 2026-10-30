@@ -20,7 +20,8 @@ if (Astro.request.method === 'POST') {
  * into the dashboard also get in, so the page can be checked without anyone
  * texting themselves an invite.
  */
-const member = await readMemberSession(env, Astro.cookies);
+const member = await readMemberSession(env, Astro.cookies,
+  { secure: Astro.url.protocol === 'https:' });
 // Read directly, NOT from Astro.locals: /directory is a public prefix so the
 // middleware returns early and never populates locals.user. Relying on it here
 // meant the staff fallback silently did nothing.
@@ -80,7 +81,7 @@ const viewerName = member ? `${member.firstName} ${member.lastName}` : staff?.na
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Church Directory · Fairhaven Community Church</title>
+    <title>Church Directory · Fairhaven Community</title>
     <!-- Never indexed, never cached by anything in between. This page is the
          congregation's contact details. -->
     <meta name="robots" content="noindex, nofollow, noarchive" />

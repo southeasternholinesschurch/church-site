@@ -1,27 +1,26 @@
 import type { APIRoute } from 'astro';
-import { eq } from 'drizzle-orm';
-import { getDb, schema, nowIso } from '../../../db';
+import { eq, inArray } from 'drizzle-orm';
+import { getDb, schema } from '../../../db';
 import { isDemoInstance, DEMO_SEND_REFUSED } from '../../../lib/demo-instance';
 import { buildAudience } from '../../../lib/recipients';
-import { countSegments, sendOne, smsConfigured } from '../../../lib/sms';
+import { smsConfigured } from '../../../lib/sms';
+import { drainQueue, NOW_PREFIX } from '../../../lib/schedule-runner';
+import { broadcastPrefix, broadcastProgress, enqueueBroadcast, isBroadcastId } from '../../../lib/broadcast';
 
 /**
- * Sends one composed message to a group, IN SLICES.
+ * Sends one composed message, through the QUEUE.
  *
- * Sequential, one message per HANDSET, and it never aborts. A single bad
- * number must not strand everyone after it in the loop — each failure is
- * recorded against that recipient and the batch carries on.
+ * The first call (a `broadcastId` and the message) puts every recipient in the
+ * queue, one row per handset, then sends the first 40. Later calls
+ * (`continue: true`) send the next 40 of the same broadcast. If the page stops
+ * calling (a locked phone, a closed tab), the five-minute cron sends the rest.
+ * See lib/broadcast.ts for why: the browser used to hold the only copy of who
+ * was still to be sent to.
  *
- * The slicing is not tidiness, it is the whole point. A Worker on Cloudflare's
- * free plan may make 50 outbound requests per INCOMING request, and every text
- * is one. This route used to loop over the whole audience in a single call, so
- * a broadcast to 75 people sent 51 and then threw on every one after that —
- * logged as 'failed' with no Twilio error code, because Twilio was never
- * reached. Nobody noticed until people said they had not received a text:
- * three broadcasts dropped 19, 21 and 24 recipients that way.
- *
- * So the caller asks for a window (`offset`), gets back how many remain, and
- * calls again until none do. Each call stays well under the cap.
+ * Forty a call, because a Worker may make 50 outbound requests per incoming
+ * request and every text is one. This route once looped over a whole audience
+ * in one call and dropped everybody past the 51st, logged as 'failed' with no
+ * Twilio error code because Twilio was never reached.
  */
 const PER_CALL = 40;
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -44,7 +43,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const body = (await request.json().catch(() => null)) as
     { body?: string; groupId?: number | null; personIds?: number[];
-      to?: string; offset?: number } | null;
+      to?: string; broadcastId?: string; continue?: boolean } | null;
+  if (!isBroadcastId(body?.broadcastId)) return json({ error: 'Reload the page and try again.' }, 400);
+  const broadcastId = body!.broadcastId as string;
+
+  // A later call: carry on sending what this broadcast already queued.
+  if (body?.continue) return json(await finishEvenIfDropped(locals, sendSome(locals.runtime.env, broadcastId)));
+
   const text = (body?.body ?? '').trim();
   if (!text) return json({ error: 'The message is empty.' }, 400);
 
@@ -91,52 +96,58 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
   }
 
-  const db = getDb(env);
-  const { segments } = countSegments(text);
-  let sent = 0;
-  const failures: { name: string; reason: string }[] = [];
-
-  // The window this call is responsible for. buildAudience is deterministic,
-  // so the same group always yields the same order and the windows tile
-  // cleanly across calls without anyone being sent to twice or skipped.
-  const offset = Math.max(0, Number(body?.offset ?? 0));
-  const slice = audience.handsets.slice(offset, offset + PER_CALL);
-  const remaining = Math.max(0, audience.handsets.length - (offset + slice.length));
-
-  for (const handset of slice) {
-    const result = await sendOne(env, handset.phoneE164, text);
-
-    // One log row PER PERSON so each person's history is complete, but the
-    // segments are counted once per handset — otherwise a shared family phone
-    // would be billed twice in the cost readout for one actual message.
-    const logFor = handset.people.length ? handset.people
-      : [{ personId: null as number | null, name: handset.phoneE164, phoneE164: handset.phoneE164 }];
-    for (const [i, person] of logFor.entries()) {
-      await db.insert(schema.messageLog).values({
-        personId: person.personId,
-        phoneE164: handset.phoneE164,
-        body: text,
-        direction: 'out',
-        twilioSid: result.sid ?? null,
-        status: result.ok ? (result.status ?? 'queued') : 'failed',
-        errorCode: result.errorCode ?? null,
-        segments: i === 0 ? segments : 0,
-        createdAt: nowIso(),
-      });
-    }
-
-    if (result.ok) sent++;
-    else failures.push({ name: handset.people.map((p) => p.name).join(' / '),
-                         reason: result.error ?? result.errorCode ?? 'unknown' });
-  }
-
-  return json({ sent, failed: failures.length, failures, segments,
-                people: audience.recipients.length,
-                // What the caller needs to finish the job.
-                handsets: audience.handsets.length,
-                nextOffset: remaining > 0 ? offset + slice.length : null,
-                remaining });
+  /*
+   * Everybody into the queue first, in one batch, before a single text goes.
+   * From here on the queue, not this request, is what knows who is still to
+   * be sent to.
+   */
+  const work = (async () => {
+    await enqueueBroadcast(getDb(env), {
+      prefix: NOW_PREFIX, broadcastId, body: text,
+      groupId: body?.groupId ? Number(body.groupId) : null,
+      handsets: audience.handsets.map((h) => ({ phoneE164: h.phoneE164, personId: h.people[0]?.personId ?? null })),
+    });
+    return sendSome(env, broadcastId);
+  })();
+  return json({ ...(await finishEvenIfDropped(locals, work)), people: audience.recipients.length });
 };
+
+/**
+ * Keep the work going if the browser goes away.
+ *
+ * Cloudflare stops a request's work when the person who made it disconnects.
+ * That is what happened on 2026-10-20: the work-day text reached 4 of 79 phones
+ * in its first second, the phone went away, and the request was cut off with
+ * nothing recorded. Registered with waitUntil, the queueing and this batch of
+ * 40 finish regardless; anything after them is the cron's.
+ */
+function finishEvenIfDropped<T>(locals: App.Locals, work: Promise<T>): Promise<T> {
+  locals.runtime?.ctx?.waitUntil(work.catch(() => undefined));
+  return work;
+}
+
+/** Send up to PER_CALL more of this broadcast, and say where it has got to. */
+async function sendSome(env: Env, broadcastId: string) {
+  const db = getDb(env);
+  const drained = await drainQueue(env, PER_CALL, broadcastPrefix(NOW_PREFIX, broadcastId));
+
+  // Names for anybody it failed for, so the person pressing Send knows who.
+  const ids = drained.failures.map((f) => f.personId).filter((n): n is number => n !== null);
+  const names = ids.length
+    ? await db.select({ id: schema.people.id, first: schema.people.firstName, last: schema.people.lastName })
+        .from(schema.people).where(inArray(schema.people.id, ids))
+    : [];
+  const nameOf = (id: number | null, phone: string) => {
+    const p = names.find((n) => n.id === id);
+    return p ? `${p.first} ${p.last}` : phone;
+  };
+
+  const progress = await broadcastProgress(db, NOW_PREFIX, broadcastId);
+  return {
+    sent: progress.sent, failed: progress.failed, handsets: progress.total, remaining: progress.pending,
+    failures: drained.failures.map((f) => ({ name: nameOf(f.personId, f.phoneE164), reason: f.reason })),
+  };
+}
 
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });

@@ -48,7 +48,7 @@ export const MORE_HEIGHT = 22;
 export const HEAD_GAP = 14;          // space above a part, except at the top of a column
 export const HEAD_TITLE = 18;        // the part's name
 export const HEAD_DETAIL_LINE = 15;
-export const HEAD_DETAIL_MAX = 2;
+export const HEAD_DETAIL_MAX = 3;      // a job's supplies list can run to three
 export const HEAD_COLS = 22;         // the Name / Bringing / Count line
 export const RUNNING_HEAD = 30;      // the sheet's name at the top of pages after the first
 

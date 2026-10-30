@@ -29,7 +29,7 @@ const env = Astro.locals.runtime.env;
  * directory — hiding the member's own view, which is half the point of showing
  * a directory at all. A fixed invented member stands in.
  */
-const session = (await readMemberSession(env, Astro.cookies))
+const session = (await readMemberSession(env, Astro.cookies, { secure: Astro.url.protocol === 'https:' }))
   ?? (isDemoInstance(env) ? { personId: DEMO_MEMBER_PERSON_ID } as { personId: number } : null);
 if (!session) return Astro.redirect('/directory', 303);
 
@@ -59,7 +59,7 @@ if (Astro.request.method === 'POST') {
 
   const phone = str('phone');
   const phoneChanged = (phone ?? '') !== (me.phone ?? '');
-  // the pastor's rule: a changed number cannot be saved until they have said, on
+  // The pastor's rule: a changed number cannot be saved until they have said, on
   // this screen, whether it should receive church texts. Enforced HERE and not
   // only in the browser — the form can be replayed without the radio.
   const choice = String(form.get('smsChoice') ?? '');
@@ -125,7 +125,7 @@ if (Astro.request.method === 'POST') {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>My listing · Fairhaven Community Church</title>
+    <title>My listing · Fairhaven Community</title>
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" href="/favicon-48.png" />

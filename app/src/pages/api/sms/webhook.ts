@@ -4,6 +4,7 @@ import { getDb, schema, nowIso } from '../../../db';
 import { isValidTwilioSignature, isStopKeyword, isStartKeyword } from '../../../lib/twilio-signature';
 import { readForm } from '../../../lib/form';
 import { findConsentTargets, applyOptOut, applyOptIn, shouldCreatePersonOnStart } from '../../../lib/consent';
+import { recordDeliveryStatus } from '../../../lib/text-status-db';
 
 export const prerender = false;
 
@@ -54,41 +55,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // --- delivery receipt: no Body, just a status for a message we sent -------
   if (params.MessageStatus && !params.Body) {
-    if (sid) {
-      const status = params.MessageStatus;
-      await db.update(schema.messageLog)
-        .set({ status, errorCode: params.ErrorCode ?? null })
-        .where(eq(schema.messageLog.twilioSid, sid));
-
-      /**
-       * Twilio ACCEPTING a message is not the same as a phone receiving one,
-       * and the gap between them is where a reminder disappears. A send is
-       * recorded as done the moment Twilio takes it — which is right, because
-       * that is the only way to guarantee it is not sent twice — but if the
-       * carrier then rejects it, that record is a lie: the app believes
-       * somebody was told and they were not.
-       *
-       * So a terminal failure reopens the reminder. The job runs hourly and
-       * only inside its Monday/Tuesday window, so this means a retry while
-       * that window is open and nothing at all afterwards — never a text
-       * arriving days late.
-       *
-       * This is exactly what happened on 2026-09-01: both reminders were
-       * accepted and then dropped with error 30034 (unregistered number),
-       * and without this they would have stayed marked as sent forever.
-       */
-      if (status === 'undelivered' || status === 'failed') {
-        const rows = await db.select({ smId: schema.messageLog.scheduledMessageId })
-          .from(schema.messageLog).where(eq(schema.messageLog.twilioSid, sid)).limit(1);
-        const smId = rows[0]?.smId;
-        if (smId) {
-          await db.update(schema.scheduledMessages)
-            .set({ status: 'failed',
-                   note: `Carrier did not deliver it${params.ErrorCode ? ` (error ${params.ErrorCode})` : ''}` })
-            .where(eq(schema.scheduledMessages.id, smId));
-        }
-      }
-    }
+    // The same write the stuck-text checker makes (lib/text-status-db.ts),
+    // including reopening a reminder whose text the carrier dropped.
+    if (sid) await recordDeliveryStatus(db, sid, params.MessageStatus, params.ErrorCode ?? null);
     return twiml();
   }
 

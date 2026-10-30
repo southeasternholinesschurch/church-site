@@ -42,10 +42,13 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   // Member photos are same-origin: they come through /directory/photo/[id],
-  // never straight from R2.
-  "img-src 'self' data:",
+  // never straight from R2. `blob:` is the lobby hero editor's preview of a
+  // graphic it has just cropped in the browser, before it is uploaded — an
+  // address only this page can mint, for an image only this page made.
+  "img-src 'self' data: blob:",
   "connect-src 'self'",
-  "frame-src 'none'",
+  // Only this app's own pages, for the Lobby tab's live preview of /lobby.
+  "frame-src 'self'",
 ].join('; ');
 
 function harden(response: Response): Response {
