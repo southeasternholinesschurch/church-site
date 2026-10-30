@@ -432,11 +432,11 @@ eq('no name is no name', firstNameOf(''), '');
 // to UCS-2 and cuts the budget from 160 characters to 70 — silently, on every
 // reminder ever sent.
 eq('a curly apostrophe is refused',
-   invalidReminderReason('SHC - Don’t forget your meal tomorrow, {when}.') !== null, true);
+   invalidReminderReason('FCC - Don’t forget your meal tomorrow, {when}.') !== null, true);
 eq('an em dash is refused',
-   invalidReminderReason('SHC — your meal is tomorrow, {when}.') !== null, true);
+   invalidReminderReason('FCC — your meal is tomorrow, {when}.') !== null, true);
 eq('the plain version is fine',
-   invalidReminderReason("SHC - Don't forget your meal tomorrow, {when}."), null);
+   invalidReminderReason("FCC - Don't forget your meal tomorrow, {when}."), null);
 eq('an empty message is refused', invalidReminderReason('   ') !== null, true);
 eq('the default passes its own validator',
    invalidReminderReason(DEFAULT_REMINDER_BODY), null);
@@ -450,12 +450,12 @@ eq('a long message is refused',
 
 // A stored value that is unusable degrades to the built-in wording rather than
 // to silence — the shape getInviteTemplate and getBirthdaySettings both use.
-eq('a good stored body is used', reminderBodyFor('SHC - Meal tomorrow, {when}.'),
-   'SHC - Meal tomorrow, {when}.');
+eq('a good stored body is used', reminderBodyFor('FCC - Meal tomorrow, {when}.'),
+   'FCC - Meal tomorrow, {when}.');
 eq('a blank stored body falls back', reminderBodyFor(''), DEFAULT_REMINDER_BODY);
 eq('a null stored body falls back', reminderBodyFor(null), DEFAULT_REMINDER_BODY);
 eq('a broken stored body falls back',
-   reminderBodyFor('SHC — far too long a message '.repeat(12)), DEFAULT_REMINDER_BODY);
+   reminderBodyFor('FCC — far too long a message '.repeat(12)), DEFAULT_REMINDER_BODY);
 
 /* ==== the staff list's one line ========================================== */
 

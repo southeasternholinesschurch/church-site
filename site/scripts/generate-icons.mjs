@@ -1,4 +1,4 @@
-// Rasterizes the real SHC logo mark (src/assets/brand/shc-mark.png) into
+// Rasterizes the real FCC logo mark (src/assets/brand/shc-mark.png) into
 // every PWA/favicon size the manifest and <head> expect. Re-run this
 // (`node scripts/generate-icons.mjs`) any time that source file changes.
 import sharp from 'sharp';

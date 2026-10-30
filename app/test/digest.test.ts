@@ -83,7 +83,7 @@ const LINK = 'https://app.yourchurch.org/digest';
 {
   const t = digestText(ordinary, LINK);
   eq('an ordinary week reads in full', t,
-     'SHC week of Oct 5. Sun AM 74 (avg 70), Sun PM 41, Wed 22. Follow up: 2 guests, 3 not been in, '
+     'FCC week of Oct 5. Sun AM 74 (avg 70), Sun PM 41, Wed 22. Follow up: 2 guests, 3 not been in, '
      + '1 reminder. 1 planning to visit. 2 birthdays, 1 anniversary this week. Singing Sun: Tom Camp / '
      + 'Ada Aldridge, Erin Thorne. 2 sign-up slots open. https://app.yourchurch.org/digest');
   eq('and stays inside two segments', countSegments(t).segments <= 2, true);
@@ -93,7 +93,7 @@ const LINK = 'https://app.yourchurch.org/digest';
   const quiet: DigestData = { ...ordinary, services: [], care: { guest: 0, missing: 0, reminder: 0 },
     newGuests: 0, expected: 0, celebrations: [], singing: null, openSlots: 0 };
   eq('a quiet week is a short text', digestText(quiet, LINK),
-     'SHC week of Oct 5. no attendance taken. https://app.yourchurch.org/digest');
+     'FCC week of Oct 5. no attendance taken. https://app.yourchurch.org/digest');
 }
 {
   const curly = { ...ordinary, singing: { sunday: '2026-10-18', morning: 'Pat O’Brien', evening: null } };

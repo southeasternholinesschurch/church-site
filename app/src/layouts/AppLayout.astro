@@ -86,11 +86,11 @@ const home = user ? homeFor(user.role) : '/';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title} · SHC Staff</title>
+    <title>{title} · FCC Staff</title>
     <!-- A staff tool holding member contact details has no business in a
          search index, whatever the login gate does. -->
     <meta name="robots" content="noindex, nofollow" />
-    {/* The staff mark. Favicon sizes get a single S rather than the SHC
+    {/* The staff mark. Favicon sizes get a single S rather than the FCC
         lockup: three letters at 16px in a browser tab is four grey smears,
         and a tab is where this tool spends its life. See design/staff-icon.
         No manifest here on purpose — that would have Chrome offering
@@ -117,13 +117,13 @@ const home = user ? homeFor(user.role) : '/';
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="SHC Staff" />
+    <meta name="apple-mobile-web-app-title" content="FCC Staff" />
   </head>
   <body class:list={[backdrop && "has-backdrop"]}>
     {user && (
       <header class="bar">
         <div class="bar__in">
-          <a href={home} class="bar__brand">SHC Staff</a>
+          <a href={home} class="bar__brand">FCC Staff</a>
           <nav class="bar__nav">
             {nav.map(([href, label]) => (
               <a href={href} aria-current={isHere(href) ? 'page' : undefined}>{label}</a>

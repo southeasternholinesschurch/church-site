@@ -218,7 +218,7 @@ real values as they arrive.
 
 - [x] Church-owned GitHub repo — done 2026-08-29. Pushed via a dedicated SSH deploy key (`~/.ssh/id_ed25519_changeme_site` on the pastor's Mac); repo is [your-github-org/your-repo-name](https://github.com/your-github-org/your-repo-name)
 - [x] Breeze export received and inspected 2026-08-29 (`docs/breeze-export-notes.md`). The pastor dropped the manual adult/child review at import time. It mattered in the end — adult/child now drives directory visibility, the attendance split AND who appears in the bulletin's birthday list — and it was cleaned up as the directory was built. Two junk records still carry `child` (see Still Outstanding).
-- [x] SHC logo — done 2026-08-29. Real files live in `site/src/assets/brand/` (icon mark, dark and white horizontal lockups) and are wired into the nav/footer/favicon/PWA icons via Astro's image pipeline (auto-optimized to WebP). Fairhaven Kids/Fairhaven Youth marks are in too; Fairhaven Ladies/Fairhaven Men/Fairhaven Seniors still have no real logo.
+- [x] FCC logo — done 2026-08-29. Real files live in `site/src/assets/brand/` (icon mark, dark and white horizontal lockups) and are wired into the nav/footer/favicon/PWA icons via Astro's image pipeline (auto-optimized to WebP). Fairhaven Kids/Fairhaven Youth marks are in too; Fairhaven Ladies/Fairhaven Men/Fairhaven Seniors still have no real logo.
 - [x] Fonts — settled. Texta (body/UI, self-hosted from the pastor's own files) + Instrument Serif (display, Google Fonts, OFL). BD Script was used in an earlier direction and has been dropped. Still open: the Texta web-embedding licence — see the note in the stack-choices table above.
 - [x] Calendar feed — done 2026-08-29, live and connected (currently empty, waiting on real events)
 - [x] **`YOUTUBE_API_KEY`** — fully done. Created on a church-owned Google Cloud project, added BOTH as a GitHub Actions secret (the nightly sermon import runs on it) and as a Cloudflare secret on the site Worker. `/api/live-status` returns `configured: true` and the Livestream page detects a live service; verified against a real test stream. Channel ID: `UC…YOUR_CHANNEL_ID`
@@ -1038,7 +1038,7 @@ fourteen-Sunday quarter with three long names in every cell.
 Switched on in Care → *Texts to the pastors*. On Mondays at the chosen time, one text:
 
 ```
-SHC week of Oct 5. Sun AM 74 (avg 70), Sun PM 41, Wed 22. Follow up: 2 guests,
+FCC week of Oct 5. Sun AM 74 (avg 70), Sun PM 41, Wed 22. Follow up: 2 guests,
 3 not been in, 1 reminder. 1 planning to visit. 2 birthdays, 1 anniversary this
 week. Singing Sun: Tom Camp / Ada Aldridge, Erin Thorne. 2 sign-up slots open.
 https://app.yourchurch.org/digest

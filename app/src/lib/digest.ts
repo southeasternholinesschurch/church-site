@@ -108,7 +108,7 @@ const SHORT: Record<string, string> = {
  */
 export function digestText(d: DigestData, link: string): string {
   const parts: string[] = [];
-  parts.push(`SHC week of ${shortDate(d.week.start).replace(/^\w+, /, '')}`);
+  parts.push(`FCC week of ${shortDate(d.week.start).replace(/^\w+, /, '')}`);
 
   if (d.services.length) {
     const s = d.services.map((x) => {
